@@ -151,9 +151,10 @@ def run_workflow(pid: str, wid: str, only_node: str | None = Query(None)):
 
 
 @app.get("/api/projects/{pid}/workflows/{wid}/run-stream")
-def run_stream(pid: str, wid: str, only_node: str | None = Query(None)):
+def run_stream(pid: str, wid: str, only_node: str | None = Query(None),
+               force: bool = Query(False)):
     def gen():
-        for ev in engine.iter_run_workflow(pid, wid, only_node):
+        for ev in engine.iter_run_workflow(pid, wid, only_node, force):
             yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
     return StreamingResponse(
         gen(),

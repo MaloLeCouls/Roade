@@ -86,8 +86,8 @@ export const api = {
     sendJSON('/validate/test', 'POST', { config, samples }),
 
   // ---- streaming run (Server-Sent Events) ----
-  runStream: (pid, wid, onlyNode, onEvent) => {
-    const url = `${BASE}/projects/${enc(pid)}/workflows/${enc(wid)}/run-stream${qs({ only_node: onlyNode })}`
+  runStream: (pid, wid, onlyNode, onEvent, force = false) => {
+    const url = `${BASE}/projects/${enc(pid)}/workflows/${enc(wid)}/run-stream${qs({ only_node: onlyNode, force: force ? 1 : undefined })}`
     const es = new EventSource(url)
     let finished = false
     const stop = () => { finished = true; es.close() }

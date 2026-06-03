@@ -90,6 +90,21 @@ def _is_numeric_type(t: str) -> bool:
 _EXCEL_EXT = (".xlsx", ".xls", ".xlsm")
 
 
+def _source_fingerprint(pid, node) -> str | None:
+    """Identity of a source's inputs: file name + sheet + header + size + mtime.
+    Changes whenever the underlying file or its read options change, so a cached
+    output can be safely reused only while this string is unchanged."""
+    d = node["data"]
+    f = d.get("file")
+    if not f:
+        return None
+    p = storage.files_dir(pid) / f
+    if not p.exists():
+        return None
+    st = p.stat()
+    return f"{f}|{d.get('sheet') or ''}|{int(d.get('header_row') or 0)}|{st.st_size}|{st.st_mtime_ns}"
+
+
 def _read_source(path, sheet, header_row: int) -> pd.DataFrame:
     ext = path.suffix.lower()
     hr = int(header_row or 0)
@@ -210,7 +225,8 @@ def _run_source(con, pid, node, ins):
     if not path.exists():
         raise ValueError(f"fichier introuvable : {file}")
     df = _read_source(path, d.get("sheet"), d.get("header_row") or 0)
-    return {"out": df}, {}
+    fp = _source_fingerprint(pid, node)
+    return {"out": df}, ({"source_fingerprint": fp} if fp else {})
 
 
 def _run_sql(con, pid, node, ins):
@@ -676,14 +692,26 @@ def _write_output(pid, wid, node, handle, df, extra) -> dict:
     return meta
 
 
-def _execute_node(con, pid, wid, node, edges) -> dict:
+def _execute_node(con, pid, wid, node, edges, bypass_cache=False) -> dict:
     ntype = node["type"]
     handles = OUTPUTS.get(ntype, ["out"])
     label = node["data"].get("label", node["id"])
 
+    # source caching: skip re-reading a file that has not changed since last run
+    # (fingerprint = name + sheet + header + size + mtime). Big Excel reads are
+    # slow, so this avoids recomputing the source every time a downstream block runs.
+    if (ntype == "source" and not bypass_cache and node["data"].get("cache", True)
+            and storage.node_parquet(pid, wid, node["id"], "out").exists()):
+        m = storage.read_node_meta(pid, wid, node["id"], "out") or {}
+        fp = _source_fingerprint(pid, node)
+        if fp and m.get("source_fingerprint") == fp:
+            return {"type": ntype, "locked": False, "cached": True,
+                    "outputs": {"out": m.get("row_count", 0)},
+                    "row_count": m.get("row_count", 0), "columns": m.get("columns", [])}
+
     # locked: reuse existing parquet without recomputing
-    if node["data"].get("locked") and handles and all(
-            storage.node_parquet(pid, wid, node["id"], h).exists() for h in handles):
+    if (node["data"].get("locked") and not bypass_cache and handles and all(
+            storage.node_parquet(pid, wid, node["id"], h).exists() for h in handles)):
         outputs, columns, extra = {}, [], {}
         for i, h in enumerate(handles):
             m = storage.read_node_meta(pid, wid, node["id"], h) or {}
@@ -726,7 +754,7 @@ def _execute_node(con, pid, wid, node, edges) -> dict:
 # --------------------------------------------------------------------------- #
 # Run
 # --------------------------------------------------------------------------- #
-def iter_run_workflow(pid, wid, only_node=None):
+def iter_run_workflow(pid, wid, only_node=None, force=False):
     wf = storage.get_workflow(pid, wid)
     if not wf:
         yield {"event": "error", "message": "Workflow introuvable"}
@@ -748,7 +776,8 @@ def iter_run_workflow(pid, wid, only_node=None):
             yield {"event": "node_start", "node_id": nid,
                    "label": node["data"].get("label", nid), "type": node["type"]}
             try:
-                result = _execute_node(con, pid, wid, node, edges)
+                result = _execute_node(con, pid, wid, node, edges,
+                                       bypass_cache=(force and nid == only_node))
             except Exception as e:  # noqa: BLE001 - reported to the client
                 yield {"event": "error", "node_id": nid,
                        "message": f"{node['data'].get('label', nid)} : {e}"}

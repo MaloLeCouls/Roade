@@ -691,6 +691,12 @@ function SourceConfig({ pid, node, files, set, onSchema }) {
         <input type="number" min="0" value={d.header_row || 0} onChange={(e) => set({ header_row: Number(e.target.value) })} />
       </label>
 
+      <label className="qb-check" title="Le fichier n'est relu que s'il a changé (taille ou date de modification). Évite de recharger un gros Excel à chaque exécution d'un bloc en aval.">
+        <input type="checkbox" checked={d.cache !== false} onChange={(e) => set({ cache: e.target.checked })} />
+        Garder le fichier en cache (relire seulement s'il a changé)
+      </label>
+      <p className="qb-hint">Le gros Excel n'est plus relu à chaque exécution. Pour forcer la relecture : bouton <b>Recharger</b> (⟳) sur le bloc.</p>
+
       {files.length === 0 && <div className="qb-warn">Aucun fichier dans le projet. Importez un Excel/CSV depuis la page du projet.</div>}
     </div>
   )

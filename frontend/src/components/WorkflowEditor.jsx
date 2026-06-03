@@ -39,7 +39,7 @@ const HANDLE_COLOR = {
 }
 
 const DEFAULT_DATA = {
-  source: { label: 'Source', file: '', sheet: '', header_row: 0 },
+  source: { label: 'Source', file: '', sheet: '', header_row: 0, cache: true },
   sql: { label: 'SQL', mode: 'builder', query: { select: [], where: [], joins: [], group_by: [], order_by: [] } },
   dedup: { label: 'Doublons', key_columns: [], keep: 'first', dups_mode: 'all' },
   validate: { label: 'Validation', mode: 'rules', target_column: '', combine: 'all', case_sensitive: false, rules: [], segments: [], add_flag: false, add_reason: true },
@@ -88,12 +88,14 @@ function Editor({ pid, wid, onBack }) {
   const [status, setStatus] = useState({})         // nodeId -> {ran, rows, error}
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState({ active: false, total: 0, done: 0, currentId: null, currentLabel: '' })
+  const [nodeFrac, setNodeFrac] = useState(0)            // animated sub-progress of the running node
   const [previewNode, setPreviewNode] = useState(null)
   const [previewPrefs, setPreviewPrefs] = useState({ tab: 'rows', column: null })
   const [banner, setBanner] = useState(null)
   const [saveState, setSaveState] = useState('saved')
   const loaded = useRef(false)
   const saveTimer = useRef(null)
+  const anim = useRef({ timer: null, start: 0, est: 0 })   // per-node progress animation
 
   // ---- load ----
   useEffect(() => {
@@ -152,6 +154,9 @@ function Editor({ pid, wid, onBack }) {
     }
   }, [progress.active, progress.done])
 
+  // stop the progress animation if the editor unmounts mid-run
+  useEffect(() => () => { if (anim.current.timer) clearInterval(anim.current.timer) }, [])
+
   // ---- connections ----
   // Union accepts many edges on its single input; every other target handle
   // keeps a single incoming edge.
@@ -208,14 +213,61 @@ function Editor({ pid, wid, onBack }) {
       ...prev,
       [nid]: {
         ran: true, rows: r.row_count ?? r.rows ?? 0, error: null,
-        outputs: r.outputs || {}, cleanReport: r.clean_report, locked: r.locked,
+        outputs: r.outputs || {}, cleanReport: r.clean_report,
+        locked: r.locked, cached: r.cached,
       },
     }))
     if (r.columns) setSchemas((prev) => ({ ...prev, [nid]: r.columns }))
   }
 
+  // ---- artificial, smooth per-node progress -----------------------------
+  // Reading a big Excel file gives no real progress signal, so we animate an
+  // estimated bar: duration is guessed from the file size using a rate learned
+  // (and stored) from real runs, and the fill eases asymptotically toward ~97%
+  // so it slows near the end and never "completes" before the node actually does.
+  const getRate = () => {
+    const v = parseFloat(localStorage.getItem('roade.srcRateMsPerByte'))
+    return Number.isFinite(v) && v > 0 ? v : 0.004      // default ≈ 4 s / Mo
+  }
+  const saveRate = (r) => {
+    const blended = 0.5 * getRate() + 0.5 * r            // smooth (EMA) so one slow run can't skew it
+    localStorage.setItem('roade.srcRateMsPerByte', String(Math.min(0.05, Math.max(0.0003, blended))))
+  }
+  const estimateMs = (node) => {
+    if (node?.type === 'source') {
+      const bytes = files.find((f) => f.name === node?.data?.file)?.size || 0
+      return Math.max(800, bytes * getRate())
+    }
+    return 1000                                          // other blocks: short default, asymptote handles overruns
+  }
+  const stopAnim = () => {
+    if (anim.current.timer) { clearInterval(anim.current.timer); anim.current.timer = null }
+  }
+  const startNodeAnim = (node) => {
+    stopAnim()
+    anim.current.start = performance.now()
+    anim.current.est = estimateMs(node)
+    setNodeFrac(0)
+    anim.current.timer = setInterval(() => {
+      const elapsed = performance.now() - anim.current.start
+      const frac = 1 - Math.exp(-2.2 * elapsed / anim.current.est)   // ~0.89 at est, creeps after
+      setNodeFrac(Math.min(0.97, frac))
+    }, 80)
+  }
+  const finishNodeAnim = (node, result) => {
+    stopAnim()
+    const elapsed = performance.now() - anim.current.start
+    const bytes = files.find((f) => f.name === node?.data?.file)?.size || 0
+    if (node?.type === 'source' && result && !result.cached && !result.locked
+        && bytes > 50000 && elapsed > 300) {
+      saveRate(elapsed / bytes)                          // calibrate from this real read
+    }
+    setNodeFrac(1)
+    setTimeout(() => setNodeFrac(0), 150)
+  }
+
   // Streaming run: live progress, ComfyUI-style.
-  const doRun = async (onlyNode = null) => {
+  const doRun = async (onlyNode = null, force = false) => {
     if (busy) return
     setBanner(null)
     setBusy(true)
@@ -227,24 +279,28 @@ function Editor({ pid, wid, onBack }) {
         setProgress({ active: true, total: ev.total, done: 0, currentId: null, currentLabel: '' })
       } else if (ev.event === 'node_start') {
         setProgress((p) => ({ ...p, currentId: ev.node_id, currentLabel: ev.label || ev.type }))
+        startNodeAnim(nodes.find((n) => n.id === ev.node_id))
       } else if (ev.event === 'node_done') {
+        finishNodeAnim(nodes.find((n) => n.id === ev.node_id), ev.result)
         applyOneResult(ev.node_id, ev.result)
         if (Array.isArray(ev.result?.clean_report)) cleaned.push(ev.node_id)
         setProgress((p) => ({ ...p, done: p.done + 1, currentId: null }))
       } else if (ev.event === 'done') {
+        stopAnim(); setNodeFrac(0)
         setBusy(false)
         setProgress((p) => ({ ...p, active: false, currentId: null, done: p.total }))
         api.listFiles(pid).then(setFiles)
         if (cleaned.length === 1) setPreviewNode({ id: cleaned[0], tab: 'clean' })
         else if (cleaned.length > 1) setBanner({ type: 'info', text: `${cleaned.length} bloc(s) de nettoyage exécutés — cliquez l'icône « rapport » sur un bloc pour voir son rapport.` })
       } else if (ev.event === 'error') {
+        stopAnim(); setNodeFrac(0)
         setBusy(false)
         setProgress((p) => ({ ...p, active: false, currentId: null }))
         if (ev.node_id) setStatus((s) => ({ ...s, [ev.node_id]: { ...(s[ev.node_id] || {}), error: ev.message, ran: false } }))
         setBanner({ type: 'error', text: ev.message || "Erreur d'exécution" })
         api.listFiles(pid).then(setFiles)
       }
-    })
+    }, force)
   }
 
   // ---- inputs for the selected SQL node ----
@@ -268,7 +324,7 @@ function Editor({ pid, wid, onBack }) {
     status,
     running: progress.active ? progress.currentId : null,
     onPreview: (id, tab) => setPreviewNode({ id, tab }),
-    onRunNode: (id) => doRun(id),
+    onRunNode: (id, force) => doRun(id, force),
     onDeleteEdge,
   }), [status, progress.active, progress.currentId, nodes, edges, wfName, onDeleteEdge])
 
@@ -320,7 +376,7 @@ function Editor({ pid, wid, onBack }) {
         <div className="editor-main">
           {/* overlays float above the canvas so nothing shifts when they appear */}
           <div className="overlays">
-            <ProgressBar progress={progress} />
+            <ProgressBar progress={progress} frac={nodeFrac} />
             {banner && <div className={`banner ${banner.type}`}>{banner.text}<button className="ghost small" onClick={() => setBanner(null)}><Icon name="x" /></button></div>}
           </div>
           <div className="canvas">
@@ -377,9 +433,10 @@ function Editor({ pid, wid, onBack }) {
   )
 }
 
-function ProgressBar({ progress }) {
+function ProgressBar({ progress, frac = 0 }) {
   if (!progress.active && progress.done === 0) return null
-  const pct = progress.total ? Math.round((progress.done / progress.total) * 100) : 0
+  const within = progress.active ? Math.min(0.999, frac) : 0
+  const pct = progress.total ? Math.min(100, Math.round(((progress.done + within) / progress.total) * 100)) : 0
   return (
     <div className={`progress-wrap ${progress.active ? 'on' : 'off'}`}>
       <div className={`progress-track ${progress.active ? 'busy' : ''}`}>
@@ -390,7 +447,7 @@ function ProgressBar({ progress }) {
           <>
             <span className="pulse-dot" />
             {progress.currentLabel ? <>Exécution : <b>{progress.currentLabel}</b></> : 'Exécution…'}
-            {progress.total > 0 && <span className="pmeta"> · {progress.done}/{progress.total}</span>}
+            {progress.total > 0 && <span className="pmeta"> · {progress.done}/{progress.total} · {pct}%</span>}
           </>
         ) : (
           <span className="done-text">Terminé · {progress.total} bloc(s)</span>
