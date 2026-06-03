@@ -186,7 +186,9 @@ button.small { padding: 4px 8px; font-size: 12px; }
 
 /* ---------- inspector ---------- */
 .inspector { width: 494px; flex: 0 0 494px; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; }
-.insp-desc textarea { resize: vertical; font-family: inherit; }
+.fld.insp-desc { padding: 12px 15px; margin-bottom: 0; border-bottom: 1px solid var(--line-soft); gap: 6px; }
+.insp-desc > span { font-size: 12px; }
+.insp-desc textarea { resize: vertical; font-family: inherit; min-height: 44px; background: #fffdf4; border: 1px solid var(--line); border-radius: var(--radius); padding: 7px 9px; }
 .empty-inspector { padding: 22px; }
 .legend { margin-top: 16px; display: flex; flex-direction: column; gap: 9px; font-size: 13px; color: var(--muted); }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 8px; }
