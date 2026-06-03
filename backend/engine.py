@@ -507,27 +507,62 @@ _CLASS_RE = {"letter": "[A-Za-z]", "upper": "[A-Z]", "lower": "[a-z]",
              "digit": "[0-9]", "alnum": "[A-Za-z0-9]", "any": "."}
 
 
-def _mask_pattern(segments: list, case_sensitive: bool) -> str:
-    parts = []
-    for seg in segments or []:
-        t = seg.get("type") or "any"
-        if t == "literal":
-            parts.append(re.escape(seg.get("value") or ""))
-            continue
-        if t == "set":
-            base = "[" + re.escape(seg.get("value") or "") + "]"
-        else:
-            base = _CLASS_RE.get(t, ".")
-        ln, lo, hi = seg.get("length"), seg.get("min"), seg.get("max")
-        if ln not in (None, ""):
-            quant = "{%d}" % int(ln)
-        elif lo not in (None, "") or hi not in (None, ""):
-            quant = "{%s,%s}" % (int(lo) if lo not in (None, "") else 0,
-                                 int(hi) if hi not in (None, "") else "")
-        else:
-            quant = "{1}"
-        parts.append(base + quant)
-    return "".join(parts)
+def _seg_pattern(seg) -> str:
+    """Regex for one mask segment."""
+    t = seg.get("type") or "any"
+    if t == "literal":
+        return re.escape(seg.get("value") or "")
+    base = "[" + re.escape(seg.get("value") or "") + "]" if t == "set" else _CLASS_RE.get(t, ".")
+    ln, lo, hi = seg.get("length"), seg.get("min"), seg.get("max")
+    if ln not in (None, ""):
+        return base + "{%d}" % int(ln)
+    if lo not in (None, "") or hi not in (None, ""):
+        return base + "{%s,%s}" % (int(lo) if lo not in (None, "") else 0,
+                                   int(hi) if hi not in (None, "") else "")
+    return base + "{1}"
+
+
+def _mask_pattern(segments: list, case_sensitive: bool = False) -> str:
+    return "".join(_seg_pattern(s) for s in segments or [])
+
+
+def _segment_label(seg) -> str:
+    t = seg.get("type") or "any"
+    if t == "literal":
+        return f"« {seg.get('value') or ''} »"
+    names = {"letter": "lettres", "upper": "MAJ", "lower": "min", "digit": "chiffres",
+             "alnum": "alphanum.", "set": f"[{seg.get('value') or ''}]", "any": "tout"}
+    base = names.get(t, t)
+    ln, lo, hi = seg.get("length"), seg.get("min"), seg.get("max")
+    if ln not in (None, ""):
+        return f"{base}×{int(ln)}"
+    if lo not in (None, "") or hi not in (None, ""):
+        return f"{base}×{lo or 0}–{hi if hi not in (None, '') else '∞'}"
+    return base
+
+
+def _mask_steps(s: str, segments: list, cs: bool) -> list[dict]:
+    """Per-segment status for one sample: the first segment whose cumulative
+    prefix no longer matches is the blocker ('fail'); earlier ones are 'ok',
+    later ones 'skip'. A trailing extra (string longer than the mask) is flagged."""
+    flags = 0 if cs else re.IGNORECASE
+    segs = segments or []
+    pats = [_seg_pattern(x) for x in segs]
+    labels = [_segment_label(x) for x in segs]
+    n = len(pats)
+    if n == 0:
+        return []
+    blocker = n
+    for k in range(n):
+        if not re.match("".join(pats[:k + 1]), s, flags):
+            blocker = k
+            break
+    steps = [{"label": labels[i],
+              "status": "ok" if i < blocker else ("fail" if i == blocker else "skip")}
+             for i in range(n)]
+    if blocker == n and not re.fullmatch("".join(pats), s, flags):
+        steps.append({"label": "caractères en trop", "status": "fail"})
+    return steps
 
 
 def _char_in_class(ch: str, cls: str, cs: bool) -> bool:
@@ -651,11 +686,21 @@ def _validate_one(value, cfg: dict) -> tuple[bool, str]:
 
 
 def validate_test(config: dict, samples: list) -> dict:
+    cfg = config or {}
+    cs = bool(cfg.get("case_sensitive"))
+    is_mask = cfg.get("mode") == "mask"
     try:
         results = []
         for x in samples or []:
-            ok, motif = _validate_one(x, config or {})
-            results.append({"valid": ok, "motif": "OK" if ok else (motif or "non conforme")})
+            s = "" if _is_null(x) else str(x)
+            ok, motif = _validate_one(x, cfg)
+            if is_mask:
+                steps = _mask_steps(s, cfg.get("segments") or [], cs)
+            else:
+                steps = [{"label": _rule_label(r), "status": "ok" if _rule_ok(s, r, cs) else "fail"}
+                         for r in (cfg.get("rules") or [])]
+            results.append({"valid": ok, "motif": "OK" if ok else (motif or "non conforme"),
+                            "steps": steps})
         return {"ok": True, "results": results}
     except Exception as e:  # noqa: BLE001 - surfaced to the UI tester
         return {"ok": False, "error": str(e)}
@@ -810,9 +855,23 @@ def _build_where(columns, filters, q) -> str:
     names = {c["name"] for c in columns}
     clauses = []
     for f in filters or []:
-        col, val = f.get("column"), f.get("value")
-        if col in names and val not in (None, ""):
-            clauses.append(f"CAST({q_ident(col)} AS VARCHAR) ILIKE {_slike(val)}")
+        col = f.get("column")
+        if col not in names:
+            continue
+        op = f.get("op", "contains")
+        val = f.get("value")
+        ident = q_ident(col)
+        if op == "is_null":
+            clauses.append(f"{ident} IS NULL")
+        elif op == "equals":                       # exact match (top-value click)
+            if isinstance(val, bool):
+                clauses.append(f"{ident} = {'TRUE' if val else 'FALSE'}")
+            elif isinstance(val, (int, float)):
+                clauses.append(f"{ident} = {val}")
+            elif val not in (None, ""):
+                clauses.append(f"CAST({ident} AS VARCHAR) = '{str(val).replace(chr(39), chr(39) * 2)}'")
+        elif val not in (None, ""):                # contains (text filter input)
+            clauses.append(f"CAST({ident} AS VARCHAR) ILIKE {_slike(val)}")
     if q:
         ors = [f"CAST({q_ident(c)} AS VARCHAR) ILIKE {_slike(q)}" for c in names]
         if ors:

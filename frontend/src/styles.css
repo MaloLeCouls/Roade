@@ -185,7 +185,8 @@ button.small { padding: 4px 8px; font-size: 12px; }
 .mini-op { font-family: ui-monospace, monospace; font-size: 11px; }
 
 /* ---------- inspector ---------- */
-.inspector { width: 380px; flex: 0 0 380px; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; }
+.inspector { width: 494px; flex: 0 0 494px; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; }
+.insp-desc textarea { resize: vertical; font-family: inherit; }
 .empty-inspector { padding: 22px; }
 .legend { margin-top: 16px; display: flex; flex-direction: column; gap: 9px; font-size: 13px; color: var(--muted); }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 8px; }
@@ -306,6 +307,20 @@ code { background: #eef0f3; padding: 1px 5px; border-radius: 3px; font-size: 12p
 .vtest-row.ko .vtest-mark { background: var(--danger); }
 .vtest-val { font-family: ui-monospace, monospace; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
 .vtest-motif { flex: 0 0 auto; max-width: 46%; font-size: 10.5px; color: var(--danger); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vtest-item { display: flex; flex-direction: column; gap: 3px; }
+.vtest-steps { display: flex; flex-wrap: wrap; gap: 4px; padding: 1px 6px 2px 29px; }
+.vstep { font-size: 10px; line-height: 1.5; padding: 0 7px; border-radius: 999px; border: 1px solid transparent; white-space: nowrap; }
+.vstep.ok { color: var(--ok); background: #e7f0ea; border-color: #bcd9c6; }
+.vstep.fail { color: #fff; background: var(--danger); border-color: var(--danger); font-weight: 600; }
+.vstep.skip { color: var(--muted); border-color: var(--line-soft); border-style: dashed; opacity: .65; }
+
+/* block free-text comment (sticky note above the node) + validation help bubble */
+.node-comment { position: absolute; bottom: 100%; left: 0; margin-bottom: 6px; max-width: 280px; min-width: 90px;
+  background: #fff8d6; border: 1px solid #e6d98a; color: #5b5326; font-size: 11px; line-height: 1.35;
+  padding: 4px 8px; border-radius: var(--radius); white-space: pre-wrap; box-shadow: var(--shadow); pointer-events: none; }
+.node-help { flex: 0 0 auto; width: 15px; height: 15px; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; color: #fff; background: rgba(255,255,255,.18); border-radius: 50%; cursor: help; }
+.node-help:hover { background: rgba(255,255,255,.38); }
 .vtest-pattern { margin-top: 8px; font-size: 12px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .vtest-pattern code { word-break: break-all; }
 
@@ -400,6 +415,9 @@ table.dt td.idx, table.dt th.idx { background: #fafbfc; color: var(--muted); tex
 .tv-bar { background: #eef1f6; border-radius: 2px; height: 13px; overflow: hidden; }
 .tv-fill { height: 100%; background: var(--t-source); }
 .tv-count { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tv.clickable { cursor: pointer; padding: 2px 4px; margin: 0 -4px; border-radius: var(--radius); }
+.tv.clickable:hover { background: #eef1f6; }
+.tv.clickable:hover .tv-label { color: var(--t-source); font-weight: 600; }
 
 /* ---------- progress bar (overlay, no layout shift) ---------- */
 .progress-wrap { background: var(--panel); border-bottom: 1px solid var(--line); overflow: hidden; box-shadow: var(--shadow); }

@@ -21,9 +21,24 @@ import DataPreview from './DataPreview'
 import ButtonEdge from './ButtonEdge'
 import Icon from './Icon'
 
+// Render the block's free-text comment (data.description) as a sticky note above
+// the node — lets the user document the workflow at a glance. One wrapper instead
+// of editing all nine node components.
+function withComment(Comp) {
+  return function Commented(props) {
+    const note = props.data?.description
+    return (
+      <>
+        {note ? <div className="node-comment">{note}</div> : null}
+        <Comp {...props} />
+      </>
+    )
+  }
+}
 const nodeTypes = {
-  source: SourceNode, sql: SqlNode, dedup: DedupNode, validate: ValidateNode,
-  pivot: PivotNode, clean: CleanNode, calc: CalcNode, union: UnionNode, export: ExportNode,
+  source: withComment(SourceNode), sql: withComment(SqlNode), dedup: withComment(DedupNode),
+  validate: withComment(ValidateNode), pivot: withComment(PivotNode), clean: withComment(CleanNode),
+  calc: withComment(CalcNode), union: withComment(UnionNode), export: withComment(ExportNode),
 }
 const edgeTypes = { deletable: ButtonEdge }
 

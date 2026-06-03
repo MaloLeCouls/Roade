@@ -2,6 +2,7 @@ import { Handle, Position } from '@xyflow/react'
 import { useEditor } from '../editorContext'
 import { LockBadge } from './SourceNode'
 import Icon from '../Icon'
+import { buildMaskPattern, ruleSummary } from '../validateHelpers'
 
 const OUTPUTS = [
   { handle: 'valid', label: 'Conformes', cls: 'kept' },
@@ -12,11 +13,16 @@ export default function ValidateNode({ id, data, selected }) {
   const { status, onPreview, onRunNode, running } = useEditor()
   const st = status[id] || {}
   const outs = st.outputs || {}
+  const desc = data.mode === 'mask'
+    ? (buildMaskPattern(data.segments || [], data.case_sensitive) || '(masque vide)')
+    : ((data.rules || []).map(ruleSummary).join('  •  ') || '(aucune règle)')
+  const help = `${data.mode === 'mask' ? 'Masque' : 'Règles'} sur « ${data.target_column || '?'} » :\n${desc}`
   return (
     <div className={`node node-validate ${selected ? 'sel' : ''}`}>
       <Handle type="target" position={Position.Left} id="in" style={{ top: 34 }} className="anchor anchor-in" />
       <div className="node-head">
         <span className="node-title">{data.label || 'Validation'}</span>
+        <span className="node-help" title={help}>?</span>
         <LockBadge locked={data.locked} />
       </div>
       <div className="node-body">

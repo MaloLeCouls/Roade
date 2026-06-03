@@ -20,8 +20,8 @@ export default function DataPreview({
   const [activeColumn, setActiveColumn] = useState(initialColumn)
 
   const filterList = Object.entries(filters)
-    .filter(([, v]) => v !== '' && v != null)
-    .map(([column, value]) => ({ column, op: 'contains', value }))
+    .filter(([, f]) => f && (f.op === 'is_null' || (f.value !== '' && f.value != null)))
+    .map(([column, f]) => ({ column, op: f.op || 'contains', value: f.value }))
 
   useEffect(() => {
     setLoading(true)
@@ -43,6 +43,12 @@ export default function DataPreview({
   const cycleSort = (col) => {
     setOffset(0)
     setSort((s) => (!s || s.col !== col) ? { col, dir: 'asc' } : s.dir === 'asc' ? { col, dir: 'desc' } : null)
+  }
+
+  // Clicking a frequent value (in the profile panel) filters the data view on it.
+  const filterByValue = (column, value) => {
+    setFilters((f) => ({ ...f, [column]: value == null ? { op: 'is_null' } : { value, op: 'equals' } }))
+    setTab('rows'); setOffset(0); setFilterOpen(true)
   }
 
   return (
@@ -84,6 +90,11 @@ export default function DataPreview({
                   <button className={filterOpen ? 'ghost small on' : 'ghost small'} onClick={() => setFilterOpen((v) => !v)}>
                     <Icon name="filter" /> Filtres
                   </button>
+                  {filterList.length > 0 && (
+                    <button className="ghost small" onClick={() => { setFilters({}); setOffset(0) }} title="Effacer tous les filtres">
+                      Effacer ({filterList.length})
+                    </button>
+                  )}
                 </div>
               )}
               <div className="rowcount">
@@ -98,7 +109,7 @@ export default function DataPreview({
                 {tab === 'rows' && (
                   <RowsTable columns={data.columns} rows={data.rows} sort={sort} onSort={cycleSort}
                     filterOpen={filterOpen} filters={filters} active={activeColumn}
-                    onFilter={(c, v) => { setFilters((f) => ({ ...f, [c]: v })); setOffset(0) }}
+                    onFilter={(c, v) => { setFilters((f) => ({ ...f, [c]: { value: v, op: 'contains' } })); setOffset(0) }}
                     onProfile={setActiveColumn} />
                 )}
                 {tab === 'cols' && (
@@ -109,7 +120,7 @@ export default function DataPreview({
                 {tab === 'clean' && <CleanReport report={data.clean_report} />}
               </div>
 
-              <ProfilePanel pid={pid} wid={wid} nodeId={nodeId} handle={handle} column={activeColumn} />
+              <ProfilePanel pid={pid} wid={wid} nodeId={nodeId} handle={handle} column={activeColumn} onPickValue={filterByValue} />
             </div>
 
             {tab === 'rows' && (
@@ -157,7 +168,7 @@ function RowsTable({ columns, rows, sort, onSort, filterOpen, filters, onFilter,
               <th className="idx"></th>
               {columns.map((c) => (
                 <th key={c.name}>
-                  <input className="col-filter" placeholder="contient…" value={filters[c.name] || ''}
+                  <input className="col-filter" placeholder="contient…" value={filters[c.name]?.value ?? ''}
                     onChange={(e) => onFilter(c.name, e.target.value)} />
                 </th>
               ))}
@@ -245,7 +256,7 @@ function CleanReport({ report }) {
   )
 }
 
-function ProfilePanel({ pid, wid, nodeId, handle, column }) {
+function ProfilePanel({ pid, wid, nodeId, handle, column, onPickValue }) {
   const [p, setP] = useState(null)
   useEffect(() => {
     if (!column) { setP(null); return }
@@ -284,7 +295,7 @@ function ProfilePanel({ pid, wid, nodeId, handle, column }) {
             )}
             <div className="pp-section">
               <div className="pp-title">Valeurs fréquentes</div>
-              <TopValues items={p.top_values} />
+              <TopValues items={p.top_values} onPick={(val) => onPickValue && onPickValue(column, val)} />
             </div>
           </div>
         )}
@@ -309,14 +320,16 @@ function Histogram({ bins }) {
   )
 }
 
-function TopValues({ items }) {
+function TopValues({ items, onPick }) {
   if (!items?.length) return <div className="muted">—</div>
   const max = Math.max(...items.map((v) => v.count), 1)
   return (
     <div className="topvals">
       {items.map((v, i) => (
-        <div className="tv" key={i}>
-          <div className="tv-label" title={v.value ?? 'vide'}>{v.value ?? <span className="null">vide</span>}</div>
+        <div className={`tv${onPick ? ' clickable' : ''}`} key={i}
+          onClick={onPick ? () => onPick(v.value) : undefined}
+          title={onPick ? `Filtrer les données sur « ${v.value ?? 'vide'} »` : (v.value ?? 'vide')}>
+          <div className="tv-label">{v.value ?? <span className="null">vide</span>}</div>
           <div className="tv-bar"><div className="tv-fill" style={{ width: `${(v.count / max) * 100}%` }} /></div>
           <div className="tv-count">{v.count.toLocaleString('fr-FR')}</div>
         </div>
