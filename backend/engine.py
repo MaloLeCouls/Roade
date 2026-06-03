@@ -246,6 +246,8 @@ def _run_sql(con, pid, node, ins):
         sql = query_builder.compile_query(d.get("query") or {}, primary)
     try:
         df = con.execute(sql).df()
+    except Exception as e:
+        raise ValueError(f"{e}  —  SQL généré : {sql}")
     finally:
         for alias in aliases:
             con.unregister(alias)

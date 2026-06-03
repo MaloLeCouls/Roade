@@ -43,6 +43,15 @@ def q_ident(name: str) -> str:
     return '"' + str(name).replace('"', '""') + '"'
 
 
+def _need(value, message: str):
+    """Return value, or raise a user-facing error if it's missing/empty.
+    Guards against incomplete UI items (e.g. a filter where no column was picked)
+    instead of crashing with a cryptic KeyError."""
+    if value in (None, ""):
+        raise ValueError(message)
+    return value
+
+
 def q_ref(input_alias: str | None, column: str) -> str:
     col = q_ident(column)
     if input_alias:
@@ -89,11 +98,13 @@ def _select_item(item: dict) -> str:
         sql = f"({expr})"
     elif kind == "agg":
         col = item.get("column")
-        ref = "*" if (item.get("func", "").upper() == "COUNT" and not col) \
-            else q_ref(item.get("input"), col)
+        if item.get("func", "").upper() == "COUNT" and not col:
+            ref = "*"
+        else:
+            ref = q_ref(item.get("input"), _need(col, "Agrégat : choisissez une colonne."))
         sql = _agg_expr(item["func"], ref)
     else:  # column
-        sql = q_ref(item.get("input"), item["column"])
+        sql = q_ref(item.get("input"), _need(item.get("column"), "Colonne en sortie : choisissez une colonne."))
     if alias:
         sql += f" AS {q_ident(alias)}"
     return sql
@@ -106,13 +117,17 @@ def _condition(c: dict) -> str:
 
     # left side: either a plain column or an aggregate (for HAVING)
     if c.get("func"):
-        ref = "*" if (c["func"].upper() == "COUNT" and not c.get("column")) \
-            else q_ref(c.get("input"), c.get("column"))
+        if c["func"].upper() == "COUNT" and not c.get("column"):
+            ref = "*"
+        else:
+            ref = q_ref(c.get("input"), _need(c.get("column"), "Filtre d'agrégat : choisissez une colonne."))
         left = _agg_expr(c["func"], ref)
     else:
-        left = q_ref(c.get("input"), c["column"])
+        left = q_ref(c.get("input"), _need(c.get("column"), "Filtre : choisissez une colonne."))
 
     vtype = c.get("value_type", "text")
+    if op in ("LIKE", "NOT LIKE", "ILIKE"):
+        vtype = "text"      # LIKE/ILIKE patterns are always quoted string literals
     if op in ("IS NULL", "IS NOT NULL"):
         return f"{left} {op}"
     if op in ("IN", "NOT IN"):
@@ -141,8 +156,8 @@ def _join_clause(j: dict) -> str:
         raise ValueError("Jointure sans condition ON")
     parts = []
     for c in conds:
-        l = q_ref(c["left_input"], c["left_column"])
-        r = q_ref(c["right_input"], c["right_column"])
+        l = q_ref(c.get("left_input"), _need(c.get("left_column"), "Jointure : colonne de gauche manquante."))
+        r = q_ref(c.get("right_input"), _need(c.get("right_column"), "Jointure : colonne de droite manquante."))
         parts.append(f"{l} = {r}")
     return f"{jtype} JOIN {q_ident(alias)} ON " + " AND ".join(parts)
 
@@ -184,7 +199,7 @@ def compile_query(model: dict, primary_input: str) -> str:
 
     group_by = model.get("group_by") or []
     if group_by:
-        cols = ", ".join(q_ref(g.get("input"), g["column"]) for g in group_by)
+        cols = ", ".join(q_ref(g.get("input"), _need(g.get("column"), "Regroupement : choisissez une colonne.")) for g in group_by)
         sql += "\nGROUP BY " + cols
 
     having = model.get("having") or []
@@ -196,7 +211,7 @@ def compile_query(model: dict, primary_input: str) -> str:
         parts = []
         for o in order_by:
             d = "DESC" if (o.get("dir") or "ASC").upper() == "DESC" else "ASC"
-            parts.append(f"{q_ref(o.get('input'), o['column'])} {d}")
+            parts.append(f"{q_ref(o.get('input'), _need(o.get('column'), 'Tri : choisissez une colonne.'))} {d}")
         sql += "\nORDER BY " + ", ".join(parts)
 
     limit = model.get("limit")

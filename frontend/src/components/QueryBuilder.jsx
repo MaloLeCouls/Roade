@@ -32,8 +32,9 @@ function ColPicker({ inputs, value, onChange, allowEmpty }) {
         onChange({ input, column })
       }}
     >
-      {allowEmpty && <option value="">—</option>}
-      {opts.length === 0 && <option value="">(exécutez les blocs en amont)</option>}
+      {/* always show an explicit empty option so an unpicked column reads as
+          « — colonne — » instead of silently defaulting to the first one */}
+      <option value="">{opts.length === 0 ? '(exécutez les blocs en amont)' : '— colonne —'}</option>
       {inputs.map((inp) => (
         <optgroup key={inp.alias} label={`${inp.alias} — ${inp.label || ''}`}>
           {(inp.columns || []).map((c) => (
@@ -73,6 +74,7 @@ export default function QueryBuilder({ value, onChange, inputs }) {
 
   const hasSecond = inputs.length > 1
   const primary = inputs[0]?.alias || 'in1'
+  const firstCol = inputs[0]?.columns?.[0]?.name || ''   // sensible default so a new item isn't column-less
 
   return (
     <div className="qb">
@@ -87,7 +89,7 @@ export default function QueryBuilder({ value, onChange, inputs }) {
       <Section
         title="Colonnes en sortie (SELECT)"
         addLabel="colonne"
-        onAdd={() => setList('select', [...list('select'), { kind: 'column', input: primary }])}
+        onAdd={() => setList('select', [...list('select'), { kind: 'column', input: primary, column: firstCol }])}
       >
         <label className="qb-check">
           <input type="checkbox" checked={!!q.distinct} onChange={(e) => set({ distinct: e.target.checked })} />
@@ -166,7 +168,7 @@ export default function QueryBuilder({ value, onChange, inputs }) {
 
       {/* ---------------- WHERE ---------------- */}
       <Section title="Filtres (WHERE)" addLabel="filtre"
-        onAdd={() => setList('where', [...list('where'), { input: primary, op: '=', value_type: 'text', connector: 'AND' }])}>
+        onAdd={() => setList('where', [...list('where'), { input: primary, column: firstCol, op: '=', value_type: 'text', connector: 'AND' }])}>
         {list('where').map((c, i) => (
           <ConditionRow key={i} c={c} i={i} inputs={inputs} onUpd={(p) => upd('where', i, p)} onDel={() => del('where', i)} showConnector={i > 0} />
         ))}
@@ -174,7 +176,7 @@ export default function QueryBuilder({ value, onChange, inputs }) {
 
       {/* ---------------- GROUP BY ---------------- */}
       <Section title="Regroupement (GROUP BY)" addLabel="colonne"
-        onAdd={() => setList('group_by', [...list('group_by'), { input: primary, column: '' }])}>
+        onAdd={() => setList('group_by', [...list('group_by'), { input: primary, column: firstCol }])}>
         {list('group_by').map((g, i) => (
           <div className="qb-row" key={i}>
             <ColPicker inputs={inputs} value={g} onChange={(v) => upd('group_by', i, v || { input: primary, column: '' })} />
@@ -186,7 +188,7 @@ export default function QueryBuilder({ value, onChange, inputs }) {
       {/* ---------------- HAVING ---------------- */}
       {list('group_by').length > 0 && (
         <Section title="Filtres d'agrégat (HAVING)" addLabel="condition"
-          onAdd={() => setList('having', [...list('having'), { func: 'SUM', input: primary, op: '>', value_type: 'number', connector: 'AND' }])}>
+          onAdd={() => setList('having', [...list('having'), { func: 'SUM', input: primary, column: firstCol, op: '>', value_type: 'number', connector: 'AND' }])}>
           {list('having').map((c, i) => (
             <div className="qb-row" key={i}>
               {i > 0 && <select className="qb-select tiny" value={c.connector || 'AND'} onChange={(e) => upd('having', i, { connector: e.target.value })}><option>AND</option><option>OR</option></select>}
@@ -206,7 +208,7 @@ export default function QueryBuilder({ value, onChange, inputs }) {
 
       {/* ---------------- ORDER BY ---------------- */}
       <Section title="Tri (ORDER BY)" addLabel="colonne"
-        onAdd={() => setList('order_by', [...list('order_by'), { input: primary, column: '', dir: 'ASC' }])}>
+        onAdd={() => setList('order_by', [...list('order_by'), { input: primary, column: firstCol, dir: 'ASC' }])}>
         {list('order_by').map((o, i) => (
           <div className="qb-row" key={i}>
             <ColPicker inputs={inputs} value={o} onChange={(v) => upd('order_by', i, v || { input: primary, column: '' })} />
@@ -236,8 +238,12 @@ export default function QueryBuilder({ value, onChange, inputs }) {
   }
 }
 
+const LIKE_OPS = ['LIKE', 'NOT LIKE', 'ILIKE']
+
 function ConditionRow({ c, inputs, onUpd, onDel, showConnector }) {
   const noValue = c.op === 'IS NULL' || c.op === 'IS NOT NULL'
+  const isLike = LIKE_OPS.includes(c.op)
+  const placeholder = isLike ? '%motif%' : (c.op === 'IN' || c.op === 'NOT IN' ? 'a, b, c' : 'valeur')
   return (
     <div className="qb-row">
       {showConnector && (
@@ -251,14 +257,19 @@ function ConditionRow({ c, inputs, onUpd, onDel, showConnector }) {
       </select>
       {!noValue && (
         <>
-          <input className="qb-input narrow" placeholder={c.op === 'IN' || c.op === 'NOT IN' ? 'a, b, c' : 'valeur'}
+          <input className="qb-input narrow" placeholder={placeholder}
             value={c.value || ''} onChange={(e) => onUpd({ value: e.target.value })} />
           {c.op === 'BETWEEN' && (
             <input className="qb-input narrow" placeholder="et…" value={c.value2 || ''} onChange={(e) => onUpd({ value2: e.target.value })} />
           )}
-          <select className="qb-select tiny" value={c.value_type || 'text'} onChange={(e) => onUpd({ value_type: e.target.value })}>
-            {VALUE_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
+          {/* LIKE patterns are always text; the type picker would only mislead (« brut » breaks the SQL) */}
+          {isLike ? (
+            <span className="qb-lbl" title="Jokers : % = n'importe quelle suite, _ = un caractère">texte · % _</span>
+          ) : (
+            <select className="qb-select tiny" value={c.value_type || 'text'} onChange={(e) => onUpd({ value_type: e.target.value })}>
+              {VALUE_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          )}
         </>
       )}
       <button className="ghost danger small" onClick={onDel}><Icon name="x" /></button>
