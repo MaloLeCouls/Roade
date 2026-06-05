@@ -943,6 +943,29 @@ def _write_workbook(path, sheets, fresh=True):
             df.to_excel(writer, sheet_name=nm, index=False)
 
 
+def export_filenames(pid) -> set:
+    """Names of the files produced by Export blocks across every workflow of a
+    project — used to tell generated exports apart from imported sources.
+    Mirrors the naming in _run_export (normal file vs single-workbook sheet)."""
+    names = set()
+    for meta in storage.list_workflows(pid):
+        wf = storage.get_workflow(pid, meta["id"])
+        if not wf:
+            continue
+        wf_name = wf.get("name") or "Workflow"
+        for node in wf.get("nodes", []):
+            if node.get("type") != "export":
+                continue
+            d = node.get("data") or {}
+            if d.get("to_workbook"):
+                names.add(_sanitize_filename(wf_name, "Workflow") + ".xlsx")
+            else:
+                fn = _sanitize_filename(d.get("filename"), "resultat")
+                ext = "csv" if (d.get("format") or "xlsx").lower() == "csv" else "xlsx"
+                names.add(f"{fn}.{ext}")
+    return names
+
+
 _RUNNERS = {
     "source": _run_source, "sql": _run_sql, "dedup": _run_dedup,
     "validate": _run_validate, "pivot": _run_pivot, "clean": _run_clean,

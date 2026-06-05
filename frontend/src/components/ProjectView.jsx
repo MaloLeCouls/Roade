@@ -29,6 +29,21 @@ export default function ProjectView({ pid, onOpenWorkflow }) {
     setFiles(await api.listFiles(pid))
   }
 
+  const openFile = async (name) => {
+    try { await api.openFile(pid, name) }
+    catch (e) { alert(`Impossible d'ouvrir le fichier : ${e.message}`) }
+  }
+
+  const fileRow = (f) => (
+    <li key={f.name}>
+      <span className="fname"><Icon name="file" size={13} /> {f.name}</span>
+      <span className="fsize">{fmtSize(f.size)}</span>
+      <button className="ghost small" onClick={() => openFile(f.name)} title="Ouvrir dans l'application par défaut"><Icon name="external" /></button>
+      <a className="ghost small" href={api.downloadUrl(pid, f.name)} title="Télécharger"><Icon name="download" /></a>
+      <button className="ghost danger small" onClick={() => delFile(f.name)} title="Supprimer"><Icon name="trash" /></button>
+    </li>
+  )
+
   const createWf = async () => {
     const n = wfName.trim() || 'Nouveau workflow'
     const wf = await api.createWorkflow(pid, n)
@@ -45,6 +60,9 @@ export default function ProjectView({ pid, onOpenWorkflow }) {
 
   if (!project) return <div className="page"><p className="muted">Chargement…</p></div>
 
+  const sources = files.filter((f) => f.origin !== 'export')
+  const exportFiles = files.filter((f) => f.origin === 'export')
+
   return (
     <div className="page">
       <div className="page-head">
@@ -59,7 +77,7 @@ export default function ProjectView({ pid, onOpenWorkflow }) {
       <div className="cols">
         <section className="panel">
           <div className="panel-head">
-            <h2>Fichiers sources</h2>
+            <h2>Fichiers</h2>
             <button className="primary small" onClick={() => fileInput.current.click()}>
               Importer
             </button>
@@ -75,16 +93,20 @@ export default function ProjectView({ pid, onOpenWorkflow }) {
           {files.length === 0 ? (
             <div className="empty small">Aucun fichier. Importez vos Excel/CSV.</div>
           ) : (
-            <ul className="list">
-              {files.map((f) => (
-                <li key={f.name}>
-                  <span className="fname"><Icon name="file" size={13} /> {f.name}</span>
-                  <span className="fsize">{fmtSize(f.size)}</span>
-                  <a className="ghost small" href={api.downloadUrl(pid, f.name)} title="Télécharger"><Icon name="download" /></a>
-                  <button className="ghost danger small" onClick={() => delFile(f.name)} title="Supprimer"><Icon name="trash" /></button>
-                </li>
-              ))}
-            </ul>
+            <>
+              {sources.length > 0 && (
+                <div className="file-group">
+                  <div className="file-group-head">Sources <span className="fg-count">{sources.length}</span></div>
+                  <ul className="list">{sources.map(fileRow)}</ul>
+                </div>
+              )}
+              {exportFiles.length > 0 && (
+                <div className="file-group">
+                  <div className="file-group-head">Exports générés <span className="fg-count">{exportFiles.length}</span></div>
+                  <ul className="list">{exportFiles.map(fileRow)}</ul>
+                </div>
+              )}
+            </>
           )}
         </section>
 

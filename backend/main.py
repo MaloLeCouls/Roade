@@ -6,6 +6,9 @@ The Vite dev server proxies /api -> http://127.0.0.1:8000.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 
 from fastapi import FastAPI, Body, UploadFile, File, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -66,7 +69,11 @@ def delete_project(pid: str):
 # --------------------------------------------------------------------------- #
 @app.get("/api/projects/{pid}/files")
 def list_files(pid: str):
-    return storage.list_files(pid)
+    files = storage.list_files(pid)
+    exports = engine.export_filenames(pid)
+    for f in files:
+        f["origin"] = "export" if f["name"] in exports else "source"
+    return files
 
 
 @app.post("/api/projects/{pid}/files")
@@ -94,6 +101,32 @@ def delete_file(pid: str, name: str):
     path = storage.files_dir(pid) / name
     if path.exists():
         path.unlink()
+    return {"ok": True}
+
+
+def _open_in_os(path) -> None:
+    """Open a file with the OS default application (Excel, etc.). Local use only:
+    the backend runs on the same machine as the user."""
+    if sys.platform.startswith("win"):
+        os.startfile(str(path))  # noqa: S606 - Windows-only, trusted local path
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", str(path)])
+    else:
+        subprocess.Popen(["xdg-open", str(path)])
+
+
+@app.post("/api/projects/{pid}/files/{name}/open")
+def open_file(pid: str, name: str):
+    fd = storage.files_dir(pid).resolve()
+    path = (fd / name).resolve()
+    if fd != path.parent:                         # reject path traversal / subdirs
+        raise HTTPException(400, "Chemin de fichier invalide")
+    if not path.exists():
+        raise HTTPException(404, "Fichier introuvable")
+    try:
+        _open_in_os(path)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"Impossible d'ouvrir le fichier : {e}")
     return {"ok": True}
 
 
