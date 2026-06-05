@@ -2,7 +2,7 @@
 
 Petite application web pour transformer des fichiers **Excel/CSV** en assemblant
 des **blocs** sur un canevas — l'idée de ce qu'on ferait en SQL, mais sans écrire
-de SQL. C'est un outil personnel, sans prétention : il fait le travail, pas plus.
+de SQL.
 
 On crée un **projet** (un dossier sur le disque), on importe ses fichiers, puis on
 relie des blocs par leurs ancres d'entrée/sortie. Chaque bloc matérialise son
