@@ -386,21 +386,292 @@ function GroupCalcSection({ d, cols, set }) {
   )
 }
 
+/* ----- visual builder for a calculated column: an `op` model -> a formula --- *
+ * The op is stored on the column so the form can be re-edited; we also generate
+ * the `expr` formula string the backend already compiles — the backend is
+ * unchanged. 'formula' is the advanced escape hatch (raw textarea).           */
+const CALC_OPS = [
+  ['extract', 'Extraire du texte'],
+  ['transform', 'Transformer du texte'],
+  ['combine', 'Combiner (coller) des colonnes'],
+  ['condition', 'Condition (Si… alors…)'],
+  ['math', 'Calcul (nombres)'],
+  ['formula', 'Formule (avancé)'],
+]
+const EXTRACT_WHAT = [
+  ['after_sep', 'le texte après un séparateur'],
+  ['before_sep', 'le texte avant un séparateur'],
+  ['first_n', 'les N premiers caractères'],
+  ['last_n', 'les N derniers caractères'],
+  ['mid', 'à partir d’une position'],
+]
+const OCCURRENCES = [['first', 'première'], ['last', 'dernière'], ['nth', 'n-ième']]
+const TRANSFORMS = [['upper', 'MAJUSCULES'], ['lower', 'minuscules'], ['trim', 'enlever les espaces'], ['replace', 'remplacer un texte']]
+const CMPS = [['=', '='], ['<>', '≠'], ['>', '>'], ['>=', '≥'], ['<', '<'], ['<=', '≤'], ['contains', 'contient']]
+const MATH_OPS = [['+', '+'], ['-', '−'], ['*', '×'], ['/', '÷']]
+
+const _lit = (s) => '"' + String(s ?? '').replace(/"/g, '""') + '"'
+const _colref = (c) => `[${c}]`
+const _isNum = (v) => v !== '' && v != null && !isNaN(Number(v))
+const _num = (v, def) => (v === '' || v == null || isNaN(Number(v)) ? def : Number(v))
+const _valExpr = (v, isCol) => (isCol ? (v ? _colref(v) : '""') : (_isNum(v) ? String(v) : _lit(v)))
+
+function buildCalcExpr(op) {
+  if (!op) return ''
+  const c = op.column
+  switch (op.kind) {
+    case 'extract': {
+      if (!c) return ''
+      const w = op.what || 'after_sep'
+      if (w === 'first_n') return `LEFT(${_colref(c)}, ${_num(op.n, 1)})`
+      if (w === 'last_n') return `RIGHT(${_colref(c)}, ${_num(op.n, 1)})`
+      if (w === 'mid') return `MID(${_colref(c)}, ${_num(op.start, 1)}, ${_num(op.n, 5)})`
+      const fn = w === 'before_sep' ? 'TEXTBEFORE' : 'TEXTAFTER'
+      const inst = op.occurrence === 'last' ? -1 : op.occurrence === 'nth' ? _num(op.instance, 1) : 1
+      return `${fn}(${_colref(c)}, ${_lit(op.sep ?? '')}, ${inst})`
+    }
+    case 'transform': {
+      if (!c) return ''
+      const t = op.transform || 'upper'
+      if (t === 'replace') return `SUBSTITUTE(${_colref(c)}, ${_lit(op.find ?? '')}, ${_lit(op.replace ?? '')})`
+      return `${t.toUpperCase()}(${_colref(c)})`
+    }
+    case 'combine': {
+      const segs = (op.parts || []).map((p) => (p.type === 'text' ? _lit(p.value) : (p.value ? _colref(p.value) : ''))).filter(Boolean)
+      if (!segs.length) return ''
+      return segs.join(op.sep ? ` & ${_lit(op.sep)} & ` : ' & ')
+    }
+    case 'condition': {
+      if (!c) return ''
+      const then = _valExpr(op.then, op.thenIsCol)
+      const els = _valExpr(op.else, op.elseIsCol)
+      if (op.cmp === 'contains') return `IF(FIND(${_valExpr(op.value, op.valueIsCol)}, ${_colref(c)}) > 0, ${then}, ${els})`
+      return `IF(${_colref(c)} ${op.cmp || '='} ${_valExpr(op.value, op.valueIsCol)}, ${then}, ${els})`
+    }
+    case 'math': {
+      if (!c) return ''
+      const rhs = op.rhsIsCol ? (op.rhs ? _colref(op.rhs) : '0') : (_isNum(op.rhs) ? String(op.rhs) : '0')
+      let e = `${_colref(c)} ${op.mathOp || '+'} ${rhs}`
+      if (op.round !== '' && op.round != null) e = `ROUND(${e}, ${_num(op.round, 0)})`
+      return `(${e})`
+    }
+    default:
+      return op.expr || ''
+  }
+}
+
+function CalcColSelect({ cols, value, onChange, placeholder = '— colonne —' }) {
+  return (
+    <select className="qb-select" value={value || ''} onChange={(e) => onChange(e.target.value)}>
+      <option value="">{placeholder}</option>
+      {cols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+    </select>
+  )
+}
+
+// a value that is either a typed constant or a reference to another column
+function ValueField({ cols, value, isCol, onValue, onToggle, placeholder = 'valeur' }) {
+  return (
+    <span className="calc-valuefield">
+      {isCol
+        ? <CalcColSelect cols={cols} value={value} onChange={onValue} />
+        : <input className="qb-input narrow" value={value ?? ''} placeholder={placeholder} onChange={(e) => onValue(e.target.value)} />}
+      <label className="qb-check tiny" title="Utiliser une colonne plutôt qu'une valeur saisie">
+        <input type="checkbox" checked={!!isCol} onChange={(e) => onToggle(e.target.checked)} /> col
+      </label>
+    </span>
+  )
+}
+
+function CombineForm({ op, setOp, cols }) {
+  const parts = op.parts || []
+  const setParts = (p) => setOp({ parts: p })
+  const upd = (i, patch) => setParts(parts.map((p, j) => (j === i ? { ...p, ...patch } : p)))
+  return (
+    <div className="combine-form">
+      {parts.map((p, i) => (
+        <div className="qb-row indent" key={i}>
+          <select className="qb-select" value={p.type || 'col'} onChange={(e) => upd(i, { type: e.target.value })}>
+            <option value="col">colonne</option>
+            <option value="text">texte</option>
+          </select>
+          {p.type === 'text'
+            ? <input className="qb-input" value={p.value ?? ''} placeholder="texte" onChange={(e) => upd(i, { value: e.target.value })} />
+            : <CalcColSelect cols={cols} value={p.value} onChange={(v) => upd(i, { value: v })} />}
+          <button className="ghost danger small" onClick={() => setParts(parts.filter((_, j) => j !== i))}><Icon name="x" /></button>
+        </div>
+      ))}
+      <div className="qb-row indent">
+        <button className="ghost small" onClick={() => setParts([...parts, { type: 'col', value: '' }])}>+ colonne</button>
+        <button className="ghost small" onClick={() => setParts([...parts, { type: 'text', value: '' }])}>+ texte</button>
+        <span className="qb-lbl">séparateur</span>
+        <input className="qb-input narrow" value={op.sep ?? ''} placeholder="ex : espace, -" onChange={(e) => setOp({ sep: e.target.value })} />
+      </div>
+    </div>
+  )
+}
+
+function CalcColumnCard({ item, index, count, cols, onChange, onMove, onDelete }) {
+  const op = item.op || { kind: 'formula' }
+  const kind = op.kind || 'formula'
+  const setOp = (patch) => { const next = { ...op, ...patch }; onChange({ op: next, expr: buildCalcExpr(next) }) }
+  const setKind = (k) => {
+    if (k === 'formula') onChange({ op: { kind: 'formula' }, expr: item.expr || '' })
+    else { const next = { ...op, kind: k }; onChange({ op: next, expr: buildCalcExpr(next) }) }
+  }
+  const appendCol = (cName) => {
+    const cur = item.expr || ''
+    onChange({ op: { kind: 'formula' }, expr: cur + (cur && !cur.endsWith(' ') ? ' ' : '') + `[${cName}]` })
+  }
+  const w = op.what || 'after_sep'
+  return (
+    <div className={`clean-op ${item.enabled === false ? 'off' : ''}`}>
+      <div className="qb-row">
+        <input type="checkbox" checked={item.enabled !== false} onChange={(e) => onChange({ enabled: e.target.checked })} title="Activer / désactiver" />
+        <input className="qb-input" placeholder="nom de la nouvelle colonne" value={item.name || ''} onChange={(e) => onChange({ name: e.target.value })} />
+      </div>
+      <div className="qb-row indent">
+        <span className="qb-lbl">calcule</span>
+        <select className="qb-select" value={kind} onChange={(e) => setKind(e.target.value)}>
+          {CALC_OPS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+      </div>
+
+      {kind === 'extract' && (
+        <>
+          <div className="qb-row indent">
+            <span className="qb-lbl">de</span>
+            <CalcColSelect cols={cols} value={op.column} onChange={(v) => setOp({ column: v })} />
+            <span className="qb-lbl">prendre</span>
+            <select className="qb-select" value={w} onChange={(e) => setOp({ what: e.target.value })}>
+              {EXTRACT_WHAT.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
+          {['after_sep', 'before_sep'].includes(w) && (
+            <div className="qb-row indent">
+              <span className="qb-lbl">séparateur</span>
+              <input className="qb-input narrow" value={op.sep ?? ''} placeholder={'\\  /  -  .'} onChange={(e) => setOp({ sep: e.target.value })} />
+              <span className="qb-lbl">occurrence</span>
+              <select className="qb-select" value={op.occurrence || 'last'} onChange={(e) => setOp({ occurrence: e.target.value })}>
+                {OCCURRENCES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+              {op.occurrence === 'nth' && <input className="qb-input narrow" type="number" min="1" value={op.instance ?? 1} onChange={(e) => setOp({ instance: e.target.value })} />}
+            </div>
+          )}
+          {['first_n', 'last_n'].includes(w) && (
+            <div className="qb-row indent"><span className="qb-lbl">combien de caractères</span>
+              <input className="qb-input narrow" type="number" min="1" value={op.n ?? 1} onChange={(e) => setOp({ n: e.target.value })} /></div>
+          )}
+          {w === 'mid' && (
+            <div className="qb-row indent"><span className="qb-lbl">à partir de</span>
+              <input className="qb-input narrow" type="number" min="1" value={op.start ?? 1} onChange={(e) => setOp({ start: e.target.value })} />
+              <span className="qb-lbl">sur</span>
+              <input className="qb-input narrow" type="number" min="1" value={op.n ?? 5} onChange={(e) => setOp({ n: e.target.value })} /></div>
+          )}
+          <div className="qb-row indent calc-presets">
+            <span className="qb-lbl">préréglages</span>
+            <button className="chip-mini" onClick={() => setOp({ what: 'after_sep', sep: '\\', occurrence: 'last' })}>nom de fichier</button>
+            <button className="chip-mini" onClick={() => setOp({ what: 'before_sep', sep: '.', occurrence: 'last' })}>retirer l’extension</button>
+          </div>
+        </>
+      )}
+
+      {kind === 'transform' && (
+        <>
+          <div className="qb-row indent">
+            <CalcColSelect cols={cols} value={op.column} onChange={(v) => setOp({ column: v })} />
+            <span className="qb-lbl">→</span>
+            <select className="qb-select" value={op.transform || 'upper'} onChange={(e) => setOp({ transform: e.target.value })}>
+              {TRANSFORMS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
+          {op.transform === 'replace' && (
+            <div className="qb-row indent">
+              <span className="qb-lbl">remplacer</span>
+              <input className="qb-input narrow" value={op.find ?? ''} onChange={(e) => setOp({ find: e.target.value })} />
+              <span className="qb-lbl">par</span>
+              <input className="qb-input narrow" value={op.replace ?? ''} onChange={(e) => setOp({ replace: e.target.value })} />
+            </div>
+          )}
+        </>
+      )}
+
+      {kind === 'combine' && <CombineForm op={op} setOp={setOp} cols={cols} />}
+
+      {kind === 'condition' && (
+        <>
+          <div className="qb-row indent">
+            <span className="qb-lbl">si</span>
+            <CalcColSelect cols={cols} value={op.column} onChange={(v) => setOp({ column: v })} />
+            <select className="qb-select" value={op.cmp || '='} onChange={(e) => setOp({ cmp: e.target.value })}>
+              {CMPS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+            <ValueField cols={cols} value={op.value} isCol={op.valueIsCol} onValue={(v) => setOp({ value: v })} onToggle={(b) => setOp({ valueIsCol: b })} />
+          </div>
+          <div className="qb-row indent">
+            <span className="qb-lbl">alors</span>
+            <ValueField cols={cols} value={op.then} isCol={op.thenIsCol} onValue={(v) => setOp({ then: v })} onToggle={(b) => setOp({ thenIsCol: b })} />
+            <span className="qb-lbl">sinon</span>
+            <ValueField cols={cols} value={op.else} isCol={op.elseIsCol} onValue={(v) => setOp({ else: v })} onToggle={(b) => setOp({ elseIsCol: b })} />
+          </div>
+        </>
+      )}
+
+      {kind === 'math' && (
+        <div className="qb-row indent">
+          <CalcColSelect cols={cols} value={op.column} onChange={(v) => setOp({ column: v })} />
+          <select className="qb-select" value={op.mathOp || '+'} onChange={(e) => setOp({ mathOp: e.target.value })}>
+            {MATH_OPS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+          <ValueField cols={cols} value={op.rhs} isCol={op.rhsIsCol} onValue={(v) => setOp({ rhs: v })} onToggle={(b) => setOp({ rhsIsCol: b })} placeholder="nombre" />
+          <span className="qb-lbl">arrondi</span>
+          <input className="qb-input narrow" type="number" placeholder="—" value={op.round ?? ''} onChange={(e) => setOp({ round: e.target.value })} />
+        </div>
+      )}
+
+      {kind === 'formula' && (
+        <>
+          <div className="qb-row indent">
+            <span className="qb-eq">=</span>
+            <textarea className="qb-input calc-expr" rows={2} placeholder='ex : IF([stock] > 0, "OK", "Rupture")'
+              value={item.expr || ''} onChange={(e) => onChange({ op: { kind: 'formula' }, expr: e.target.value })} />
+          </div>
+          {cols.length > 0 && (
+            <div className="calc-cols">
+              {cols.map((c) => (
+                <button key={c.name} className="calc-coltag" title="Insérer cette colonne" onClick={() => appendCol(c.name)}>{c.name}</button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {kind !== 'formula' && (
+        <div className="calc-genexpr" title="Formule générée (modifiable en mode « Formule (avancé) »)">
+          = <code>{item.expr || '…'}</code>
+        </div>
+      )}
+
+      <div className="clean-op-actions">
+        <button className="mini" onClick={() => onMove(-1)} disabled={index === 0}><Icon name="up" /></button>
+        <button className="mini" onClick={() => onMove(1)} disabled={index === count - 1}><Icon name="down" /></button>
+        <button className="ghost danger small" onClick={onDelete}><Icon name="x" /></button>
+      </div>
+    </div>
+  )
+}
+
 function CalcConfig({ node, inputs, set }) {
   const d = node.data
   const cols = inputs[0]?.columns || []
   const items = d.columns || []
   const upd = (i, patch) => set({ columns: items.map((o, j) => (j === i ? { ...o, ...patch } : o)) })
   const del = (i) => set({ columns: items.filter((_, j) => j !== i) })
-  const add = () => set({ columns: [...items, { name: '', expr: '', enabled: true }] })
+  const add = () => set({ columns: [...items, { name: '', enabled: true, op: { kind: 'extract', what: 'after_sep', occurrence: 'last' }, expr: '' }] })
   const move = (i, dir) => {
     const j = i + dir
     if (j < 0 || j >= items.length) return
     const a = [...items];[a[i], a[j]] = [a[j], a[i]]; set({ columns: a })
-  }
-  const appendCol = (i, c) => {
-    const cur = items[i].expr || ''
-    upd(i, { expr: cur + (cur && !cur.endsWith(' ') ? ' ' : '') + `[${c}]` })
   }
   return (
     <div className="insp-body">
@@ -411,51 +682,26 @@ function CalcConfig({ node, inputs, set }) {
       <div className="ports-head">
         <span className="ports-title">Colonnes calculées</span>
         <InfoBubble>
-          Formules façon Excel. Une formule peut réutiliser une colonne calculée plus haut (y compris une colonne « par groupe ») ;
-          si le nom existe déjà, la colonne est remplacée.<br />
-          <b>Syntaxe</b> : colonne = <code>[Nom]</code> · texte = <code>"texte"</code> · concaténer = <code>&amp;</code><br />
-          <b>Texte</b> : CONCAT, UPPER, LOWER, TRIM, LEFT, RIGHT, MID, LEN, REPT, FIND, SEARCH,
-          SUBSTITUTE, REPLACE, TEXTBEFORE, TEXTAFTER, REGEXEXTRACT, REGEXREPLACE<br />
-          <b>Nombres</b> : ROUND, ABS, MOD, POWER, MIN, MAX · <b>Date</b> : YEAR, MONTH, DAY, TODAY<br />
-          <b>Logique / autres</b> : IF, AND, OR, NOT, COALESCE, ISBLANK, TEXT, VALUE<br />
-          <b>TEXTBEFORE/TEXTAFTER([texte], "séparateur", n)</b> : <code>n</code> = quelle occurrence du séparateur
-          (1 = la 1ʳᵉ, <code>-1</code> = la dernière). Ex. nom de fichier d'un chemin : <code>TEXTAFTER([chemin], "\", -1)</code>.
+          Chaque colonne se construit avec un <b>choix d'opération</b> (extraire un morceau de texte, transformer,
+          combiner, condition Si…, calcul) — sans écrire de formule.<br />
+          <b>Extraire</b> couvre le besoin courant : p.ex. le nom d'un fichier = « le texte après le séparateur
+          <code>\</code>, dernière occurrence » (bouton préréglage « nom de fichier »).<br />
+          La formule générée reste affichée. Le mode <b>Formule (avancé)</b> permet d'écrire directement :
+          <code>[Nom]</code> = colonne, <code>"texte"</code> = littéral, <code>&amp;</code> = concaténer, et toutes les
+          fonctions (IF, TEXTAFTER, REGEXEXTRACT…). Une colonne peut réutiliser une colonne calculée plus haut.
         </InfoBubble>
       </div>
       <button className="ghost small" onClick={add}>+ Colonne calculée</button>
       <div className="clean-ops">
         {items.map((o, i) => (
-          <div className={`clean-op ${o.enabled === false ? 'off' : ''}`} key={i}>
-            <div className="qb-row">
-              <input type="checkbox" checked={o.enabled !== false} onChange={(e) => upd(i, { enabled: e.target.checked })} title="Activer / désactiver" />
-              <input className="qb-input" placeholder="nom de la colonne" value={o.name || ''} onChange={(e) => upd(i, { name: e.target.value })} />
-            </div>
-            <div className="qb-row indent">
-              <span className="qb-eq">=</span>
-              <textarea className="qb-input calc-expr" rows={2} placeholder='ex : IF([stock] > 0, "OK", "Rupture")'
-                value={o.expr || ''} onChange={(e) => upd(i, { expr: e.target.value })} />
-            </div>
-            {cols.length > 0 && (
-              <div className="calc-cols">
-                {cols.map((c) => (
-                  <button key={c.name} className="calc-coltag" title="Insérer cette colonne" onClick={() => appendCol(i, c.name)}>
-                    {c.name}
-                  </button>
-                ))}
-              </div>
-            )}
-            <div className="clean-op-actions">
-              <button className="mini" onClick={() => move(i, -1)} disabled={i === 0}><Icon name="up" /></button>
-              <button className="mini" onClick={() => move(i, 1)} disabled={i === items.length - 1}><Icon name="down" /></button>
-              <button className="ghost danger small" onClick={() => del(i)}><Icon name="x" /></button>
-            </div>
-          </div>
+          <CalcColumnCard key={i} item={o} index={i} count={items.length} cols={cols}
+            onChange={(patch) => upd(i, patch)} onMove={(dir) => move(i, dir)} onDelete={() => del(i)} />
         ))}
         {items.length === 0 && (
           <div className="calc-examples">
-            <div className="qb-hint">Aucune colonne. Exemples :</div>
+            <div className="qb-hint">Aucune colonne. Exemples (cliquez pour insérer) :</div>
             {CALC_EXAMPLES.map(([n, e], i) => (
-              <button key={i} className="calc-example" onClick={() => set({ columns: [...items, { name: n, expr: e, enabled: true }] })}>
+              <button key={i} className="calc-example" onClick={() => set({ columns: [...items, { name: n, expr: e, op: { kind: 'formula' }, enabled: true }] })}>
                 <b>{n}</b> = <code>{e}</code>
               </button>
             ))}

@@ -310,6 +310,18 @@ code { background: #eef0f3; padding: 1px 5px; border-radius: 3px; font-size: 12p
 .calc-example:hover { border-color: var(--t-calc); background: #faf5f8; }
 .calc-example code { font-family: ui-monospace, monospace; font-size: 11px; color: var(--ink-soft); }
 
+/* visual builder for a calculated column */
+.calc-genexpr { margin: 4px 0 2px; padding: 3px 8px; font-size: 11px; color: var(--ink-soft);
+  background: #f6f7fa; border-radius: var(--radius); border: 1px dashed var(--line); }
+.calc-genexpr code { font-family: ui-monospace, monospace; color: var(--t-calc); word-break: break-all; }
+.calc-valuefield { display: inline-flex; align-items: center; gap: 5px; }
+.qb-check.tiny { font-size: 11px; color: var(--muted); gap: 3px; }
+.calc-presets { flex-wrap: wrap; }
+.chip-mini { font-size: 11px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 10px;
+  background: #fff; color: var(--ink-soft); cursor: pointer; }
+.chip-mini:hover { background: var(--t-calc); color: #fff; border-color: var(--t-calc); }
+.combine-form { display: flex; flex-direction: column; gap: 4px; }
+
 /* ---------- validation block ---------- */
 .fld-head { display: flex; align-items: center; gap: 6px; }
 .fld-head span { font-weight: 600; color: var(--ink-soft); }
