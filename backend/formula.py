@@ -93,6 +93,54 @@ def _call(name):
     return lambda a: f"{name}(" + ", ".join(a) + ")"
 
 
+# ---- text helpers (extract / locate / replace parts of a string) ----------- #
+def _find_builder(ci: bool):
+    """FIND/SEARCH: 1-based position of `find` in `within`, NULL if absent.
+    SEARCH (ci=True) is case-insensitive; the optional 3rd arg is a start offset."""
+    def b(a):
+        find = f"lower({a[0]})" if ci else a[0]
+        within = f"lower({a[1]})" if ci else a[1]
+        if len(a) == 2:
+            return f"nullif(strpos({within}, {find}), 0)"
+        start = a[2]
+        p = f"strpos(substr({within}, {start}), {find})"
+        return f"(CASE WHEN {p} = 0 THEN NULL ELSE {p} + ({start}) - 1 END)"
+    return b
+
+
+def _fn_replace(a):
+    """REPLACE(text, start, num_chars, new): swap `num_chars` chars at `start`."""
+    s, start, num, new = a
+    return f"(substr({s}, 1, ({start}) - 1) || {new} || substr({s}, ({start}) + ({num})))"
+
+
+def _fn_textafter(a):
+    """TEXTAFTER(text, delim [, instance]): part after the instance-th delimiter.
+    instance defaults to 1 (first); a negative value counts from the end
+    (-1 = after the last delimiter), handy to get a file name from a path."""
+    t, d = a[0], a[1]
+    n = a[2] if len(a) == 3 else "1"
+    parts = f"string_split({t}, {d})"
+    start = f"(CASE WHEN ({n}) >= 0 THEN ({n}) + 1 ELSE len({parts}) + ({n}) + 1 END)"
+    return f"array_to_string(list_slice({parts}, {start}, len({parts})), {d})"
+
+
+def _fn_textbefore(a):
+    """TEXTBEFORE(text, delim [, instance]): part before the instance-th delimiter."""
+    t, d = a[0], a[1]
+    n = a[2] if len(a) == 3 else "1"
+    parts = f"string_split({t}, {d})"
+    end = f"(CASE WHEN ({n}) >= 0 THEN ({n}) ELSE len({parts}) + ({n}) END)"
+    return f"array_to_string(list_slice({parts}, 1, {end}), {d})"
+
+
+def _fn_regexextract(a):
+    """REGEXEXTRACT(text, pattern [, group]): the (group-th) regex match, '' if none."""
+    if len(a) == 2:
+        return f"regexp_extract({a[0]}, {a[1]})"
+    return f"regexp_extract({a[0]}, {a[1]}, CAST({a[2]} AS INTEGER))"
+
+
 FUNCTIONS = {
     "IF":       (2, 3, _fn_if),
     "AND":      (1, None, _join("AND")),
@@ -106,6 +154,15 @@ FUNCTIONS = {
     "RIGHT":    (2, 2, lambda a: f"right({a[0]}, {a[1]})"),
     "MID":      (3, 3, lambda a: f"substr({a[0]}, {a[1]}, {a[2]})"),
     "LEN":      (1, 1, _call("length")),
+    "REPT":     (2, 2, lambda a: f"repeat({a[0]}, {a[1]})"),
+    "FIND":     (2, 3, _find_builder(False)),
+    "SEARCH":   (2, 3, _find_builder(True)),
+    "SUBSTITUTE": (3, 3, lambda a: f"replace({a[0]}, {a[1]}, {a[2]})"),
+    "REPLACE":  (4, 4, _fn_replace),
+    "TEXTBEFORE": (2, 3, _fn_textbefore),
+    "TEXTAFTER":  (2, 3, _fn_textafter),
+    "REGEXEXTRACT": (2, 3, _fn_regexextract),
+    "REGEXREPLACE": (3, 3, lambda a: f"regexp_replace({a[0]}, {a[1]}, {a[2]}, 'g')"),
     "ROUND":    (1, 2, lambda a: f"round({', '.join(a)})"),
     "ABS":      (1, 1, _call("abs")),
     "MOD":      (2, 2, lambda a: f"mod({a[0]}, {a[1]})"),

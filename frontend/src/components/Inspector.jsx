@@ -283,7 +283,8 @@ const CALC_EXAMPLES = [
   ['prix_ttc', '[prix_ht] * 1.2'],
   ['statut', 'IF([stock] > 0, "OK", "Rupture")'],
   ['nom_complet', '[nom] & " " & [prenom]'],
-  ['categorie', 'IF([montant] >= 1000, "Grand", IF([montant] >= 100, "Moyen", "Petit"))'],
+  ['nom_fichier', 'TEXTAFTER([chemin], "\\", -1)'],
+  ['sans_extension', 'TEXTBEFORE(TEXTAFTER([chemin], "\\", -1), ".", -1)'],
 ]
 
 function GroupCalcSection({ d, cols, set }) {
@@ -413,8 +414,12 @@ function CalcConfig({ node, inputs, set }) {
           Formules façon Excel. Une formule peut réutiliser une colonne calculée plus haut (y compris une colonne « par groupe ») ;
           si le nom existe déjà, la colonne est remplacée.<br />
           <b>Syntaxe</b> : colonne = <code>[Nom]</code> · texte = <code>"texte"</code> · concaténer = <code>&amp;</code><br />
-          <b>Fonctions</b> : IF, AND, OR, NOT, CONCAT, UPPER, LOWER, TRIM, LEFT, RIGHT, MID, LEN,
-          ROUND, ABS, MOD, POWER, MIN, MAX, COALESCE, ISBLANK, YEAR, MONTH, DAY, TODAY, TEXT, VALUE
+          <b>Texte</b> : CONCAT, UPPER, LOWER, TRIM, LEFT, RIGHT, MID, LEN, REPT, FIND, SEARCH,
+          SUBSTITUTE, REPLACE, TEXTBEFORE, TEXTAFTER, REGEXEXTRACT, REGEXREPLACE<br />
+          <b>Nombres</b> : ROUND, ABS, MOD, POWER, MIN, MAX · <b>Date</b> : YEAR, MONTH, DAY, TODAY<br />
+          <b>Logique / autres</b> : IF, AND, OR, NOT, COALESCE, ISBLANK, TEXT, VALUE<br />
+          <b>TEXTBEFORE/TEXTAFTER([texte], "séparateur", n)</b> : <code>n</code> = quelle occurrence du séparateur
+          (1 = la 1ʳᵉ, <code>-1</code> = la dernière). Ex. nom de fichier d'un chemin : <code>TEXTAFTER([chemin], "\", -1)</code>.
         </InfoBubble>
       </div>
       <button className="ghost small" onClick={add}>+ Colonne calculée</button>
