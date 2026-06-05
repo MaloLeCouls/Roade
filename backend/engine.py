@@ -15,6 +15,8 @@ Public API (consumed by main.py and the smoke tests in backend/_test_*.py):
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 import re
 
@@ -34,6 +36,17 @@ OUTPUTS = {
     "dedup": ["kept", "dups", "uniques"],
     "validate": ["valid", "invalid"],
 }
+
+
+def _output_handles(node) -> list[str]:
+    """Output handle ids for a node — dynamic for a validate block in 'route'
+    mode (one handle per user-defined output, plus an optional 'else')."""
+    if node["type"] == "validate" and node["data"].get("mode") == "route":
+        ids = [o["id"] for o in (node["data"].get("outputs") or []) if o.get("id")]
+        if node["data"].get("else_enabled", True):
+            ids.append("else")
+        return ids or ["else"]
+    return OUTPUTS.get(node["type"], ["out"])
 
 _NUMERIC_TYPES = ("TINYINT", "SMALLINT", "INTEGER", "BIGINT", "HUGEINT",
                   "UTINYINT", "USMALLINT", "UINTEGER", "UBIGINT", "UHUGEINT",
@@ -103,6 +116,65 @@ def _source_fingerprint(pid, node) -> str | None:
         return None
     st = p.stat()
     return f"{f}|{d.get('sheet') or ''}|{int(d.get('header_row') or 0)}|{st.st_size}|{st.st_mtime_ns}"
+
+
+# --------------------------------------------------------------------------- #
+# Change tracking — a node's "compute signature"
+# --------------------------------------------------------------------------- #
+_SIG_DROP_KEYS = {"test_samples"}                       # UI-only, dropped at any depth
+_SIG_DROP_TOP = {"label", "description", "locked", "cache"}  # cosmetic / handled apart
+
+
+def _clean_for_sig(obj):
+    if isinstance(obj, dict):
+        return {k: _clean_for_sig(v) for k, v in obj.items() if k not in _SIG_DROP_KEYS}
+    if isinstance(obj, list):
+        return [_clean_for_sig(x) for x in obj]
+    return obj
+
+
+def _node_signature(pid, node, upstream_sigs) -> str:
+    """Merkle-style signature of a node's *computed output*: its type, the config
+    that affects computation, the signatures of its upstream inputs and — for a
+    source — the file fingerprint. Same signature ⇒ same output, so a stored
+    result can be reused safely."""
+    d = {k: v for k, v in (node.get("data") or {}).items() if k not in _SIG_DROP_TOP}
+    payload = json.dumps(_clean_for_sig(d), sort_keys=True, ensure_ascii=False, default=str)
+    h = hashlib.sha256()
+    h.update(node["type"].encode("utf-8"))
+    h.update(b"\x00")
+    h.update(payload.encode("utf-8"))
+    if node["type"] == "source":
+        h.update(b"\x00")
+        h.update((_source_fingerprint(pid, node) or "").encode("utf-8"))
+    for s in sorted(upstream_sigs):
+        h.update(b"\x00")
+        h.update(s.encode("utf-8"))
+    return h.hexdigest()
+
+
+def _signatures_for(pid, wid, nodes, edges, order) -> dict:
+    """Current signature of every node, in topo order. A locked node that still
+    has a materialized result contributes its *stored* (frozen) signature, so
+    downstream blocks stay cached for as long as it stays locked."""
+    sigs = {}
+    for nid in order:
+        node = nodes[nid]
+        ups = []
+        for e in edges:
+            if e.get("target") == nid:
+                src = e.get("source")
+                ups.append(f"{e.get('targetHandle') or 'in'}<-{src}:"
+                           f"{e.get('sourceHandle') or 'out'}#{sigs.get(src, '')}")
+        sig = _node_signature(pid, node, ups)
+        if node["data"].get("locked"):
+            hs = _output_handles(node)
+            h0 = hs[0] if hs else "out"
+            m = storage.read_node_meta(pid, wid, nid, h0) or {}
+            if m.get("node_signature") and storage.node_parquet(pid, wid, nid, h0).exists():
+                sig = m["node_signature"]
+        sigs[nid] = sig
+    return sigs
 
 
 def _read_source(path, sheet, header_row: int) -> pd.DataFrame:
@@ -257,9 +329,17 @@ def _run_sql(con, pid, node, ins):
 def _run_dedup(con, pid, node, ins):
     d = node["data"]
     df = _single(ins)
-    keys = [k for k in (d.get("key_columns") or []) if k in df.columns]
-    if not keys:
-        keys = list(df.columns)
+    # Explicitly-selected key columns must exist in the actual input. Silently
+    # dropping a missing one would make dedup fall back to fewer keys (e.g. the
+    # first column only) and produce wrong-but-plausible groups with no warning.
+    requested = list(d.get("key_columns") or [])
+    missing = [k for k in requested if k not in df.columns]
+    if missing:
+        raise ValueError(
+            "colonnes-clés introuvables dans l'entrée : " + ", ".join(missing)
+            + " — réexécutez le bloc amont, puis re-cochez les colonnes-clés."
+        )
+    keys = requested or list(df.columns)
     keep = d.get("keep", "first")
     if keep not in ("first", "last"):
         keep = "first"
@@ -275,6 +355,12 @@ def _run_dedup(con, pid, node, ins):
         dups = df[df.duplicated(subset=keys, keep=keep)]
     else:
         dups = df[dup_any]
+    # Group identical-key rows together so the duplicate groups are obvious when
+    # the user inspects the "Doublons" output (scattered rows look unrelated).
+    try:
+        dups = dups.sort_values(by=keys, kind="stable")
+    except TypeError:
+        pass                                                 # unorderable mixed types
     return {
         "kept": kept.reset_index(drop=True),
         "dups": dups.reset_index(drop=True),
@@ -285,6 +371,8 @@ def _run_dedup(con, pid, node, ins):
 def _run_validate(con, pid, node, ins):
     d = node["data"]
     df = _single(ins)
+    if d.get("mode") == "route":
+        return _run_route(d, df)
     col = d.get("target_column")
     if not col or col not in df.columns:
         raise ValueError("choisissez la colonne à contrôler")
@@ -303,6 +391,221 @@ def _run_validate(con, pid, node, ins):
         "valid": out[mask].reset_index(drop=True),
         "invalid": out[~mask].reset_index(drop=True),
     }, {}
+
+
+# --------------------------------------------------------------------------- #
+# Routing (neutral multi-output classification, set-algebra conditions)
+# --------------------------------------------------------------------------- #
+def _rule_mask(df: pd.DataFrame, rule: dict, cs: bool, default_col: str) -> pd.Series:
+    """Boolean Series: does each row satisfy this single rule (optionally negated)?"""
+    col = rule.get("column") or default_col
+    if not col or col not in df.columns:
+        return pd.Series(False, index=df.index)
+    m = df[col].map(lambda v: _rule_ok("" if _is_null(v) else str(v), rule, cs))
+    m = m.astype(bool)
+    return ~m if rule.get("negate") else m
+
+
+def _eval_condition(df: pd.DataFrame, condition: dict, cs: bool, default_col: str) -> pd.Series:
+    """Evaluate a DNF condition over a DataFrame -> boolean Series.
+    condition = {groups: [{rules: [...]}, ...]} : OR of groups, each group is the
+    AND of its rules. Set algebra: union of intersections (complement via negate).
+    No groups (or only empty groups) -> matches nothing."""
+    groups = (condition or {}).get("groups") or []
+    result = pd.Series(False, index=df.index)
+    for g in groups:
+        rules = g.get("rules") or []
+        if not rules:
+            continue
+        gm = pd.Series(True, index=df.index)
+        for r in rules:
+            gm &= _rule_mask(df, r, cs, default_col)
+        result |= gm
+    return result
+
+
+def _group_condition_mask(df: pd.DataFrame, cond: dict, cs: bool, default_col: str) -> pd.Series:
+    """Per-row mask for a 'group' condition: group the rows by the key columns,
+    then categorise the group / the checked column inside each group. Returns True
+    for rows that SATISFY the check (a 'NON' on the output isolates the offenders).
+
+    Group-size checks (no column needed):
+        size_eq/size_min/size_max : the group has = / ≥ / ≤ N rows.
+    Column checks (need a column):
+        unique       : the value differs from every other in its group.
+        constant     : the group holds a single distinct value.
+        distinct_eq/min/max : the group has = / ≥ / ≤ N distinct values.
+        contains/not_contains : the group does / doesn't hold a given value."""
+    check = cond.get("check") or "unique"
+    keys = [c for c in (cond.get("group_by") or []) if c in df.columns]
+    false = pd.Series(False, index=df.index)
+
+    def _int(x):
+        try:
+            return int(x)
+        except (TypeError, ValueError):
+            return None
+
+    # --- group-size checks: column-independent --------------------------------
+    if check in ("size_eq", "size_min", "size_max"):
+        k = _int(cond.get("n"))
+        if k is None:
+            return false
+        sizes = (df.groupby(keys, dropna=False)[keys[0]].transform("size")
+                 if keys else pd.Series(len(df), index=df.index))
+        if check == "size_eq":
+            return sizes == k
+        if check == "size_min":
+            return sizes >= k
+        return sizes <= k
+
+    col = cond.get("column") or default_col
+    if not col:
+        raise ValueError(f"Contrôle par groupe « {cond.get('name') or '?'} » : "
+                         "choisissez la colonne à vérifier.")
+    if col not in df.columns:
+        raise ValueError(f"Contrôle par groupe « {cond.get('name') or '?'} » : "
+                         f"colonne « {col} » introuvable dans l'entrée.")
+
+    work = df
+    if not cs:                                    # case-insensitive compare on text
+        work = df.copy()
+        for c in (keys + [col]):
+            if work[c].dtype == object:
+                work[c] = work[c].map(lambda v: v.lower() if isinstance(v, str) else v)
+
+    def _distinct():
+        if keys:
+            return work.groupby(keys, dropna=False)[col].transform(lambda s: s.nunique(dropna=False))
+        return pd.Series(work[col].nunique(dropna=False), index=df.index)
+
+    if check == "unique":
+        return ~work.duplicated(subset=keys + [col], keep=False)
+    if check == "constant":
+        return _distinct() <= 1
+    if check in ("distinct_eq", "distinct_min", "distinct_max"):
+        k = _int(cond.get("n"))
+        if k is None:
+            return false
+        nun = _distinct()
+        if check == "distinct_eq":
+            return nun == k
+        if check == "distinct_min":
+            return nun >= k
+        return nun <= k
+    if check in ("contains", "not_contains"):
+        target = cond.get("value")
+        if target is None:
+            return false
+        if not cs and isinstance(target, str):
+            target = target.lower()
+        if keys:
+            has = work.groupby(keys, dropna=False)[col].transform(lambda s: (s == target).any())
+        else:
+            has = pd.Series(bool((work[col] == target).any()), index=df.index)
+        has = has.astype(bool)
+        return has if check == "contains" else ~has
+    return false
+
+
+def _condition_mask(df: pd.DataFrame, cond: dict, cs: bool, default_col: str) -> pd.Series:
+    """Boolean Series for a *named* condition object. Three flavours:
+    - kind 'rules': a DNF (groups OR'd, rules AND'd) — delegates to _eval_condition.
+    - kind 'mask' : a positional mask regex, full-matched on the column.
+    - kind 'group': a whole-table group check (uniqueness/constancy within a key).
+    A condition may override the column (cond['column']); otherwise default_col."""
+    cond = cond or {}
+    if cond.get("kind") == "group":
+        return _group_condition_mask(df, cond, cs, default_col)
+    col = cond.get("column") or default_col
+    if cond.get("kind") == "mask":
+        if not col or col not in df.columns:
+            return pd.Series(False, index=df.index)
+        pat = _mask_pattern(cond.get("segments") or [], cs)
+        flags = 0 if cs else re.IGNORECASE
+        def _m(v):
+            s = "" if _is_null(v) else str(v)
+            return bool(re.fullmatch(pat, s, flags)) if pat else (s == "")
+        return df[col].map(_m).astype(bool)
+    return _eval_condition(df, {"groups": cond.get("groups") or []}, cs, col)
+
+
+def _output_mask(df: pd.DataFrame, o: dict, conds: dict, cs: bool, default_col: str) -> pd.Series:
+    """Row mask for one output. New shape: o['match'] = {conditionId, negate} points
+    at a named condition. Legacy shape (kept working): an inline o['condition'] DNF."""
+    match = o.get("match")
+    if match and match.get("conditionId") in conds:
+        m = _condition_mask(df, conds[match["conditionId"]], cs, default_col)
+        return ~m if match.get("negate") else m
+    if o.get("condition") is not None:        # legacy inline DNF (pre-named-conditions)
+        return _eval_condition(df, o.get("condition"), cs, default_col)
+    return pd.Series(False, index=df.index)
+
+
+def _augment_diagnostics(d: dict, df: pd.DataFrame, cs: bool, default_col: str) -> pd.DataFrame:
+    """Conformity preset (intent 'control'): add the optional 'valide'/'motif'
+    columns, computed against the first condition. No-op when neither is requested."""
+    if not (d.get("add_flag") or d.get("add_reason")):
+        return df
+    conds = d.get("conditions") or []
+    if not conds:
+        return df
+    cond = conds[0]
+    if cond.get("kind") == "group":               # group checks route rows, they
+        return df                                 # don't annotate a per-row column
+    col = cond.get("column") or default_col
+    if not col or col not in df.columns:
+        return df
+    out = df.copy()
+    flags, motifs = [], []
+    for v in out[col].tolist():
+        s = "" if _is_null(v) else str(v)
+        ok, motif, _ = _condition_eval_str(s, cond, cs)
+        flags.append(ok)
+        motifs.append(motif)
+    if d.get("add_flag"):
+        out["valide"] = ["oui" if f else "non" for f in flags]
+    if d.get("add_reason"):
+        out["motif"] = ["" if f else m for f, m in zip(flags, motifs)]
+    return out
+
+
+def _run_route(d: dict, df: pd.DataFrame, diagnostics: bool = True):
+    cs = bool(d.get("case_sensitive"))
+    default_col = d.get("target_column")
+    routing = d.get("routing", "first")
+    if diagnostics:
+        df = _augment_diagnostics(d, df, cs, default_col)
+    conds = {c.get("id"): c for c in (d.get("conditions") or []) if c.get("id")}
+    result = {}
+    assigned = pd.Series(False, index=df.index)
+    for o in d.get("outputs") or []:
+        oid = o.get("id")
+        if not oid:
+            continue
+        m = _output_mask(df, o, conds, cs, default_col)
+        if routing == "first":          # partition: each row to the first matching output
+            m = m & ~assigned
+        assigned |= m
+        result[oid] = df[m].reset_index(drop=True)
+    if d.get("else_enabled", True):
+        result["else"] = df[~assigned].reset_index(drop=True)
+    return result, {}
+
+
+def route_preview(pid, wid, node_id, config: dict) -> dict:
+    """Dry-run a routing config against the node's current input (no materialization).
+    Returns per-output counts so the flow map can update live as the user edits."""
+    wf = storage.get_workflow(pid, wid)
+    if not wf:
+        raise ValueError("Workflow introuvable")
+    node = next((n for n in wf.get("nodes", []) if n["id"] == node_id), None)
+    if not node:
+        raise ValueError("Bloc introuvable")
+    ins = _node_inputs(pid, wid, node, wf.get("edges", []))
+    df = _single(ins)
+    outs, _ = _run_route(config or {}, df, diagnostics=False)
+    return {"total": int(len(df)), "counts": {h: int(len(v)) for h, v in outs.items()}}
 
 
 def _run_pivot(con, pid, node, ins):
@@ -428,13 +731,104 @@ def _apply_clean(op, s: pd.Series, o: dict):
     return s, 0
 
 
+# Group/window functions: name -> whether it operates on a chosen target column.
+_GROUP_NEEDS_COL = {"count_distinct", "is_duplicate", "sum", "avg", "min", "max",
+                    "median", "share", "first", "last", "prev", "next", "concat"}
+
+
+def _group_funcs_sql(group, df_cols) -> list[tuple[str, str]]:
+    """Compile the Calcul block's "par groupe" functions into (name, sql_expr)
+    pairs, one per added column. These are DuckDB window functions partitioned by
+    the group key. Aggregates (count/sum/…) use a partition-only frame so they
+    return the *whole group* value on every row (not a running total); ranking
+    and offset functions (occurrence/first/last/prev/next) honour the order."""
+    group = group or {}
+    funcs = group.get("functions") or []
+    if not funcs:
+        return []
+    part = [c for c in (group.get("partition_by") or []) if c in df_cols]
+    order = []
+    for o in (group.get("order_by") or []):
+        c = o.get("column") if isinstance(o, dict) else o
+        if c and c in df_cols:
+            order.append((c, bool(isinstance(o, dict) and o.get("desc"))))
+    P = "PARTITION BY " + ", ".join(q_ident(c) for c in part) if part else ""
+    O = "ORDER BY " + ", ".join(q_ident(c) + (" DESC" if dsc else "")
+                                for c, dsc in order) if order else ""
+
+    def over(*clauses):
+        return "OVER (" + " ".join(c for c in clauses if c) + ")"
+
+    out: list[tuple[str, str]] = []
+    for f in funcs:
+        if f.get("enabled") is False:
+            continue
+        name = (f.get("name") or "").strip()
+        fn = f.get("fn")
+        col = f.get("column")
+        if not name or not fn:
+            continue
+        if fn in _GROUP_NEEDS_COL and (not col or col not in df_cols):
+            continue
+        Y = q_ident(col) if col else None
+        if fn == "occurrence":
+            expr = f"ROW_NUMBER() {over(P, O)}"
+        elif fn == "group_size":
+            expr = f"COUNT(*) {over(P)}"
+        elif fn == "count_distinct":
+            expr = f"COUNT(DISTINCT {Y}) {over(P)}"
+        elif fn == "is_duplicate":
+            pxy = "PARTITION BY " + ", ".join(q_ident(c) for c in (part + [col]))
+            expr = f"CASE WHEN COUNT(*) {over(pxy)} > 1 THEN 'oui' ELSE 'non' END"
+        elif fn in ("sum", "avg", "min", "max", "median"):
+            agg = {"sum": "SUM", "avg": "AVG", "min": "MIN",
+                   "max": "MAX", "median": "MEDIAN"}[fn]
+            expr = f"{agg}({Y}) {over(P)}"
+        elif fn == "share":
+            expr = f"({Y} / NULLIF(SUM({Y}) {over(P)}, 0))"
+        elif fn == "first":
+            expr = f"first_value({Y}) {over(P, O)}"
+        elif fn == "last":
+            frame = "ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING"
+            expr = f"last_value({Y}) {over(P, O, frame)}"
+        elif fn == "prev":
+            expr = f"lag({Y}) {over(P, O)}"
+        elif fn == "next":
+            expr = f"lead({Y}) {over(P, O)}"
+        elif fn == "concat":
+            expr = f"string_agg(CAST({Y} AS VARCHAR), ', ') {over(P)}"
+        else:
+            continue
+        out.append((name, expr))
+    return out
+
+
 def _run_calc(con, pid, node, ins):
     d = node["data"]
     df = _single(ins)
     con.register("_calc_in", df)
-    known = {str(c) for c in df.columns}
-    sql = "SELECT * FROM _calc_in"
+    original = {str(c) for c in df.columns}
+    known = set(original)
     try:
+        # 1) group/window columns first, so formulas below can reference them.
+        group_exprs = _group_funcs_sql(d.get("group"), original)
+        if group_exprs:
+            adds, replaces = [], []
+            for name, expr in group_exprs:
+                if name in original:
+                    replaces.append(f"({expr}) AS {q_ident(name)}")
+                else:
+                    adds.append(f"({expr}) AS {q_ident(name)}")
+                    known.add(name)
+            sel = "SELECT *"
+            if replaces:
+                sel += " REPLACE (" + ", ".join(replaces) + ")"
+            if adds:
+                sel += ", " + ", ".join(adds)
+            sql = sel + " FROM _calc_in"
+        else:
+            sql = "SELECT * FROM _calc_in"
+        # 2) Excel-like formula columns (layered on top of the group columns).
         for item in d.get("columns") or []:
             if item.get("enabled") is False:
                 continue
@@ -480,19 +874,73 @@ def _run_union(con, pid, node, ins):
     return {"out": out}, {}
 
 
-def _run_export(con, pid, node, ins):
+def _sanitize_filename(name: str, default: str) -> str:
+    return re.sub(r"[\\/:*?\"<>|]", "_", str(name or "").strip()) or default
+
+
+def _sanitize_sheet_name(name: str) -> str:
+    """Excel sheet-name rules: max 31 chars, none of []:*?/\\, never blank."""
+    s = re.sub(r"[\\/:*?\[\]]", "_", str(name or "")).strip()
+    return s[:31] or "Feuille"
+
+
+def _run_export(con, pid, node, ins, export_sink=None, workflow_name=None, force_enabled=False):
     d = node["data"]
+    if d.get("enabled") is False and not force_enabled:   # disabled export: don't touch the file
+        return {}, {"skipped": True, "row_count": 0}
     df = _single(ins)
-    fn = (d.get("filename") or "resultat").strip() or "resultat"
+    n = int(len(df))
+    if n == 0:                                    # empty result: write nothing at all
+        return {}, {"skipped_empty": True, "row_count": 0}
+    fn = _sanitize_filename(d.get("filename"), "resultat")
+
+    # multi-sheet mode: contribute one sheet to a single workbook named after the
+    # workflow. The actual write is deferred to the end of the run so every sheet
+    # lands in the same file (see _write_workbook in iter_run_workflow).
+    if d.get("to_workbook") and export_sink is not None:
+        wb = _sanitize_filename(workflow_name, "Workflow")
+        wb_path = storage.files_dir(pid) / f"{wb}.xlsx"
+        sheet = _sanitize_sheet_name(fn)
+        export_sink.setdefault(str(wb_path), []).append((sheet, df))
+        return {}, {"exported": f"{wb}.xlsx", "sheet": sheet, "row_count": n, "deferred": True}
+
     fmt = (d.get("format") or "xlsx").lower()
-    fn = re.sub(r"[\\/:*?\"<>|]", "_", fn)
     if fmt == "csv":
         out_path = storage.files_dir(pid) / f"{fn}.csv"
         df.to_csv(out_path, index=False)
     else:
         out_path = storage.files_dir(pid) / f"{fn}.xlsx"
         df.to_excel(out_path, index=False)
-    return {}, {"exported": out_path.name, "row_count": int(len(df))}
+    return {}, {"exported": out_path.name, "row_count": n}
+
+
+def _write_workbook(path, sheets, fresh=True):
+    """Write the gathered (sheet_name, DataFrame) pairs into one .xlsx workbook.
+    A full run (fresh) rewrites the file from scratch; a partial run appends/
+    replaces only its own sheets, leaving the others intact. Duplicate sheet
+    names are disambiguated (Excel forbids them)."""
+    import pathlib
+    sheets = [(s, df) for s, df in sheets if df is not None and len(df)]
+    if not sheets:                                # nothing to write -> no empty file
+        return
+    seen, final = set(), []
+    for name, df in sheets:
+        base = name or "Feuille"
+        nm, k = base, 2
+        while nm.lower() in seen:
+            sfx = f"_{k}"
+            nm = base[:31 - len(sfx)] + sfx
+            k += 1
+        seen.add(nm.lower())
+        final.append((nm, df))
+    p = pathlib.Path(path)
+    if fresh or not p.exists():
+        writer = pd.ExcelWriter(p, engine="openpyxl", mode="w")
+    else:
+        writer = pd.ExcelWriter(p, engine="openpyxl", mode="a", if_sheet_exists="replace")
+    with writer:
+        for nm, df in final:
+            df.to_excel(writer, sheet_name=nm, index=False)
 
 
 _RUNNERS = {
@@ -687,12 +1135,51 @@ def _validate_one(value, cfg: dict) -> tuple[bool, str]:
     return ok, ("" if ok else _rule_label(fails[0]))
 
 
+def _condition_eval_str(s: str, cond: dict, cs: bool) -> tuple[bool, str, list]:
+    """Evaluate a named condition against a single string sample, returning
+    (valid, motif, per-step statuses) for the live tester."""
+    cond = cond or {}
+    if cond.get("kind") == "mask":
+        pat = _mask_pattern(cond.get("segments") or [], cs)
+        flags = 0 if cs else re.IGNORECASE
+        ok = bool(re.fullmatch(pat, s, flags)) if pat else (s == "")
+        steps = _mask_steps(s, cond.get("segments") or [], cs)
+        return ok, ("" if ok else "ne correspond pas au format attendu"), steps
+    groups = cond.get("groups") or []
+    if not groups:
+        return True, "", []
+    steps, group_ok, first_fail = [], [], None
+    for g in groups:
+        rules = g.get("rules") or []
+        oks = []
+        for r in rules:
+            rok = _rule_ok(s, r, cs)
+            if r.get("negate"):
+                rok = not rok
+            oks.append(rok)
+            label = ("NON " if r.get("negate") else "") + _rule_label(r)
+            steps.append({"label": label, "status": "ok" if rok else "fail"})
+            if not rok and first_fail is None:
+                first_fail = label
+        group_ok.append(all(oks) if rules else False)
+    ok = any(group_ok)
+    motif = "" if ok else (first_fail or "aucune règle satisfaite")
+    return ok, motif, steps
+
+
 def validate_test(config: dict, samples: list) -> dict:
     cfg = config or {}
     cs = bool(cfg.get("case_sensitive"))
-    is_mask = cfg.get("mode") == "mask"
     try:
         results = []
+        if cfg.get("kind") in ("rules", "mask"):          # new: a single named condition
+            for x in samples or []:
+                s = "" if _is_null(x) else str(x)
+                ok, motif, steps = _condition_eval_str(s, cfg, cs)
+                results.append({"valid": ok, "motif": "OK" if ok else (motif or "non conforme"),
+                                "steps": steps})
+            return {"ok": True, "results": results}
+        is_mask = cfg.get("mode") == "mask"               # legacy: rules/mask conformity block
         for x in samples or []:
             s = "" if _is_null(x) else str(x)
             ok, motif = _validate_one(x, cfg)
@@ -739,59 +1226,72 @@ def _write_output(pid, wid, node, handle, df, extra) -> dict:
     return meta
 
 
-def _execute_node(con, pid, wid, node, edges, bypass_cache=False) -> dict:
+def _reuse_result(pid, wid, node, handles, ntype, locked, signature) -> dict:
+    """Build a 'cached' run result from the stored meta of an existing output."""
+    outputs, columns, extra = {}, [], {}
+    for i, h in enumerate(handles):
+        m = storage.read_node_meta(pid, wid, node["id"], h) or {}
+        outputs[h] = m.get("row_count", 0)
+        if i == 0:
+            columns = m.get("columns", [])
+            for k in ("compiled_sql", "clean_report"):
+                if k in m:
+                    extra[k] = m[k]
+    return {"type": ntype, "locked": locked, "cached": True, "signature": signature,
+            "outputs": outputs, "row_count": outputs.get(handles[0], 0),
+            "columns": columns, **extra}
+
+
+def _execute_node(con, pid, wid, node, edges, bypass_cache=False, bypass_lock=False,
+                  export_sink=None, wf_name=None, signature=None, all_exports=False) -> dict:
     ntype = node["type"]
-    handles = OUTPUTS.get(ntype, ["out"])
-    label = node["data"].get("label", node["id"])
+    handles = _output_handles(node)
+    have_outputs = bool(handles) and all(
+        storage.node_parquet(pid, wid, node["id"], h).exists() for h in handles)
 
-    # source caching: skip re-reading a file that has not changed since last run
-    # (fingerprint = name + sheet + header + size + mtime). Big Excel reads are
-    # slow, so this avoids recomputing the source every time a downstream block runs.
-    if (ntype == "source" and not bypass_cache and node["data"].get("cache", True)
-            and storage.node_parquet(pid, wid, node["id"], "out").exists()):
-        m = storage.read_node_meta(pid, wid, node["id"], "out") or {}
-        fp = _source_fingerprint(pid, node)
-        if fp and m.get("source_fingerprint") == fp:
-            return {"type": ntype, "locked": False, "cached": True,
-                    "outputs": {"out": m.get("row_count", 0)},
-                    "row_count": m.get("row_count", 0), "columns": m.get("columns", [])}
+    # locked: reuse the frozen result without recomputing, whatever changed.
+    # A bulk "force recompute all" busts the incremental cache (bypass_cache) but
+    # still honours locks; only an explicit single-node force overrides a lock.
+    if node["data"].get("locked") and not bypass_lock and have_outputs:
+        return _reuse_result(pid, wid, node, handles, ntype, True, signature)
 
-    # locked: reuse existing parquet without recomputing
-    if (node["data"].get("locked") and not bypass_cache and handles and all(
-            storage.node_parquet(pid, wid, node["id"], h).exists() for h in handles)):
-        outputs, columns, extra = {}, [], {}
-        for i, h in enumerate(handles):
-            m = storage.read_node_meta(pid, wid, node["id"], h) or {}
-            outputs[h] = m.get("row_count", 0)
-            if i == 0:
-                columns = m.get("columns", [])
-                for k in ("compiled_sql", "clean_report"):
-                    if k in m:
-                        extra[k] = m[k]
-        return {"type": ntype, "locked": True, "outputs": outputs,
-                "row_count": outputs.get(handles[0], 0), "columns": columns, **extra}
+    # incremental cache: reuse when the node's signature is unchanged since the
+    # last run (its config and every upstream block are identical). This is what
+    # makes a full run recompute only the new/changed blocks and their dependents.
+    if (signature and not bypass_cache and have_outputs
+            and node["data"].get("cache", True) is not False):
+        m0 = storage.read_node_meta(pid, wid, node["id"], handles[0]) or {}
+        if m0.get("node_signature") == signature:
+            return _reuse_result(pid, wid, node, handles, ntype, False, signature)
 
     ins = _node_inputs(pid, wid, node, edges)
-    runner = _RUNNERS.get(ntype)
-    if runner is None:
-        raise ValueError(f"type de bloc inconnu : {ntype}")
-    out_dfs, extra = runner(con, pid, node, ins)
+    if ntype == "export":
+        out_dfs, extra = _run_export(con, pid, node, ins, export_sink=export_sink,
+                                     workflow_name=wf_name, force_enabled=all_exports)
+    else:
+        runner = _RUNNERS.get(ntype)
+        if runner is None:
+            raise ValueError(f"type de bloc inconnu : {ntype}")
+        out_dfs, extra = runner(con, pid, node, ins)
 
-    if not handles:  # export
-        return {"type": ntype, "locked": False, "outputs": {},
-                "row_count": extra.get("row_count", 0), "columns": [], **extra}
+    if not handles:  # export (always runs; nothing to cache)
+        return {"type": ntype, "locked": False, "cached": False, "signature": signature,
+                "row_count": extra.get("row_count", 0), "outputs": {}, "columns": [], **extra}
 
     outputs, columns = {}, []
     for i, h in enumerate(handles):
         df = out_dfs.get(h)
         if df is None:
             df = pd.DataFrame()
-        meta = _write_output(pid, wid, node, h, df, extra if i == 0 else {})
+        ex = dict(extra) if i == 0 else {}
+        if i == 0 and signature:                  # stamp the signature for next-run reuse
+            ex["node_signature"] = signature
+        meta = _write_output(pid, wid, node, h, df, ex)
         outputs[h] = meta["row_count"]
         if i == 0:
             columns = meta["columns"]
-    result = {"type": ntype, "locked": False, "outputs": outputs,
-              "row_count": outputs.get(handles[0], 0), "columns": columns}
+    result = {"type": ntype, "locked": False, "cached": False, "signature": signature,
+              "outputs": outputs, "row_count": outputs.get(handles[0], 0), "columns": columns}
     for k in ("compiled_sql", "clean_report"):
         if k in extra:
             result[k] = extra[k]
@@ -801,35 +1301,46 @@ def _execute_node(con, pid, wid, node, edges, bypass_cache=False) -> dict:
 # --------------------------------------------------------------------------- #
 # Run
 # --------------------------------------------------------------------------- #
-def iter_run_workflow(pid, wid, only_node=None, force=False):
+def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False):
     wf = storage.get_workflow(pid, wid)
     if not wf:
         yield {"event": "error", "message": "Workflow introuvable"}
         return
     nodes = {n["id"]: n for n in wf.get("nodes", [])}
     edges = wf.get("edges", [])
+    wf_name = wf.get("name") or "Workflow"
     order = _topo_order(nodes, edges)
+    sig_by_node = _signatures_for(pid, wid, nodes, edges, order)
     if only_node and only_node in nodes:
         run_set = _ancestors(only_node, edges) | {only_node}
     else:
         run_set = set(nodes)
-    run_ids = [nid for nid in order if nid in run_set]
+    # frames (visual-only containers; legacy type name "group") never execute
+    run_ids = [nid for nid in order if nid in run_set and nodes[nid]["type"] not in ("frame", "group")]
 
     yield {"event": "start", "total": len(run_ids)}
     con = duckdb.connect()
+    export_sink = {}                              # workbook_path -> [(sheet, df), …]
     try:
         for nid in run_ids:
             node = nodes[nid]
             yield {"event": "node_start", "node_id": nid,
                    "label": node["data"].get("label", nid), "type": node["type"]}
+            single_force = force and only_node is not None and nid == only_node
             try:
                 result = _execute_node(con, pid, wid, node, edges,
-                                       bypass_cache=(force and nid == only_node))
+                                       bypass_cache=(single_force or (force and only_node is None)),
+                                       bypass_lock=single_force, all_exports=all_exports,
+                                       export_sink=export_sink, wf_name=wf_name,
+                                       signature=sig_by_node.get(nid))
             except Exception as e:  # noqa: BLE001 - reported to the client
                 yield {"event": "error", "node_id": nid,
                        "message": f"{node['data'].get('label', nid)} : {e}"}
                 return
             yield {"event": "node_done", "node_id": nid, "result": result}
+        # write the multi-sheet workbooks once every sheet has been gathered
+        for wb_path, sheets in export_sink.items():
+            _write_workbook(wb_path, sheets, fresh=(only_node is None))
         yield {"event": "done"}
     finally:
         con.close()

@@ -152,9 +152,9 @@ def run_workflow(pid: str, wid: str, only_node: str | None = Query(None)):
 
 @app.get("/api/projects/{pid}/workflows/{wid}/run-stream")
 def run_stream(pid: str, wid: str, only_node: str | None = Query(None),
-               force: bool = Query(False)):
+               force: bool = Query(False), all_exports: bool = Query(False)):
     def gen():
-        for ev in engine.iter_run_workflow(pid, wid, only_node, force):
+        for ev in engine.iter_run_workflow(pid, wid, only_node, force, all_exports):
             yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
     return StreamingResponse(
         gen(),
@@ -190,6 +190,14 @@ def preview(pid: str, wid: str, nid: str,
 def profile(pid: str, wid: str, nid: str, column: str, handle: str = "out"):
     try:
         return engine.column_profile(pid, wid, nid, column, handle=handle)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/projects/{pid}/workflows/{wid}/nodes/{nid}/route-preview")
+def route_preview(pid: str, wid: str, nid: str, payload: dict = Body(...)):
+    try:
+        return engine.route_preview(pid, wid, nid, payload)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, str(e))
 
