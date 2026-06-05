@@ -2,21 +2,24 @@ import { Handle, Position } from '@xyflow/react'
 import { useEditor } from '../editorContext'
 import { LockBadge } from './SourceNode'
 import Icon from '../Icon'
-import { buildMaskPattern, ruleSummary } from '../validateHelpers'
-
-const OUTPUTS = [
-  { handle: 'valid', label: 'Conformes', cls: 'kept' },
-  { handle: 'invalid', label: 'Non conformes', cls: 'dups' },
-]
 
 export default function ValidateNode({ id, data, selected }) {
   const { status, onPreview, onRunNode, running } = useEditor()
   const st = status[id] || {}
   const outs = st.outputs || {}
-  const desc = data.mode === 'mask'
-    ? (buildMaskPattern(data.segments || [], data.case_sensitive) || '(masque vide)')
-    : ((data.rules || []).map(ruleSummary).join('  •  ') || '(aucune règle)')
-  const help = `${data.mode === 'mask' ? 'Masque' : 'Règles'} sur « ${data.target_column || '?'} » :\n${desc}`
+
+  const outputs = [
+    ...(data.outputs || []).map((o) => ({ handle: o.id, label: o.label || o.id, color: o.color })),
+    ...(data.else_enabled !== false
+      ? [{ handle: 'else', label: data.else_label || 'Non classé', color: data.else_color || '#9aa3b2' }]
+      : []),
+  ]
+  const list = outputs.length ? outputs
+    : [{ handle: 'valid', label: 'Conformes', color: '#59A14F' }, { handle: 'invalid', label: 'Non conformes', color: '#E15759' }]
+
+  const nConds = (data.conditions || []).length
+  const help = `${nConds} condition(s) → ${(data.outputs || []).length} sortie(s) sur « ${data.target_column || '?'} »`
+
   return (
     <div className={`node node-validate ${selected ? 'sel' : ''}`}>
       <Handle type="target" position={Position.Left} id="in" style={{ top: 34 }} className="anchor anchor-in" />
@@ -27,24 +30,25 @@ export default function ValidateNode({ id, data, selected }) {
       </div>
       <div className="node-body">
         <div className="node-sub">
-          {data.mode === 'mask' ? 'masque' : 'règles'} sur <b>{data.target_column || '?'}</b>
+          aiguillage sur <b>{data.target_column || '?'}</b>
         </div>
         <div className="dedup-outs">
-          {OUTPUTS.map((o) => (
+          {list.map((o) => (
             <div className="dedup-out" key={o.handle}>
-              <span className={`odot ${o.cls}`} />
+              <span className="odot" style={o.color ? { background: o.color } : undefined} />
               <span className="oname">{o.label}</span>
               {st.ran && <span className="ocount">{(outs[o.handle] ?? 0).toLocaleString('fr-FR')}</span>}
               <Handle type="source" position={Position.Right} id={o.handle}
-                className={`anchor anchor-out anchor-${o.cls}`} />
+                className="anchor anchor-out"
+                style={o.color ? { background: o.color, borderColor: o.color } : undefined} />
             </div>
           ))}
         </div>
       </div>
       <div className="node-foot">
-        {running === id ? <span className="badge run">contrôle…</span>
+        {running === id ? <span className="badge run">tri…</span>
           : st.error ? <span className="badge err" title={st.error}>erreur</span>
-          : st.ran ? <span className="badge ok">contrôlé</span>
+          : st.ran ? <span className="badge ok">réparti</span>
           : <span className="badge idle">non exécuté</span>}
         <div className="node-actions">
           <button className="mini" onClick={(e) => { e.stopPropagation(); onRunNode(id) }} title="Exécuter jusqu'ici"><Icon name="play" /></button>

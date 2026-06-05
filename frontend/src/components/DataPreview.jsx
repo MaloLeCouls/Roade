@@ -6,13 +6,13 @@ const PAGE = 200
 
 export default function DataPreview({
   pid, wid, nodeId, label, outputs = [{ handle: 'out', label: '' }],
-  initialTab = 'rows', initialColumn = null, onNav, onClose,
+  initialTab = 'rows', initialColumn = null, initialHandle = null, onNav, onClose,
 }) {
   const [tab, setTab] = useState(initialTab || 'rows')
   const [data, setData] = useState(null)
   const [offset, setOffset] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [handle, setHandle] = useState(outputs[0]?.handle || 'out')
+  const [handle, setHandle] = useState(initialHandle || outputs[0]?.handle || 'out')
   const [sort, setSort] = useState(null)            // { col, dir }
   const [filters, setFilters] = useState({})         // colName -> contains text
   const [filterOpen, setFilterOpen] = useState(false)
@@ -40,6 +40,13 @@ export default function DataPreview({
   // remember where the user was (tab + column) for next time
   useEffect(() => { onNav && onNav({ tab, column: activeColumn }) }, [tab, activeColumn]) // eslint-disable-line
 
+  // Échap ferme l'aperçu
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
   const cycleSort = (col) => {
     setOffset(0)
     setSort((s) => (!s || s.col !== col) ? { col, dir: 'asc' } : s.dir === 'asc' ? { col, dir: 'desc' } : null)
@@ -52,7 +59,7 @@ export default function DataPreview({
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" style={{ zIndex: 60 }} onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h3>Aperçu — {label}</h3>

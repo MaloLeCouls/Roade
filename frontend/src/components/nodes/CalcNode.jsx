@@ -6,6 +6,9 @@ export default function CalcNode({ id, data, selected }) {
   const { status, onPreview, onRunNode, running } = useEditor()
   const st = status[id] || {}
   const cols = (data.columns || []).filter((c) => c.enabled !== false && (c.name || '').trim())
+  const g = data.group || {}
+  const groupKey = g.partition_by || []
+  const groupFns = (g.functions || []).filter((f) => f.enabled !== false && f.fn)
   return (
     <div className={`node node-calc ${selected ? 'sel' : ''}`}>
       <Handle type="target" position={Position.Left} id="in" style={{ top: 34 }} className="anchor anchor-in" />
@@ -14,6 +17,9 @@ export default function CalcNode({ id, data, selected }) {
         <LockBadge locked={data.locked} />
       </div>
       <div className="node-body">
+        {groupFns.length > 0 && (
+          <div className="node-sub">par groupe : <b>{groupKey.length ? groupKey.join(' + ') : '—'}</b> · {groupFns.length} col.</div>
+        )}
         <div className="node-sub">{cols.length} colonne(s) calculée(s)</div>
         {cols.slice(0, 3).map((c, i) => (
           <div className="node-sub mini-op" key={i}>• {c.name}</div>

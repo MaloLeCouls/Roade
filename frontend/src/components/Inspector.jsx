@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react'
 import { api } from '../api'
 import QueryBuilder from './QueryBuilder'
 import Icon from './Icon'
-import { buildMaskPattern, ruleSummary } from './validateHelpers'
+import { ConditionsEditor } from './routing'
 
-export default function Inspector({ pid, node, files, inputs, onChange, onSchema, onDelete }) {
+export default function Inspector({ pid, node, files, inputs, onChange, onSchema, onDelete, wfName }) {
   if (!node) {
     return (
       <div className="inspector empty-inspector">
@@ -48,241 +48,32 @@ export default function Inspector({ pid, node, files, inputs, onChange, onSchema
       {node.type === 'clean' && <CleanConfig node={node} inputs={inputs} set={set} />}
       {node.type === 'calc' && <CalcConfig node={node} inputs={inputs} set={set} />}
       {node.type === 'union' && <UnionConfig node={node} inputs={inputs} set={set} />}
-      {node.type === 'export' && <ExportConfig node={node} set={set} />}
+      {node.type === 'export' && <ExportConfig node={node} set={set} wfName={wfName} />}
     </div>
   )
 }
 
-function typeLabel(t) {
+export function typeLabel(t) {
   return {
     source: 'Bloc Source', sql: 'Bloc SQL', dedup: 'Bloc Doublons', validate: 'Bloc Validation',
     pivot: 'Bloc Pivot', clean: 'Bloc Nettoyage', calc: 'Bloc Calcul', union: 'Bloc Union', export: 'Bloc Export',
+    frame: 'Cadre',
   }[t] || t
 }
 
-const VAL_TESTS = [
-  ['starts_with', 'commence par'], ['ends_with', 'finit par'], ['contains', 'contient'],
-  ['not_contains', 'ne contient pas'], ['equals', 'est égal à'], ['not_equals', 'est différent de'],
-  ['char_class', 'le Nᵉ caractère est (type)'], ['char_equals', 'le Nᵉ caractère est (valeur)'],
-  ['substr_equals', 'les caractères X..N = valeur'], ['substr_class', 'les caractères X..N sont (type)'],
-  ['length_eq', 'longueur ='], ['length_min', 'longueur ≥'], ['length_max', 'longueur ≤'],
-  ['is_in', 'est dans la liste'], ['is_empty', 'est vide'], ['not_empty', 'est non vide'],
-  ['is_numeric', 'est numérique'], ['regex', 'regex (contient)'], ['regex_full', 'regex (complète)'],
-]
-const CHAR_CLASS = [['letter', 'lettre'], ['upper', 'majuscule'], ['lower', 'minuscule'], ['digit', 'chiffre'], ['alnum', 'alphanumérique']]
-const SEG_TYPES = [['literal', 'Texte exact'], ['letter', 'Lettres'], ['upper', 'Majuscules'], ['lower', 'Minuscules'], ['digit', 'Chiffres'], ['alnum', 'Alphanumérique'], ['set', 'Jeu de caractères'], ['any', "N'importe"]]
-const needs = {
-  value: ['starts_with', 'ends_with', 'contains', 'not_contains', 'equals', 'not_equals', 'char_equals', 'substr_equals', 'is_in', 'regex', 'regex_full'],
-  position: ['char_class', 'char_equals'],
-  startlen: ['substr_equals', 'substr_class'],
-  cls: ['char_class', 'substr_class'],
-  number: ['length_eq', 'length_min', 'length_max'],
-}
 function ValidateConfig({ node, inputs, set }) {
-  const d = node.data
-  const mode = d.mode || 'rules'
-  const rules = d.rules || []
-  const segs = d.segments || []
-  const samplesText = d.test_samples || ''
-  const sampleLines = samplesText.split('\n').map((s) => s.trim()).filter(Boolean)
-  const updRule = (i, patch) => set({ rules: rules.map((r, j) => j === i ? { ...r, ...patch } : r) })
-  const updSeg = (i, patch) => set({ segments: segs.map((s, j) => j === i ? { ...s, ...patch } : s) })
-  const moveSeg = (i, dir) => { const j = i + dir; if (j < 0 || j >= segs.length) return; const a = [...segs];[a[i], a[j]] = [a[j], a[i]]; set({ segments: a }) }
-
-  // ---- live tester (debounced, uses the unsaved config) ----
-  const [test, setTest] = useState({ results: [], error: null, loading: false })
-  const cfgKey = JSON.stringify({ mode, t: d.target_column, cs: !!d.case_sensitive, cb: d.combine, rules, segs })
-  useEffect(() => {
-    if (sampleLines.length === 0) { setTest({ results: [], error: null, loading: false }); return }
-    setTest((t) => ({ ...t, loading: true }))
-    const cfg = { mode, target_column: d.target_column, case_sensitive: d.case_sensitive, combine: d.combine, rules, segments: segs }
-    const h = setTimeout(() => {
-      api.validateTest(cfg, sampleLines)
-        .then((r) => setTest({ results: r.ok ? (r.results || []) : [], error: r.ok ? null : r.error, loading: false }))
-        .catch((e) => setTest({ results: [], error: e.message, loading: false }))
-    }, 300)
-    return () => clearTimeout(h)
-  }, [cfgKey, samplesText]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const maskPattern = mode === 'mask' ? buildMaskPattern(segs, d.case_sensitive) : ''
-  const passCount = test.results.filter((r) => r.valid).length
-
+  const cols = inputs[0]?.columns || []
   return (
     <div className="insp-body">
       {inputs.length === 0 && <div className="qb-warn">Connectez une entrée puis exécutez l'amont pour charger les colonnes.</div>}
-
       <div className="ports-head">
-        <span className="ports-title">Validation de nomenclature</span>
+        <span className="ports-title">Conditions</span>
         <InfoBubble>
-          Contrôle qu'une colonne respecte un format. Deux sorties : <b>Conformes</b> et <b>Non conformes</b>.<br />
-          Activez la colonne <b>« motif »</b> pour savoir, sur chaque ligne, quelle règle échoue.
+          Définissez des <b>conditions</b> nommées (en <b>règles</b> ou en <b>masque</b>). À droite, attribuez chaque
+          condition à une <b>sortie</b> — un contrôle « conforme / non conforme » n'est qu'un aiguillage à deux sorties.
         </InfoBubble>
       </div>
-
-      <label className="fld">
-        <span>Colonne à contrôler</span>
-        <ColSelect inputs={inputs} value={d.target_column} onChange={(v) => set({ target_column: v })} allowEmpty />
-      </label>
-
-      <div className="mode-toggle">
-        <button className={mode === 'rules' ? 'on' : ''} onClick={() => set({ mode: 'rules' })}>Règles</button>
-        <button className={mode === 'mask' ? 'on' : ''} onClick={() => set({ mode: 'mask' })}>Masque positionnel</button>
-      </div>
-
-      <label className="qb-check" style={{ marginBottom: 8 }}>
-        <input type="checkbox" checked={!!d.case_sensitive} onChange={(e) => set({ case_sensitive: e.target.checked })} />
-        Sensible à la casse (majuscules / minuscules)
-      </label>
-
-      {mode === 'rules' ? (
-        <>
-          <label className="fld">
-            <span>Une ligne est conforme si…</span>
-            <select value={d.combine || 'all'} onChange={(e) => set({ combine: e.target.value })}>
-              <option value="all">toutes les règles sont respectées (ET)</option>
-              <option value="any">au moins une règle est respectée (OU)</option>
-            </select>
-          </label>
-          <button className="ghost small" onClick={() => set({ rules: [...rules, { test: 'starts_with', value: '' }] })}>+ Règle</button>
-          <div className="clean-ops">
-            {rules.map((r, i) => (
-              <div className="vrule" key={i}>
-                <div className="qb-row">
-                  <span className="vrule-idx">{i + 1}</span>
-                  <select className="qb-select" value={r.test} onChange={(e) => updRule(i, { test: e.target.value })}>
-                    {VAL_TESTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                  </select>
-                  <button className="ghost danger small vrule-del" onClick={() => set({ rules: rules.filter((_, j) => j !== i) })}><Icon name="x" /></button>
-                </div>
-                {(needs.position.includes(r.test) || needs.startlen.includes(r.test) || needs.cls.includes(r.test) || needs.number.includes(r.test) || needs.value.includes(r.test)) && (
-                  <div className="qb-row indent">
-                    {needs.position.includes(r.test) && (
-                      <><span className="qb-lbl">position</span>
-                        <input className="qb-input narrow" type="number" min="1" value={r.position ?? 1} onChange={(e) => updRule(i, { position: Number(e.target.value) })} /></>
-                    )}
-                    {needs.startlen.includes(r.test) && (
-                      <><span className="qb-lbl">de</span>
-                        <input className="qb-input narrow" type="number" min="1" value={r.start ?? 1} onChange={(e) => updRule(i, { start: Number(e.target.value) })} />
-                        <span className="qb-lbl">sur</span>
-                        <input className="qb-input narrow" type="number" min="1" value={r.length ?? 1} onChange={(e) => updRule(i, { length: Number(e.target.value) })} /></>
-                    )}
-                    {needs.cls.includes(r.test) && (
-                      <select className="qb-select" value={r.charclass || 'letter'} onChange={(e) => updRule(i, { charclass: e.target.value })}>
-                        {CHAR_CLASS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                      </select>
-                    )}
-                    {needs.number.includes(r.test) && (
-                      <input className="qb-input narrow" type="number" min="0" value={r.value ?? ''} onChange={(e) => updRule(i, { value: e.target.value })} />
-                    )}
-                    {needs.value.includes(r.test) && (
-                      <input className="qb-input" placeholder={r.test === 'is_in' ? 'F0, F1, FE, FX…' : 'valeur'} value={r.value ?? ''} onChange={(e) => updRule(i, { value: e.target.value })} />
-                    )}
-                  </div>
-                )}
-                <div className="vrule-sum">{ruleSummary(r)}</div>
-              </div>
-            ))}
-            {rules.length === 0 && <div className="qb-hint">Aucune règle — cliquez « + Règle ».</div>}
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="ports-head" style={{ marginTop: 4 }}>
-            <span className="ports-title">Segments, dans l'ordre</span>
-            <InfoBubble>
-              Décrivez la chaîne segment par segment. Ex. « AB1-2024 » :
-              Texte « AB » · Chiffres ×1 · Texte « - » · Chiffres ×4.<br />
-              « Jeu de caractères » = un seul caractère parmi ceux listés (ex. <code>FR</code> → F ou R).
-            </InfoBubble>
-          </div>
-          <button className="ghost small" onClick={() => set({ segments: [...segs, { type: 'letter', length: 1 }] })}>+ Segment</button>
-          <div className="clean-ops">
-            {segs.map((s, i) => (
-              <div className="vrule" key={i}>
-                <div className="qb-row">
-                  <span className="vrule-idx">{i + 1}</span>
-                  <select className="qb-select" value={s.type} onChange={(e) => updSeg(i, { type: e.target.value })}>
-                    {SEG_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                  </select>
-                  <button className="mini" onClick={() => moveSeg(i, -1)} disabled={i === 0}><Icon name="up" /></button>
-                  <button className="mini" onClick={() => moveSeg(i, 1)} disabled={i === segs.length - 1}><Icon name="down" /></button>
-                  <button className="ghost danger small" onClick={() => set({ segments: segs.filter((_, j) => j !== i) })}><Icon name="x" /></button>
-                </div>
-                <div className="qb-row indent">
-                  {(s.type === 'literal' || s.type === 'set') ? (
-                    <><span className="qb-lbl">{s.type === 'set' ? 'caractères' : 'texte'}</span>
-                      <input className="qb-input" value={s.value || ''} onChange={(e) => updSeg(i, { value: e.target.value })} /></>
-                  ) : (
-                    <><span className="qb-lbl">longueur</span>
-                      <input className="qb-input narrow" type="number" min="1" placeholder="exact" value={s.length ?? ''} onChange={(e) => updSeg(i, { length: e.target.value === '' ? '' : Number(e.target.value) })} />
-                      <span className="qb-lbl">ou min</span>
-                      <input className="qb-input narrow" type="number" min="0" value={s.min ?? ''} onChange={(e) => updSeg(i, { min: e.target.value === '' ? '' : Number(e.target.value) })} />
-                      <span className="qb-lbl">max</span>
-                      <input className="qb-input narrow" type="number" min="0" value={s.max ?? ''} onChange={(e) => updSeg(i, { max: e.target.value === '' ? '' : Number(e.target.value) })} /></>
-                  )}
-                </div>
-              </div>
-            ))}
-            {segs.length === 0 && <div className="qb-hint">Aucun segment — cliquez « + Segment ».</div>}
-          </div>
-          {maskPattern && (
-            <div className="vtest-pattern"><span className="qb-lbl">motif généré</span> <code>{maskPattern}</code></div>
-          )}
-        </>
-      )}
-
-      {/* ---------- live tester ---------- */}
-      <div className="vtest">
-        <div className="ports-head">
-          <span className="ports-title">Testeur {test.loading && <span className="vtest-spin">…</span>}</span>
-          <InfoBubble>
-            Collez des exemples (un par ligne) pour voir <b>en direct</b> lesquels passent et,
-            sinon, quelle règle échoue. Ces exemples sont enregistrés avec le bloc.
-          </InfoBubble>
-          {sampleLines.length > 0 && !test.error && (
-            <span className={`vtest-score ${passCount === sampleLines.length ? 'all' : ''}`}>{passCount}/{sampleLines.length}</span>
-          )}
-        </div>
-        <textarea className="vtest-input" rows={4} spellCheck={false}
-          placeholder={'F0-01073-0-01.pdf\nF1-01153-0-Feuille1.pdf\nXX-123'}
-          value={samplesText} onChange={(e) => set({ test_samples: e.target.value })} />
-        {test.error && <div className="qb-warn">{test.error}</div>}
-        {sampleLines.length > 0 && !test.error && (
-          <div className="vtest-results">
-            {sampleLines.map((s, i) => {
-              const r = test.results[i]
-              const ok = r?.valid
-              return (
-                <div className="vtest-item" key={i}>
-                  <div className={`vtest-row ${ok ? 'ok' : 'ko'}`}>
-                    <span className="vtest-mark"><Icon name={ok ? 'check' : 'x'} size={11} /></span>
-                    <span className="vtest-val" title={s}>{s}</span>
-                    {!ok && r?.motif && r.motif !== 'OK' && <span className="vtest-motif" title={r.motif}>{r.motif}</span>}
-                  </div>
-                  {r?.steps?.length > 0 && (
-                    <div className="vtest-steps">
-                      {r.steps.map((st, j) => (
-                        <span key={j} className={`vstep ${st.status}`} title={st.label}>{st.label}</span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
-
-      <div className="fld" style={{ marginTop: 14 }}>
-        <span>Colonnes de diagnostic à ajouter</span>
-        <label className="qb-check"><input type="checkbox" checked={!!d.add_flag} onChange={(e) => set({ add_flag: e.target.checked })} /> « valide » (oui / non)</label>
-        <label className="qb-check"><input type="checkbox" checked={!!d.add_reason} onChange={(e) => set({ add_reason: e.target.checked })} /> « motif » (règle en échec)</label>
-      </div>
-
-      <div className="outs-legend">
-        <div><span className="odot kept" /> <b>Conformes</b> — respectent les règles</div>
-        <div><span className="odot dups" /> <b>Non conformes</b> — à corriger (voir « motif »)</div>
-      </div>
+      <ConditionsEditor node={node} cols={cols} onChange={set} />
     </div>
   )
 }
@@ -301,6 +92,38 @@ const CLEAN_OPS = [
   ['abs', 'Valeur absolue'],
 ]
 const PIVOT_AGG = ['SUM', 'AVG', 'MIN', 'MAX', 'COUNT', 'MEDIAN', 'FIRST', 'LAST']
+
+// Group/window functions for the Calcul block: [value, label, needsColumn, needsOrder]
+const GROUP_FUNCS = [
+  ['occurrence', "N° d'occurrence dans le groupe", false, true],
+  ['group_size', 'Taille du groupe (nb de lignes)', false, false],
+  ['count_distinct', 'Nb de valeurs distinctes de…', true, false],
+  ['is_duplicate', 'En conflit (valeur répétée dans le groupe)', true, false],
+  ['sum', 'Somme de…', true, false],
+  ['avg', 'Moyenne de…', true, false],
+  ['min', 'Minimum de…', true, false],
+  ['max', 'Maximum de…', true, false],
+  ['median', 'Médiane de…', true, false],
+  ['share', 'Part dans le total du groupe (…)', true, false],
+  ['first', 'Première valeur de… (selon le tri)', true, true],
+  ['last', 'Dernière valeur de… (selon le tri)', true, true],
+  ['prev', 'Valeur précédente de… (selon le tri)', true, true],
+  ['next', 'Valeur suivante de… (selon le tri)', true, true],
+  ['concat', 'Lister les valeurs de… (séparées par « , »)', true, false],
+]
+const GROUP_NEEDS_COL = new Set(GROUP_FUNCS.filter((f) => f[2]).map((f) => f[0]))
+const GROUP_NEEDS_ORDER = new Set(GROUP_FUNCS.filter((f) => f[3]).map((f) => f[0]))
+
+function defaultGroupName(fn, col) {
+  const c = col || 'valeur'
+  return {
+    occurrence: 'occurrence', group_size: 'taille_groupe',
+    count_distinct: `nb_${c}_distinct`, is_duplicate: `conflit_${c}`,
+    sum: `somme_${c}`, avg: `moyenne_${c}`, min: `min_${c}`, max: `max_${c}`,
+    median: `mediane_${c}`, share: `part_${c}`, first: `premier_${c}`,
+    last: `dernier_${c}`, prev: `${c}_precedent`, next: `${c}_suivant`, concat: `liste_${c}`,
+  }[fn] || 'groupe'
+}
 
 function ColSelect({ inputs, value, onChange, allowEmpty }) {
   const cols = inputs[0]?.columns || []
@@ -463,6 +286,105 @@ const CALC_EXAMPLES = [
   ['categorie', 'IF([montant] >= 1000, "Grand", IF([montant] >= 100, "Moyen", "Petit"))'],
 ]
 
+function GroupCalcSection({ d, cols, set }) {
+  const g = d.group || {}
+  const part = g.partition_by || []
+  const funcs = g.functions || []
+  const order = g.order_by || []
+  const orderCol = order[0]?.column || ''
+  const orderDesc = !!order[0]?.desc
+  const setG = (patch) => set({ group: { ...g, ...patch } })
+  const togglePart = (c) => setG({ partition_by: part.includes(c) ? part.filter((x) => x !== c) : [...part, c] })
+  const updF = (i, patch) => setG({ functions: funcs.map((o, j) => (j === i ? { ...o, ...patch } : o)) })
+  const delF = (i) => setG({ functions: funcs.filter((_, j) => j !== i) })
+  const addF = () => setG({ functions: [...funcs, { fn: 'group_size', name: 'taille_groupe', enabled: true }] })
+  // changing the function (or its column) refreshes an auto-generated name only
+  // when the user hasn't typed their own.
+  const setFn = (i, fn) => {
+    const cur = funcs[i]
+    const wasAuto = !cur.name || cur.name === defaultGroupName(cur.fn, cur.column)
+    updF(i, { fn, name: wasAuto ? defaultGroupName(fn, cur.column) : cur.name })
+  }
+  const setCol = (i, column) => {
+    const cur = funcs[i]
+    const wasAuto = !cur.name || cur.name === defaultGroupName(cur.fn, cur.column)
+    updF(i, { column, name: wasAuto ? defaultGroupName(cur.fn, column) : cur.name })
+  }
+  const needsOrder = funcs.some((f) => f.enabled !== false && GROUP_NEEDS_ORDER.has(f.fn))
+  const open = part.length > 0 || funcs.length > 0
+
+  return (
+    <details className="group-calc" open={open}>
+      <summary>
+        <span className="ports-title">Par groupe</span>
+        <InfoBubble>
+          Regroupe les lignes qui partagent une <b>clé</b> (1+ colonnes), puis ajoute des colonnes calculées
+          sur chaque groupe : n° d'occurrence, taille, nb de valeurs distinctes, somme/part…<br />
+          <b>« En conflit »</b> marque <b>oui</b> les lignes dont une valeur se répète dans le groupe
+          (ex. même fichier → la config doit être unique).
+        </InfoBubble>
+      </summary>
+
+      <div className="fld">
+        <div className="fld-head"><span>Clé de regroupement</span></div>
+        <div className="checklist">
+          {cols.length === 0 && <div className="qb-hint">— colonnes non chargées —</div>}
+          {cols.map((c) => (
+            <label key={c.name} className="qb-check">
+              <input type="checkbox" checked={part.includes(c.name)} onChange={() => togglePart(c.name)} />
+              {c.name} <span className="coltype-inline">{c.type}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {needsOrder && (
+        <div className="qb-row">
+          <span className="qb-lbl">trier par</span>
+          <select className="qb-select" value={orderCol}
+            onChange={(e) => setG({ order_by: e.target.value ? [{ column: e.target.value, desc: orderDesc }] : [] })}>
+            <option value="">— ordre du fichier —</option>
+            {cols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+          </select>
+          {orderCol && (
+            <label className="qb-check" style={{ marginBottom: 0 }}>
+              <input type="checkbox" checked={orderDesc}
+                onChange={(e) => setG({ order_by: [{ column: orderCol, desc: e.target.checked }] })} />
+              décroissant
+            </label>
+          )}
+        </div>
+      )}
+
+      <button className="ghost small" onClick={addF}>+ Colonne par groupe</button>
+      <div className="clean-ops">
+        {funcs.map((o, i) => (
+          <div className={`clean-op ${o.enabled === false ? 'off' : ''}`} key={i}>
+            <div className="qb-row">
+              <input type="checkbox" checked={o.enabled !== false} onChange={(e) => updF(i, { enabled: e.target.checked })} title="Activer / désactiver" />
+              <select className="qb-select" value={o.fn || 'group_size'} onChange={(e) => setFn(i, e.target.value)}>
+                {GROUP_FUNCS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+              <button className="ghost danger small" onClick={() => delF(i)}><Icon name="x" /></button>
+            </div>
+            <div className="qb-row indent">
+              {GROUP_NEEDS_COL.has(o.fn) && (
+                <select className="qb-select" value={o.column || ''} onChange={(e) => setCol(i, e.target.value)} title="Colonne concernée">
+                  <option value="">— colonne —</option>
+                  {cols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+                </select>
+              )}
+              <span className="qb-lbl">→</span>
+              <input className="qb-input" placeholder="nom de la colonne" value={o.name || ''} onChange={(e) => updF(i, { name: e.target.value })} />
+            </div>
+          </div>
+        ))}
+        {funcs.length === 0 && <div className="qb-hint">Aucune colonne par groupe. Choisissez une clé puis « + Colonne par groupe ».</div>}
+      </div>
+    </details>
+  )
+}
+
 function CalcConfig({ node, inputs, set }) {
   const d = node.data
   const cols = inputs[0]?.columns || []
@@ -482,10 +404,13 @@ function CalcConfig({ node, inputs, set }) {
   return (
     <div className="insp-body">
       {inputs.length === 0 && <div className="qb-warn">Connectez une entrée puis exécutez l'amont pour charger les colonnes.</div>}
+
+      <GroupCalcSection d={d} cols={cols} set={set} />
+
       <div className="ports-head">
         <span className="ports-title">Colonnes calculées</span>
         <InfoBubble>
-          Formules façon Excel. Une formule peut réutiliser une colonne calculée plus haut ;
+          Formules façon Excel. Une formule peut réutiliser une colonne calculée plus haut (y compris une colonne « par groupe ») ;
           si le nom existe déjà, la colonne est remplacée.<br />
           <b>Syntaxe</b> : colonne = <code>[Nom]</code> · texte = <code>"texte"</code> · concaténer = <code>&amp;</code><br />
           <b>Fonctions</b> : IF, AND, OR, NOT, CONCAT, UPPER, LOWER, TRIM, LEFT, RIGHT, MID, LEN,
@@ -731,22 +656,66 @@ function SqlConfig({ node, inputs, set }) {
   )
 }
 
-function ExportConfig({ node, set }) {
+function sanitizeSheet(name) {
+  return (String(name || '').replace(/[\\/:*?[\]]/g, '_').trim().slice(0, 31)) || 'Feuille'
+}
+
+function ExportConfig({ node, set, wfName }) {
   const d = node.data
+  const auto = d.auto_name !== false
+  const toWb = !!d.to_workbook
+  // A standalone file is named (Workflow) - (block); a sheet inside the workbook
+  // only needs the block name (the file already carries the workflow name).
+  const autoName = toWb
+    ? (d.label || 'Export').trim()
+    : `${(wfName || 'Workflow').trim()} - ${(d.label || 'Export').trim()}`
+  // while auto-naming is on, keep the stored filename in sync with the auto name
+  useEffect(() => {
+    if (auto && d.filename !== autoName) set({ filename: autoName })
+  }, [auto, autoName]) // eslint-disable-line react-hooks/exhaustive-deps
+  const shown = auto ? autoName : (d.filename || '')
+  const enabled = d.enabled !== false
+  const wb = `${(wfName || 'Workflow').trim()}.xlsx`
   return (
     <div className="insp-body">
-      <label className="fld">
-        <span>Nom du fichier</span>
-        <input value={d.filename || ''} placeholder="resultat" onChange={(e) => set({ filename: e.target.value })} />
+      <label className="qb-check" style={{ marginBottom: 10 }} title="Désactivé, ce bloc n'écrit ni ne met à jour le fichier lors de l'exécution du workflow.">
+        <input type="checkbox" checked={enabled} onChange={(e) => set({ enabled: e.target.checked })} />
+        <b>Activer cet export</b> — génère le fichier à l'exécution
+      </label>
+
+      <label className="qb-check" style={{ marginBottom: 8 }} title="Tous les exports en mode classeur écrivent dans un seul fichier Excel nommé d'après le workflow ; chacun devient une feuille.">
+        <input type="checkbox" checked={toWb} onChange={(e) => set({ to_workbook: e.target.checked })} />
+        Regrouper dans un <b>classeur multi-feuilles</b> nommé d'après le workflow
+      </label>
+
+      <label className="qb-check" style={{ marginBottom: 8 }}>
+        <input type="checkbox" checked={auto} onChange={(e) => set({ auto_name: e.target.checked })} />
+        Nom automatique : <b>(Workflow) - (Nom du bloc)</b>
       </label>
       <label className="fld">
-        <span>Format</span>
-        <select value={d.format || 'xlsx'} onChange={(e) => set({ format: e.target.value })}>
-          <option value="xlsx">Excel (.xlsx)</option>
-          <option value="csv">CSV (.csv)</option>
-        </select>
+        <span>{toWb ? 'Nom de la feuille' : 'Nom du fichier'}</span>
+        <input value={shown} disabled={auto} placeholder="resultat" onChange={(e) => set({ filename: e.target.value })} />
       </label>
-      <p className="qb-hint">Le fichier sera écrit dans le dossier <b>files/</b> du projet après exécution.</p>
+
+      {!toWb && (
+        <label className="fld">
+          <span>Format</span>
+          <select value={d.format || 'xlsx'} onChange={(e) => set({ format: e.target.value })}>
+            <option value="xlsx">Excel (.xlsx)</option>
+            <option value="csv">CSV (.csv)</option>
+          </select>
+        </label>
+      )}
+
+      {toWb ? (
+        <p className="qb-hint">
+          Feuille <code>{sanitizeSheet(shown)}</code> dans le classeur <b>files/</b><code>{wb}</code>.<br />
+          Les autres exports « classeur » de ce workflow deviennent d'autres feuilles du <b>même</b> fichier.
+        </p>
+      ) : (
+        <p className="qb-hint">Écrit dans <b>files/</b> : <code>{shown || 'resultat'}.{d.format === 'csv' ? 'csv' : 'xlsx'}</code></p>
+      )}
+      <p className="qb-hint">Un export sans données (0 ligne) ne crée aucun fichier.</p>
     </div>
   )
 }

@@ -85,9 +85,13 @@ export const api = {
   validateTest: (config, samples) =>
     sendJSON('/validate/test', 'POST', { config, samples }),
 
+  // ---- routing: live distribution preview (no materialization) ----
+  routePreview: (pid, wid, nodeId, config) =>
+    sendJSON(`/projects/${enc(pid)}/workflows/${enc(wid)}/nodes/${enc(nodeId)}/route-preview`, 'POST', config),
+
   // ---- streaming run (Server-Sent Events) ----
-  runStream: (pid, wid, onlyNode, onEvent, force = false) => {
-    const url = `${BASE}/projects/${enc(pid)}/workflows/${enc(wid)}/run-stream${qs({ only_node: onlyNode, force: force ? 1 : undefined })}`
+  runStream: (pid, wid, onlyNode, onEvent, force = false, allExports = false) => {
+    const url = `${BASE}/projects/${enc(pid)}/workflows/${enc(wid)}/run-stream${qs({ only_node: onlyNode, force: force ? 1 : undefined, all_exports: allExports ? 1 : undefined })}`
     const es = new EventSource(url)
     let finished = false
     const stop = () => { finished = true; es.close() }
