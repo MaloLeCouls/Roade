@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ReactFlow, ReactFlowProvider, Background, Controls, MiniMap,
-  useNodesState, useEdgesState, addEdge,
+  useNodesState, useEdgesState, addEdge, useReactFlow,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
@@ -16,20 +16,51 @@ import CleanNode from './nodes/CleanNode'
 import CalcNode from './nodes/CalcNode'
 import UnionNode from './nodes/UnionNode'
 import ExportNode from './nodes/ExportNode'
-import Inspector from './Inspector'
+import GroupNode from './nodes/GroupNode'
 import DataPreview from './DataPreview'
+import BlockEditor from './BlockEditor'
+import WorkflowFlow from './WorkflowFlow'
+import { normalizeValidateData } from './validateHelpers'
 import ButtonEdge from './ButtonEdge'
 import Icon from './Icon'
 
+// --- change tracking (mirror of backend engine._node_signature) -------------
+// A node's "data signature" excludes cosmetic keys so that only changes which
+// affect the computed result mark it (and its descendants) as stale.
+const SIG_IGNORE_TOP = new Set(['label', 'description', 'locked', 'cache', '__dirty'])
+function cleanForSig(o) {
+  if (Array.isArray(o)) return o.map(cleanForSig)
+  if (o && typeof o === 'object') {
+    const r = {}
+    for (const k of Object.keys(o)) if (k !== 'test_samples') r[k] = cleanForSig(o[k])
+    return r
+  }
+  return o
+}
+function stableStringify(v) {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v) ?? 'null'
+  if (Array.isArray(v)) return '[' + v.map(stableStringify).join(',') + ']'
+  return '{' + Object.keys(v).sort().map((k) => JSON.stringify(k) + ':' + stableStringify(v[k])).join(',') + '}'
+}
+function nodeDataSig(data) {
+  const d = {}
+  for (const k of Object.keys(data || {})) if (!SIG_IGNORE_TOP.has(k)) d[k] = data[k]
+  return stableStringify(cleanForSig(d))
+}
+
 // Render the block's free-text comment (data.description) as a sticky note above
 // the node — lets the user document the workflow at a glance. One wrapper instead
-// of editing all nine node components.
+// of editing all nine node components. Also shows a discreet "modified since last
+// run" dot (data.__dirty, injected by the editor).
 function withComment(Comp) {
   return function Commented(props) {
     const note = props.data?.description
     return (
       <>
         {note ? <div className="node-comment">{note}</div> : null}
+        {props.data?.__dirty ? (
+          <span className="node-dirty" title="Modifié depuis la dernière exécution — sera recalculé" />
+        ) : null}
         <Comp {...props} />
       </>
     )
@@ -39,6 +70,7 @@ const nodeTypes = {
   source: withComment(SourceNode), sql: withComment(SqlNode), dedup: withComment(DedupNode),
   validate: withComment(ValidateNode), pivot: withComment(PivotNode), clean: withComment(CleanNode),
   calc: withComment(CalcNode), union: withComment(UnionNode), export: withComment(ExportNode),
+  frame: GroupNode,
 }
 const edgeTypes = { deletable: ButtonEdge }
 
@@ -46,23 +78,37 @@ const edgeTypes = { deletable: ButtonEdge }
 const TYPE_COLOR = {
   source: '#4E79A7', sql: '#59734F', dedup: '#8d6ea0', validate: '#5b6bb0',
   pivot: '#b1605f', clean: '#4f9a93', calc: '#b05a86', union: '#8a7560', export: '#c08436',
+  frame: '#5b6bb0',
 }
 // multi-output handles carry their own role colours
 const HANDLE_COLOR = {
   kept: '#3f7a4f', dups: '#c0392f', uniques: '#3556a8',
   valid: '#3f7a4f', invalid: '#c0392f',
 }
+// quick palette for colouring a frame (right-click → couleur du cadre)
+const FRAME_COLORS = ['#5b6bb0', '#4E79A7', '#59A14F', '#E1A33A', '#B05A86', '#7d8590']
 
 const DEFAULT_DATA = {
   source: { label: 'Source', file: '', sheet: '', header_row: 0, cache: true },
   sql: { label: 'SQL', mode: 'builder', query: { select: [], where: [], joins: [], group_by: [], order_by: [] } },
   dedup: { label: 'Doublons', key_columns: [], keep: 'first', dups_mode: 'all' },
-  validate: { label: 'Validation', mode: 'rules', target_column: '', combine: 'all', case_sensitive: false, rules: [], segments: [], add_flag: false, add_reason: true },
+  validate: {
+    label: 'Validation', mode: 'route', intent: 'control',
+    target_column: '', case_sensitive: false, routing: 'first',
+    conditions: [{ id: 'c1', name: 'Conforme', kind: 'rules', column: '', groups: [], segments: [], test_samples: '' }],
+    outputs: [
+      { id: 'valid', label: 'Conformes', color: '#59A14F', match: { conditionId: 'c1', negate: false } },
+      { id: 'invalid', label: 'Non conformes', color: '#E15759', match: { conditionId: 'c1', negate: true } },
+    ],
+    else_enabled: false, else_label: 'Non classé', else_color: '#9aa3b2',
+    add_flag: false, add_reason: true, test_samples: '',
+  },
   pivot: { label: 'Pivot', mode: 'pivot', index_columns: [], value_columns: [], pivot_column: '', value_column: '', agg: 'SUM', name_column: 'variable' },
   clean: { label: 'Nettoyage', operations: [] },
   calc: { label: 'Calcul', columns: [] },
   union: { label: 'Union', by_name: true, distinct: false },
-  export: { label: 'Export', filename: 'resultat', format: 'xlsx' },
+  export: { label: 'Export', filename: 'resultat', format: 'xlsx', auto_name: true, enabled: true, to_workbook: false },
+  frame: { label: 'Groupe', w: 460, h: 300, color: '#5b6bb0' },
 }
 
 // Output anchors per node type (the first is the primary, used for the badge).
@@ -74,6 +120,7 @@ const NODE_OUTPUTS = {
   calc: [{ handle: 'out', label: '' }],
   union: [{ handle: 'out', label: '' }],
   export: [],
+  frame: [],
   dedup: [
     { handle: 'kept', label: 'Dédoublonné' },
     { handle: 'dups', label: 'Doublons' },
@@ -83,6 +130,30 @@ const NODE_OUTPUTS = {
     { handle: 'valid', label: 'Conformes' },
     { handle: 'invalid', label: 'Non conformes' },
   ],
+}
+
+// Output handles for a node — dynamic for a validate block in 'route' mode
+// (user-defined outputs + optional 'else'). Mirrors backend _output_handles.
+function nodeOutputs(node) {
+  if (!node) return [{ handle: 'out', label: '' }]
+  if (node.type === 'frame') return []          // frames produce no data
+  if (node.type === 'validate' && node.data?.mode === 'route') {
+    const outs = (node.data.outputs || []).map((o) => ({ handle: o.id, label: o.label || o.id, color: o.color }))
+    if (node.data.else_enabled !== false) {
+      outs.push({ handle: 'else', label: node.data.else_label || 'Non classé', color: node.data.else_color || '#9aa3b2' })
+    }
+    return outs.length ? outs : [{ handle: 'else', label: 'Non classé', color: '#9aa3b2' }]
+  }
+  return NODE_OUTPUTS[node.type] || [{ handle: 'out', label: '' }]
+}
+
+function outputColorOf(node, handle) {
+  if (node?.type === 'validate' && node.data?.mode === 'route') {
+    const o = (node.data.outputs || []).find((x) => x.id === handle)
+    if (o) return o.color
+    if (handle === 'else') return node.data.else_color || '#9aa3b2'
+  }
+  return null
 }
 
 export default function WorkflowEditor(props) {
@@ -101,29 +172,45 @@ function Editor({ pid, wid, onBack }) {
   const [files, setFiles] = useState([])
   const [schemas, setSchemas] = useState({})       // nodeId -> [{name,type}]
   const [status, setStatus] = useState({})         // nodeId -> {ran, rows, error}
+  const [runStamps, setRunStamps] = useState({})   // nodeId -> data-sig at last run (change tracking)
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState({ active: false, total: 0, done: 0, currentId: null, currentLabel: '' })
   const [nodeFrac, setNodeFrac] = useState(0)            // animated sub-progress of the running node
   const [previewNode, setPreviewNode] = useState(null)
+  const [editorNode, setEditorNode] = useState(null)     // nodeId of the full-screen block editor
+  const [flowOpen, setFlowOpen] = useState(false)        // global workflow flow map
+  const [menu, setMenu] = useState(null)                 // right-click context menu {id, x, y}
+  const [runMenu, setRunMenu] = useState(false)          // run-button dropdown (force recompute)
   const [previewPrefs, setPreviewPrefs] = useState({ tab: 'rows', column: null })
   const [banner, setBanner] = useState(null)
   const [saveState, setSaveState] = useState('saved')
   const loaded = useRef(false)
   const saveTimer = useRef(null)
   const anim = useRef({ timer: null, start: 0, est: 0 })   // per-node progress animation
+  const startTimer = useRef(null)                          // deferred "running" indication
+  const canvasRef = useRef(null)
+  const groupDrag = useRef(null)                           // snapshot while dragging a frame
+  const rf = useReactFlow()
 
   // ---- load ----
   useEffect(() => {
     let alive = true
     Promise.all([api.getWorkflow(pid, wid), api.listFiles(pid)]).then(([wf, fl]) => {
       if (!alive) return
+      // upgrade legacy validate blocks to the unified model, and rename the old
+      // reserved 'group' frame type to 'frame' (the reserved name pulled in React
+      // Flow's default node box, producing a duplicate outer rectangle).
+      const nodes0 = (wf.nodes || []).map((nd) => {
+        if (nd.type === 'group') return { ...nd, type: 'frame' }
+        return nd.type === 'validate' ? { ...nd, data: normalizeValidateData(nd.data) } : nd
+      })
       setWfName(wf.name)
-      setNodes(wf.nodes || [])
+      setNodes(nodes0)
       setEdges(wf.edges || [])
       setFiles(fl)
       // hydrate status/schemas from any previously materialized outputs
-      for (const n of wf.nodes || []) {
-        const handles = NODE_OUTPUTS[n.type] || [{ handle: 'out', label: '' }]
+      for (const n of nodes0) {
+        const handles = nodeOutputs(n)
         handles.forEach((o, idx) => {
           api.preview(pid, wid, n.id, { limit: 1, handle: o.handle }).then((p) => {
             if (!alive || !p.available) return
@@ -139,7 +226,12 @@ function Editor({ pid, wid, onBack }) {
                 },
               }
             })
-            if (idx === 0) setSchemas((s) => ({ ...s, [n.id]: p.columns }))
+            if (idx === 0) {
+              setSchemas((s) => ({ ...s, [n.id]: p.columns }))
+              // assume the saved config matches the materialized output, so a
+              // freshly-loaded workflow shows nothing stale until it's edited.
+              setRunStamps((s) => ({ ...s, [n.id]: nodeDataSig(n.data) }))
+            }
           }).catch(() => {})
         })
       }
@@ -189,11 +281,22 @@ function Editor({ pid, wid, onBack }) {
   const addNode = (type) => {
     const id = `${type}-${Math.random().toString(36).slice(2, 8)}`
     const n = nodes.length
-    const node = {
-      id, type,
-      position: { x: 120 + (n % 4) * 80, y: 80 + n * 40 },
-      data: JSON.parse(JSON.stringify(DEFAULT_DATA[type])),
+    // Drop the new block where the user is looking: centre of the visible canvas
+    // (converted to flow coordinates), with a small jitter so repeated adds don't
+    // stack exactly on top of each other. Falls back to a cascade if unavailable.
+    const data = JSON.parse(JSON.stringify(DEFAULT_DATA[type]))
+    // a frame is centred on the viewport using its own size; blocks use a half-node offset
+    const halfW = type === 'frame' ? (data.w || 460) / 2 : 90
+    const halfH = type === 'frame' ? (data.h || 300) / 2 : 40
+    let position = { x: 120 + (n % 4) * 80, y: 80 + n * 40 }
+    const rect = canvasRef.current?.getBoundingClientRect()
+    if (rect && rf?.screenToFlowPosition) {
+      const c = rf.screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
+      const j = type === 'frame' ? 0 : (n % 5) * 26
+      position = { x: c.x - halfW + j, y: c.y - halfH + j }
     }
+    const node = { id, type, position, data }
+    if (type === 'export') node.data.filename = `${(wfName || 'Workflow').trim()} - ${node.data.label}`
     setNodes((nds) => [...nds, node])
     setSelectedId(id)
   }
@@ -211,6 +314,59 @@ function Editor({ pid, wid, onBack }) {
     setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id))
     if (selectedId === id) setSelectedId(null)
   }
+
+  // ---- ComfyUI-style frames: dragging a group carries the blocks inside it ----
+  const nodeBox = (n) => {
+    const w = n.measured?.width ?? n.width ?? 212
+    const h = n.measured?.height ?? n.height ?? 110
+    return { cx: n.position.x + w / 2, cy: n.position.y + h / 2 }
+  }
+  const onNodeDragStart = useCallback((_e, node) => {
+    if (node.type !== 'frame') return
+    const gx = node.position.x, gy = node.position.y
+    const gw = node.data.w || 460, gh = node.data.h || 300
+    const items = nodes
+      .filter((n) => n.id !== node.id && n.type !== 'frame')
+      .filter((n) => { const { cx, cy } = nodeBox(n); return cx >= gx && cx <= gx + gw && cy >= gy && cy <= gy + gh })
+      .map((n) => ({ id: n.id, x: n.position.x, y: n.position.y }))
+    groupDrag.current = { id: node.id, x: gx, y: gy, items }
+  }, [nodes])
+  const onNodeDrag = useCallback((_e, node) => {
+    const s = groupDrag.current
+    if (!s || s.id !== node.id || !s.items.length) return
+    const dx = node.position.x - s.x, dy = node.position.y - s.y
+    setNodes((nds) => nds.map((n) => {
+      const it = s.items.find((i) => i.id === n.id)
+      return it ? { ...n, position: { x: it.x + dx, y: it.y + dy } } : n
+    }))
+  }, [setNodes])
+  const onNodeDragStop = useCallback(() => { groupDrag.current = null }, [])
+
+  // Duplicate a block (its settings, not its links) next to the original.
+  const duplicateNode = (id) => {
+    const src = nodes.find((n) => n.id === id)
+    if (!src) return
+    const newId = `${src.type}-${Math.random().toString(36).slice(2, 8)}`
+    const data = JSON.parse(JSON.stringify(src.data))
+    data.label = `${data.label || src.type} (copie)`
+    if (src.type === 'export' && data.auto_name !== false) data.filename = `${(wfName || 'Workflow').trim()} - ${data.label}`
+    setNodes((nds) => [...nds, {
+      ...src, id: newId, selected: false,
+      position: { x: (src.position?.x || 0) + 40, y: (src.position?.y || 0) + 40 },
+      data,
+    }])
+    setSelectedId(newId)
+  }
+
+  // close the context menu / run dropdown on any left click or Escape
+  useEffect(() => {
+    if (!menu && !runMenu) return
+    const close = () => { setMenu(null); setRunMenu(false) }
+    const onKey = (e) => { if (e.key === 'Escape') close() }
+    window.addEventListener('click', close)
+    window.addEventListener('keydown', onKey)
+    return () => { window.removeEventListener('click', close); window.removeEventListener('keydown', onKey) }
+  }, [menu, runMenu])
 
   const onSchema = useCallback((id, cols) => {
     setSchemas((s) => ({ ...s, [id]: cols }))
@@ -230,6 +386,7 @@ function Editor({ pid, wid, onBack }) {
         ran: true, rows: r.row_count ?? r.rows ?? 0, error: null,
         outputs: r.outputs || {}, cleanReport: r.clean_report,
         locked: r.locked, cached: r.cached,
+        exported: r.exported, sheet: r.sheet, skippedEmpty: r.skipped_empty,
       },
     }))
     if (r.columns) setSchemas((prev) => ({ ...prev, [nid]: r.columns }))
@@ -282,40 +439,57 @@ function Editor({ pid, wid, onBack }) {
   }
 
   // Streaming run: live progress, ComfyUI-style.
-  const doRun = async (onlyNode = null, force = false) => {
+  const doRun = async (onlyNode = null, force = false, allExports = false) => {
     if (busy) return
     setBanner(null)
     setBusy(true)
     setProgress({ active: true, total: 0, done: 0, currentId: null, currentLabel: 'préparation…' })
     await flushSave()
     const cleaned = []
+    let recomputed = 0, reused = 0
+    const clearStartTimer = () => { if (startTimer.current) { clearTimeout(startTimer.current); startTimer.current = null } }
     api.runStream(pid, wid, onlyNode, (ev) => {
       if (ev.event === 'start') {
         setProgress({ active: true, total: ev.total, done: 0, currentId: null, currentLabel: '' })
       } else if (ev.event === 'node_start') {
-        setProgress((p) => ({ ...p, currentId: ev.node_id, currentLabel: ev.label || ev.type }))
-        startNodeAnim(nodes.find((n) => n.id === ev.node_id))
+        // Defer the "exécution…" glow: a cached/instant block finishes before this
+        // fires, so reused blocks no longer flash as if they were recomputed.
+        clearStartTimer()
+        const node = nodes.find((n) => n.id === ev.node_id)
+        startTimer.current = setTimeout(() => {
+          startTimer.current = null
+          setProgress((p) => ({ ...p, currentId: ev.node_id, currentLabel: ev.label || ev.type }))
+          startNodeAnim(node)
+        }, 150)
       } else if (ev.event === 'node_done') {
-        finishNodeAnim(nodes.find((n) => n.id === ev.node_id), ev.result)
+        const dn = nodes.find((n) => n.id === ev.node_id)
+        if (startTimer.current) clearStartTimer()   // finished before the glow showed
+        else finishNodeAnim(dn, ev.result)          // glow was visible — wind it down
         applyOneResult(ev.node_id, ev.result)
+        if (ev.result?.cached) reused++; else recomputed++
+        // this block is now up to date — remember the config it ran with
+        if (dn) setRunStamps((s) => ({ ...s, [ev.node_id]: nodeDataSig(dn.data) }))
         if (Array.isArray(ev.result?.clean_report)) cleaned.push(ev.node_id)
         setProgress((p) => ({ ...p, done: p.done + 1, currentId: null }))
       } else if (ev.event === 'done') {
-        stopAnim(); setNodeFrac(0)
+        clearStartTimer(); stopAnim(); setNodeFrac(0)
         setBusy(false)
         setProgress((p) => ({ ...p, active: false, currentId: null, done: p.total }))
         api.listFiles(pid).then(setFiles)
+        const bits = []
+        if (recomputed) bits.push(`${recomputed} recalculé${recomputed > 1 ? 's' : ''}`)
+        if (reused) bits.push(`${reused} réutilisé${reused > 1 ? 's' : ''} (inchangé)`)
         if (cleaned.length === 1) setPreviewNode({ id: cleaned[0], tab: 'clean' })
-        else if (cleaned.length > 1) setBanner({ type: 'info', text: `${cleaned.length} bloc(s) de nettoyage exécutés — cliquez l'icône « rapport » sur un bloc pour voir son rapport.` })
+        else if (bits.length) setBanner({ type: 'info', text: bits.join(' · ') })
       } else if (ev.event === 'error') {
-        stopAnim(); setNodeFrac(0)
+        clearStartTimer(); stopAnim(); setNodeFrac(0)
         setBusy(false)
         setProgress((p) => ({ ...p, active: false, currentId: null }))
         if (ev.node_id) setStatus((s) => ({ ...s, [ev.node_id]: { ...(s[ev.node_id] || {}), error: ev.message, ran: false } }))
         setBanner({ type: 'error', text: ev.message || "Erreur d'exécution" })
         api.listFiles(pid).then(setFiles)
       }
-    }, force)
+    }, force, allExports)
   }
 
   // ---- inputs for the selected SQL node ----
@@ -341,19 +515,58 @@ function Editor({ pid, wid, onBack }) {
     onPreview: (id, tab) => setPreviewNode({ id, tab }),
     onRunNode: (id, force) => doRun(id, force),
     onDeleteEdge,
-  }), [status, progress.active, progress.currentId, nodes, edges, wfName, onDeleteEdge])
+    onNodeDataChange: updateNodeData,
+  }), [status, progress.active, progress.currentId, nodes, edges, wfName, onDeleteEdge, updateNodeData])
 
-  // highlight the currently-executing node (ComfyUI-style)
+  // Stale blocks: a node is stale if its config changed since its last run, or
+  // if it never ran, or if anything upstream is stale (matches the backend's
+  // incremental recompute). Propagated in topological order over the edges.
+  const dirtyMap = useMemo(() => {
+    const self = {}
+    for (const n of nodes) {
+      if (n.type === 'frame') { self[n.id] = false; continue }   // frames aren't computed
+      const stamp = runStamps[n.id]
+      self[n.id] = stamp === undefined ? true : nodeDataSig(n.data) !== stamp
+    }
+    const indeg = {}, adj = {}, parents = {}
+    nodes.forEach((n) => { indeg[n.id] = 0; adj[n.id] = [] })
+    edges.forEach((e) => {
+      if (adj[e.source] && indeg[e.target] !== undefined) { adj[e.source].push(e.target); indeg[e.target]++ }
+      ;(parents[e.target] = parents[e.target] || []).push(e.source)
+    })
+    const q = nodes.filter((n) => indeg[n.id] === 0).map((n) => n.id)
+    const dirty = {}
+    while (q.length) {
+      const id = q.shift()
+      dirty[id] = self[id] || (parents[id] || []).some((p) => dirty[p])
+      for (const t of adj[id]) if (--indeg[t] === 0) q.push(t)
+    }
+    nodes.forEach((n) => { if (dirty[n.id] === undefined) dirty[n.id] = self[n.id] })
+    return dirty
+  }, [nodes, edges, runStamps])
+
+  // highlight the currently-executing node (ComfyUI-style) + flag stale blocks.
+  // Frames are dragged by their title bar only and rendered behind the blocks.
   const decoratedNodes = useMemo(
-    () => nodes.map((n) => (progress.currentId === n.id ? { ...n, className: 'rf-active' } : n)),
-    [nodes, progress.currentId])
+    () => nodes.map((n) => {
+      if (n.type === 'frame') return { ...n, dragHandle: '.group-titlebar', zIndex: -1 }
+      const active = progress.currentId === n.id
+      const dirty = dirtyMap[n.id]
+      if (!active && !dirty) return n
+      return {
+        ...n,
+        className: active ? 'rf-active' : undefined,
+        data: dirty ? { ...n.data, __dirty: true } : n.data,
+      }
+    }),
+    [nodes, progress.currentId, dirtyMap])
 
   // colour links by the data type leaving the source port; make them deletable
   const decoratedEdges = useMemo(() => {
-    const typeOf = (id) => nodes.find((n) => n.id === id)?.type
     return edges.map((e) => {
-      const t = typeOf(e.source)
-      const color = HANDLE_COLOR[e.sourceHandle] || TYPE_COLOR[t] || '#9aa3b2'
+      const srcNode = nodes.find((n) => n.id === e.source)
+      const color = outputColorOf(srcNode, e.sourceHandle)
+        || HANDLE_COLOR[e.sourceHandle] || TYPE_COLOR[srcNode?.type] || '#9aa3b2'
       return { ...e, type: 'deletable', animated: false, style: { ...e.style, stroke: color } }
     })
   }, [edges, nodes])
@@ -377,14 +590,37 @@ function Editor({ pid, wid, onBack }) {
             <button className="chip calc" onClick={() => addNode('calc')}><span className="swatch" />Calcul</button>
             <button className="chip uni" onClick={() => addNode('union')}><span className="swatch" />Union</button>
             <button className="chip exp" onClick={() => addNode('export')}><span className="swatch" />Export</button>
+            <button className="chip grp" onClick={() => addNode('frame')} title="Cadre : regroupe visuellement des blocs ; le déplacer déplace son contenu"><span className="swatch" />Cadre</button>
           </div>
           <div className="tb-right">
             <span className={`save ${saveState}`}>
               {saveState === 'saving' ? 'enregistrement…' : saveState === 'error' ? 'erreur de sauvegarde' : 'enregistré'}
             </span>
-            <button className="primary" disabled={busy} onClick={() => doRun(null)}>
-              {busy ? 'Exécution…' : 'Exécuter le workflow'}
+            <button className="ghost" onClick={() => setFlowOpen(true)} title="Vue d'ensemble : qui va où, des sources aux exports">
+              <Icon name="flow" /> Carte des flux
             </button>
+            <div className="run-split">
+              <button className="primary" disabled={busy} onClick={() => doRun(null)}>
+                {busy ? 'Exécution…' : 'Exécuter le workflow'}
+              </button>
+              <button className="primary run-caret" disabled={busy} title="Options d'exécution"
+                onClick={(e) => { e.stopPropagation(); setRunMenu((v) => !v) }}>
+                <Icon name="down" size={12} />
+              </button>
+              {runMenu && (
+                <div className="ctx-menu run-menu" onClick={(e) => e.stopPropagation()}>
+                  <button onClick={() => { setRunMenu(false); doRun(null, true) }}>
+                    <Icon name="refresh" size={13} /> Tout recalculer
+                  </button>
+                  <div className="run-menu-hint">Ignore le cache et recalcule chaque bloc. Les blocs verrouillés restent figés.</div>
+                  <div className="run-menu-sep" />
+                  <button onClick={() => { setRunMenu(false); doRun(null, true, true) }}>
+                    <Icon name="download" size={13} /> Super run : tout recalculer et exporter
+                  </button>
+                  <div className="run-menu-hint">Génère tous les fichiers de sortie, y compris les blocs Export désactivés (sans les réactiver).</div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -394,16 +630,20 @@ function Editor({ pid, wid, onBack }) {
             <ProgressBar progress={progress} frac={nodeFrac} />
             {banner && <div className={`banner ${banner.type}`}>{banner.text}<button className="ghost small" onClick={() => setBanner(null)}><Icon name="x" /></button></div>}
           </div>
-          <div className="canvas">
+          <div className="canvas" ref={canvasRef}>
             <ReactFlow
               nodes={decoratedNodes}
               edges={decoratedEdges}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
+              onNodeDragStart={onNodeDragStart}
+              onNodeDrag={onNodeDrag}
+              onNodeDragStop={onNodeDragStop}
               onNodesDelete={(dl) => setEdges((eds) => eds.filter((e) => !dl.some((n) => n.id === e.source || n.id === e.target)))}
-              onNodeClick={(_, n) => setSelectedId(n.id)}
-              onPaneClick={() => setSelectedId(null)}
+              onNodeClick={(_, n) => { setSelectedId(n.id); if (n.type !== 'frame') setEditorNode(n.id) }}
+              onNodeContextMenu={(e, n) => { e.preventDefault(); setSelectedId(n.id); setMenu({ id: n.id, x: e.clientX, y: e.clientY }) }}
+              onPaneClick={() => { setSelectedId(null); setMenu(null) }}
               nodeTypes={nodeTypes}
               edgeTypes={edgeTypes}
               defaultEdgeOptions={{ type: 'deletable' }}
@@ -422,15 +662,6 @@ function Editor({ pid, wid, onBack }) {
             )}
           </div>
 
-          <Inspector
-            pid={pid}
-            node={selectedNode}
-            files={files}
-            inputs={inspectorInputs}
-            onChange={updateNodeData}
-            onSchema={onSchema}
-            onDelete={deleteNode}
-          />
         </div>
 
         {previewNode && (
@@ -438,11 +669,62 @@ function Editor({ pid, wid, onBack }) {
             pid={pid} wid={wid} nodeId={previewId} label={previewLabel}
             initialTab={previewNode.tab || previewPrefs.tab}
             initialColumn={previewPrefs.column}
+            initialHandle={previewNode.handle}
             onNav={(prefs) => setPreviewPrefs(prefs)}
-            outputs={NODE_OUTPUTS[nodes.find((n) => n.id === previewId)?.type] || [{ handle: 'out', label: '' }]}
+            outputs={nodeOutputs(nodes.find((n) => n.id === previewId))}
             onClose={() => setPreviewNode(null)}
           />
         )}
+
+        {editorNode && nodes.find((n) => n.id === editorNode) && (
+          <BlockEditor
+            pid={pid} wid={wid}
+            node={nodes.find((n) => n.id === editorNode)}
+            inputs={inspectorInputs}
+            files={files}
+            status={status[editorNode]}
+            wfName={wfName}
+            onChange={updateNodeData}
+            onSchema={onSchema}
+            onDelete={(id) => { deleteNode(id); setEditorNode(null) }}
+            onRun={(id) => doRun(id)}
+            onPreview={(id, handle) => setPreviewNode({ id, handle })}
+            onClose={() => setEditorNode(null)}
+          />
+        )}
+
+        {flowOpen && (
+          <WorkflowFlow
+            nodes={nodes.filter((n) => n.type !== 'frame')} edges={edges} status={status}
+            onOpenNode={(id) => { setFlowOpen(false); setSelectedId(id); setEditorNode(id) }}
+            onClose={() => setFlowOpen(false)}
+          />
+        )}
+
+        {menu && (() => {
+          const mn = nodes.find((n) => n.id === menu.id)
+          return (
+            <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
+              {mn?.type === 'frame' && (
+                <div className="ctx-color">
+                  <span className="ctx-color-lbl">Couleur du cadre</span>
+                  <div className="ctx-swatches">
+                    {FRAME_COLORS.map((c) => (
+                      <button key={c} className={`ctx-swatch ${(mn.data.color || '#5b6bb0') === c ? 'on' : ''}`}
+                        style={{ background: c }} title={c} onClick={() => updateNodeData(menu.id, { color: c })} />
+                    ))}
+                    <label className="ctx-swatch custom" title="Couleur personnalisée">
+                      <input type="color" value={mn.data.color || '#5b6bb0'}
+                        onChange={(e) => updateNodeData(menu.id, { color: e.target.value })} />
+                    </label>
+                  </div>
+                </div>
+              )}
+              <button onClick={() => { duplicateNode(menu.id); setMenu(null) }}><Icon name="plus" size={13} /> Dupliquer</button>
+              <button className="danger" onClick={() => { deleteNode(menu.id); setMenu(null) }}><Icon name="trash" size={13} /> Supprimer</button>
+            </div>
+          )
+        })()}
       </div>
     </EditorContext.Provider>
   )
