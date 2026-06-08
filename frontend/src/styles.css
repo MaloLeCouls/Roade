@@ -574,7 +574,12 @@ table.dt td.idx, table.dt th.idx { background: #fafbfc; color: var(--muted); tex
   box-shadow: inset 1px 0 0 rgba(255,255,255,.28); }   /* thin divider, no layout shift */
 .run-split .run-caret:hover:not(:disabled) { background: var(--accent-d); }
 .run-menu { position: absolute; top: calc(100% + 6px); right: 0; left: auto; min-width: 272px; }
-.run-menu-hint { padding: 2px 10px 6px; font-size: 11.5px; color: var(--muted, #707a8a); line-height: 1.35; }
+.run-menu-row { display: flex; align-items: center; gap: 2px; }
+.run-menu-row button { flex: 1; }
+.run-menu-row .menu-info { flex: 0 0 auto; padding: 0 8px; }
+/* the run menu hugs the toolbar's right edge, so its tooltips open to the LEFT */
+.menu-info .info-pop { top: 50%; left: auto; right: calc(100% + 8px); width: 230px; transform: translate(3px, -50%); }
+.menu-info:hover .info-pop, .menu-info:focus-visible .info-pop { transform: translate(0, -50%); }
 .run-menu-sep { height: 1px; background: var(--line); margin: 3px 6px; }
 
 /* right-click colour picker for a frame */

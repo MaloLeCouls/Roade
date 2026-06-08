@@ -469,7 +469,6 @@ function Editor({ pid, wid, onBack }) {
     setBusy(true)
     setProgress({ active: true, total: 0, done: 0, currentId: null, currentLabel: 'préparation…' })
     await flushSave()
-    const cleaned = []
     let recomputed = 0, reused = 0
     const clearStartTimer = () => { if (startTimer.current) { clearTimeout(startTimer.current); startTimer.current = null } }
     api.runStream(pid, wid, onlyNode, (ev) => {
@@ -493,7 +492,6 @@ function Editor({ pid, wid, onBack }) {
         if (ev.result?.cached) reused++; else recomputed++
         // this block is now up to date — remember the config it ran with
         if (dn) setRunStamps((s) => ({ ...s, [ev.node_id]: nodeDataSig(dn.data) }))
-        if (Array.isArray(ev.result?.clean_report)) cleaned.push(ev.node_id)
         setProgress((p) => ({ ...p, done: p.done + 1, currentId: null }))
       } else if (ev.event === 'done') {
         clearStartTimer(); stopAnim(); setNodeFrac(0)
@@ -503,8 +501,7 @@ function Editor({ pid, wid, onBack }) {
         const bits = []
         if (recomputed) bits.push(`${recomputed} recalculé${recomputed > 1 ? 's' : ''}`)
         if (reused) bits.push(`${reused} réutilisé${reused > 1 ? 's' : ''} (inchangé)`)
-        if (cleaned.length === 1) setPreviewNode({ id: cleaned[0], tab: 'clean' })
-        else if (bits.length) setBanner({ type: 'info', text: bits.join(' · ') })
+        if (bits.length) setBanner({ type: 'info', text: bits.join(' · ') })
       } else if (ev.event === 'error') {
         clearStartTimer(); stopAnim(); setNodeFrac(0)
         setBusy(false)
@@ -626,7 +623,7 @@ function Editor({ pid, wid, onBack }) {
               <Icon name="flow" /> Carte des flux
             </button>
             <button className="ghost" onClick={documentWorkflow} title="Exporter un Excel expliquant, étape par étape, comment chaque fichier de sortie est produit">
-              <Icon name="download" /> Documenter (Excel)
+              <Icon name="download" /> Documenter
             </button>
             <div className="run-split">
               <button className="primary" disabled={busy} onClick={() => doRun(null)}>
@@ -638,15 +635,19 @@ function Editor({ pid, wid, onBack }) {
               </button>
               {runMenu && (
                 <div className="ctx-menu run-menu" onClick={(e) => e.stopPropagation()}>
-                  <button onClick={() => { setRunMenu(false); doRun(null, true) }}>
-                    <Icon name="refresh" size={13} /> Tout recalculer
-                  </button>
-                  <div className="run-menu-hint">Ignore le cache et recalcule chaque bloc. Les blocs verrouillés restent figés.</div>
+                  <div className="run-menu-row">
+                    <button onClick={() => { setRunMenu(false); doRun(null, true) }}>
+                      <Icon name="refresh" size={13} /> Tout recalculer
+                    </button>
+                    <MenuInfo>Ignore le cache et recalcule chaque bloc. Les blocs verrouillés restent figés.</MenuInfo>
+                  </div>
                   <div className="run-menu-sep" />
-                  <button onClick={() => { setRunMenu(false); doRun(null, true, true) }}>
-                    <Icon name="download" size={13} /> Super run : tout recalculer et exporter
-                  </button>
-                  <div className="run-menu-hint">Génère tous les fichiers de sortie, y compris les blocs Export désactivés (sans les réactiver).</div>
+                  <div className="run-menu-row">
+                    <button onClick={() => { setRunMenu(false); doRun(null, true, true) }}>
+                      <Icon name="download" size={13} /> Super run : tout recalculer et exporter
+                    </button>
+                    <MenuInfo>Génère tous les fichiers de sortie, y compris les blocs Export désactivés (sans les réactiver).</MenuInfo>
+                  </div>
                 </div>
               )}
             </div>
@@ -756,6 +757,17 @@ function Editor({ pid, wid, onBack }) {
         })()}
       </div>
     </EditorContext.Provider>
+  )
+}
+
+// Info bubble for a run-menu item: the explanation hides behind a discreet "i"
+// and opens to the left (the menu hugs the right edge of the toolbar).
+function MenuInfo({ children }) {
+  return (
+    <span className="info-bubble menu-info" tabIndex={0} onClick={(e) => e.stopPropagation()}>
+      <Icon name="info" size={13} />
+      <span className="info-pop" role="tooltip">{children}</span>
+    </span>
   )
 }
 
