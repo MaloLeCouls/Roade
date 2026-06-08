@@ -106,7 +106,7 @@ const DEFAULT_DATA = {
       { id: 'invalid', label: 'Non conformes', color: '#E15759', match: { conditionId: 'c1', negate: true } },
     ],
     else_enabled: false, else_label: 'Non classé', else_color: '#9aa3b2',
-    add_flag: false, add_reason: true, test_samples: '',
+    add_flag: false, test_samples: '',
   },
   pivot: { label: 'Pivot', mode: 'pivot', index_columns: [], value_columns: [], pivot_column: '', value_column: '', agg: 'SUM', name_column: 'variable' },
   clean: { label: 'Nettoyage', operations: [] },
@@ -135,6 +135,11 @@ const BLOCK_PALETTE = [
   ['export', 'Export', 'Écrit un fichier de sortie'],
   ['frame', 'Cadre', 'Regroupe visuellement des blocs'],
 ]
+
+// Blocks that can be dropped *onto a link* (split the link in two): they consume
+// an input and emit an output, so they fit mid-chain. Sources (no input) and the
+// terminal sinks export/report are excluded.
+const INSERTABLE = new Set(['sql', 'dedup', 'validate', 'pivot', 'clean', 'calc', 'filter', 'cols', 'union'])
 
 // Output anchors per node type (the first is the primary, used for the badge).
 const NODE_OUTPUTS = {
@@ -311,11 +316,37 @@ function Editor({ pid, wid, onBack }) {
   // ---- node helpers ----
   const addNode = (type) => {
     const id = `${type}-${Math.random().toString(36).slice(2, 8)}`
-    const n = nodes.length
-    // Drop the new block where the user is looking: centre of the visible canvas
-    // (converted to flow coordinates), with a small jitter so repeated adds don't
-    // stack exactly on top of each other. Falls back to a cascade if unavailable.
     const data = JSON.parse(JSON.stringify(DEFAULT_DATA[type]))
+    if (type === 'export') data.filename = `${(wfName || 'Workflow').trim()} - ${data.label}`
+
+    // "Insert on a link": if a link is selected and the new block can be chained
+    // (it has an input *and* an output), drop it on the link's midpoint and split
+    // the connection in two — source → new block → target — so both ends wire up
+    // automatically. Sinks (export/report) and source blocks can't sit mid-chain.
+    const sel = edges.find((e) => e.selected)
+    if (sel && INSERTABLE.has(type)) {
+      const src = nodes.find((n) => n.id === sel.source)
+      const tgt = nodes.find((n) => n.id === sel.target)
+      if (src && tgt) {
+        const a = nodeBox(src), b = nodeBox(tgt)
+        const position = { x: (a.cx + b.cx) / 2 - 90, y: (a.cy + b.cy) / 2 - 40 }
+        const outHandle = nodeOutputs({ type, data })[0]?.handle || 'out'
+        const sfx = Math.random().toString(36).slice(2, 6)
+        setNodes((nds) => [...nds, { id, type, position, data }])
+        setEdges((eds) => [
+          ...eds.filter((e) => e.id !== sel.id),
+          { id: `${sel.source}-${id}-${sfx}`, source: sel.source, sourceHandle: sel.sourceHandle, target: id, targetHandle: 'in', animated: true },
+          { id: `${id}-${sel.target}-${sfx}`, source: id, sourceHandle: outHandle, target: sel.target, targetHandle: sel.targetHandle, animated: true },
+        ])
+        setSelectedId(id)
+        return
+      }
+    }
+
+    // Otherwise drop the new block where the user is looking: centre of the visible
+    // canvas (converted to flow coordinates), with a small jitter so repeated adds
+    // don't stack exactly on top of each other. Falls back to a cascade if unavailable.
+    const n = nodes.length
     // a frame is centred on the viewport using its own size; blocks use a half-node offset
     const halfW = type === 'frame' ? (data.w || 460) / 2 : 90
     const halfH = type === 'frame' ? (data.h || 300) / 2 : 40
@@ -326,9 +357,7 @@ function Editor({ pid, wid, onBack }) {
       const j = type === 'frame' ? 0 : (n % 5) * 26
       position = { x: c.x - halfW + j, y: c.y - halfH + j }
     }
-    const node = { id, type, position, data }
-    if (type === 'export') node.data.filename = `${(wfName || 'Workflow').trim()} - ${node.data.label}`
-    setNodes((nds) => [...nds, node])
+    setNodes((nds) => [...nds, { id, type, position, data }])
     setSelectedId(id)
   }
 
@@ -408,6 +437,16 @@ function Editor({ pid, wid, onBack }) {
     clearTimeout(saveTimer.current)
     await api.saveWorkflow(pid, { id: wid, name: wfName, nodes: stripNodes(nodes), edges })
     setSaveState('saved')
+  }
+
+  // Open the project's files folder (where exports land) in the OS file explorer.
+  const openExportsFolder = async () => {
+    setBanner(null)
+    try {
+      await api.openFilesFolder(pid)
+    } catch (e) {
+      setBanner({ type: 'error', text: `Impossible d'ouvrir le dossier : ${e.message || e}` })
+    }
   }
 
   // Download the human-readable Excel documentation. The doc is built from the
@@ -646,6 +685,9 @@ function Editor({ pid, wid, onBack }) {
             <span className={`save ${saveState}`}>
               {saveState === 'saving' ? 'enregistrement…' : saveState === 'error' ? 'erreur de sauvegarde' : 'enregistré'}
             </span>
+            <button className="ghost icon-only" onClick={openExportsFolder} title="Ouvrir le dossier des exports">
+              <Icon name="folder" />
+            </button>
             <button className="ghost" onClick={() => setFlowOpen(true)} title="Vue d'ensemble : qui va où, des sources aux exports">
               <Icon name="flow" /> Carte des flux
             </button>

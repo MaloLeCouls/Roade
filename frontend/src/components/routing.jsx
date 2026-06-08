@@ -398,10 +398,15 @@ export function OutputsPane({ pid, wid, node, onChange, onPreview }) {
   const outputs = d.outputs || []
   const routing = d.routing || 'first'
 
+  // display-only sort of the flow map (does NOT touch the outputs' real order —
+  // in 'first' mode that order drives the partition routing).
+  const [sortDesc, setSortDesc] = useState(false)
+
   const items = [
     ...outputs.map((o) => ({ id: o.id, label: o.label || o.id, color: o.color, count: dist.counts[o.id] ?? 0 })),
     ...(d.else_enabled !== false ? [{ id: 'else', label: d.else_label || 'Non classé', color: d.else_color || '#9aa3b2', count: dist.counts.else ?? 0 }] : []),
   ]
+  const flowItems = sortDesc ? [...items].sort((a, b) => (b.count || 0) - (a.count || 0)) : items
 
   const setOutput = (i, patch) => onChange({ outputs: outputs.map((o, j) => (j === i ? { ...o, ...patch } : o)) })
   const addOutput = () => onChange({
@@ -432,9 +437,13 @@ export function OutputsPane({ pid, wid, node, onChange, onPreview }) {
                 title="Une ligne peut aller dans PLUSIEURS sorties.">Chevauchement</button>
             </div>
           </div>
+          <button className={`flow-sort ${sortDesc ? 'on' : ''}`} onClick={() => setSortDesc((v) => !v)}
+            title={sortDesc ? 'Ordre des sorties' : 'Trier par effectif décroissant'}>
+            <Icon name="sort" size={13} /> {sortDesc ? 'décroissant' : 'trier'}
+          </button>
           <span className="route-total">Entrée : {dist.total.toLocaleString('fr-FR')}</span>
         </div>
-        {dist.error ? <div className="qb-warn">{dist.error}</div> : <FlowMap items={items} total={dist.total} height={230} />}
+        {dist.error ? <div className="qb-warn">{dist.error}</div> : <FlowMap items={flowItems} total={dist.total} height={230} />}
       </div>
 
       <div className="opane-outs">
@@ -500,16 +509,28 @@ function OutputRow({ o, index, last, conditions, count, onChange, onDelete, onMo
 
 // One-stage Sankey: a single input bar on the left fans out into the outputs.
 export function FlowMap({ items, total, height = 380 }) {
-  const W = 760, H = height, barW = 15, gap = 10, padL = 96, padR = 188
-  const S = Math.max(1, items.reduce((a, it) => a + (it.count || 0), 0))
+  const W = 760, barW = 15, gap = 10, padL = 96, padR = 198
   const n = items.length
+  const S = Math.max(1, items.reduce((a, it) => a + (it.count || 0), 0))
+  // Right-side bands get a minimum height so a tiny category (and its two-line
+  // label) stays fully readable instead of collapsing onto its neighbour. The SVG
+  // grows taller if the floors no longer fit, so every output is always visible.
+  const minSlot = 30
+  const H = Math.max(height, n * minSlot + gap * Math.max(0, n - 1))
   const usableH = Math.max(20, H - gap * Math.max(0, n - 1))
+  const floor = Math.min(minSlot, usableH / Math.max(1, n))
+  const extra = Math.max(0, usableH - floor * n)
   const leftX = padL, rightX = W - padR
+  // top/bottom padding so a band's three-line label (which extends below its
+  // centre) is never clipped at the edges of the SVG.
+  const padT = 6, padB = 22
+  // share of the whole input, 2 decimals, French formatting (e.g. "75,55 %")
+  const pct = (c) => (total > 0 ? `${((c || 0) / total * 100).toFixed(2).replace('.', ',')} %` : '')
   let ly = 0, ry = 0
   const ribbons = items.map((it) => {
     const c = it.count || 0
     const lh = (c / S) * H
-    const rh = (c / S) * usableH
+    const rh = floor + (c / S) * extra
     const seg = { it, ly0: ly, ly1: ly + lh, ry0: ry, ry1: ry + rh }
     ly += lh; ry += rh + gap
     return seg
@@ -519,21 +540,25 @@ export function FlowMap({ items, total, height = 380 }) {
     return `M ${x0} ${a0} C ${mx} ${a0}, ${mx} ${a1}, ${x1} ${a1} L ${x1} ${b1} C ${mx} ${b1}, ${mx} ${b0}, ${x0} ${b0} Z`
   }
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="flow-svg" preserveAspectRatio="xMidYMid meet">
-      <rect x={leftX - barW} y={0} width={barW} height={H} rx={2} fill="#9aa3b2" />
-      <text x={leftX - barW - 6} y={14} textAnchor="end" className="flow-in">Entrée</text>
-      <text x={leftX - barW - 6} y={28} textAnchor="end" className="flow-in-n">{total.toLocaleString('fr-FR')}</text>
-      {ribbons.map(({ it, ly0, ly1, ry0, ry1 }) => (
-        <g key={it.id}>
-          <path d={ribbon(leftX, ly0, ly1, rightX, ry0, ry1)} fill={it.color} opacity="0.5" />
-          <rect x={rightX} y={ry0} width={barW} height={Math.max(1, ry1 - ry0)} rx={2} fill={it.color} />
-          <text x={rightX + barW + 7} y={(ry0 + ry1) / 2 - 1} className="flow-lbl">{it.label}</text>
-          <text x={rightX + barW + 7} y={(ry0 + ry1) / 2 + 12} className="flow-cnt">{(it.count || 0).toLocaleString('fr-FR')}</text>
-        </g>
-      ))}
-      {S === 1 && items.every((it) => !it.count) && (
-        <text x={W / 2} y={H / 2} textAnchor="middle" className="flow-empty">— exécute l'amont pour voir la répartition —</text>
-      )}
+    <svg viewBox={`0 0 ${W} ${H + padT + padB}`} className="flow-svg" preserveAspectRatio="xMidYMid meet">
+      <g transform={`translate(0, ${padT})`}>
+        <rect x={leftX - barW} y={0} width={barW} height={H} rx={2} fill="#9aa3b2" />
+        <text x={leftX - barW - 6} y={14} textAnchor="end" className="flow-in">Entrée</text>
+        <text x={leftX - barW - 6} y={28} textAnchor="end" className="flow-in-n">{total.toLocaleString('fr-FR')}</text>
+        {ribbons.map(({ it, ly0, ly1, ry0, ry1 }) => (
+          <g key={it.id}>
+            <path d={ribbon(leftX, ly0, ly1, rightX, ry0, ry1)} fill={it.color} opacity="0.5" />
+            <rect x={rightX} y={ry0} width={barW} height={Math.max(1, ry1 - ry0)} rx={2} fill={it.color} />
+            <text x={rightX + barW + 7} y={(ry0 + ry1) / 2 - 1} className="flow-lbl">
+              {it.label}<tspan className="flow-pct"> · {pct(it.count)}</tspan>
+            </text>
+            <text x={rightX + barW + 7} y={(ry0 + ry1) / 2 + 12} className="flow-cnt">{(it.count || 0).toLocaleString('fr-FR')}</text>
+          </g>
+        ))}
+        {S === 1 && items.every((it) => !it.count) && (
+          <text x={W / 2} y={H / 2} textAnchor="middle" className="flow-empty">— exécute l'amont pour voir la répartition —</text>
+        )}
+      </g>
     </svg>
   )
 }

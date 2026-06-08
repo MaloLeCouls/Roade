@@ -77,7 +77,7 @@ export function normalizeValidateData(data) {
       { id: 'invalid', label: 'Non conformes', color: '#E15759', match: { conditionId: cond.id, negate: true } },
     ],
     else_enabled: false, else_label: d.else_label || 'Non classé', else_color: d.else_color || '#9aa3b2',
-    add_flag: !!d.add_flag, add_reason: d.add_reason !== false,
+    add_flag: !!d.add_flag,
   }
 }
 

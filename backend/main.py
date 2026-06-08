@@ -133,6 +133,20 @@ def open_file(pid: str, name: str):
     return {"ok": True}
 
 
+@app.post("/api/projects/{pid}/files/open-folder")
+def open_files_folder(pid: str):
+    """Reveal the project's files folder (where exports are written) in the OS
+    file explorer. Local use only — the backend runs on the user's machine."""
+    fd = storage.files_dir(pid)
+    if not fd.exists():
+        raise HTTPException(404, "Dossier introuvable")
+    try:
+        _open_in_os(fd)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"Impossible d'ouvrir le dossier : {e}")
+    return {"ok": True}
+
+
 @app.get("/api/projects/{pid}/peek")
 def peek(pid: str, file: str, sheet: str | None = None, header_row: int = 0):
     try:

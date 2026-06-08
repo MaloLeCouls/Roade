@@ -72,6 +72,7 @@ button.ghost:hover { background: #f1f3f7; }
 button.ghost.danger { color: var(--danger); border-color: #e6c3c0; }
 button.ghost.on { background: var(--accent); color: #fff; border-color: var(--accent); }
 button.small { padding: 4px 8px; font-size: 12px; }
+button.ghost.icon-only { padding: 6px; }
 .iconbtn { display: inline-flex; align-items: center; gap: 6px; }
 
 .empty { padding: 36px; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: var(--radius); background: var(--panel); }
@@ -105,7 +106,7 @@ button.small { padding: 4px 8px; font-size: 12px; }
 
 /* ---------- editor ---------- */
 .editor { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.editor-toolbar { display: flex; align-items: center; gap: 12px; padding: 7px 14px; background: var(--panel); border-bottom: 1px solid var(--line); z-index: 4; }
+.editor-toolbar { display: flex; align-items: center; gap: 12px; padding: 7px 14px; background: var(--panel); border-bottom: 1px solid var(--line); position: relative; z-index: 10; }
 .wf-name { font-weight: 600; font-size: 14px; border: 1px solid transparent; min-width: 170px; background: transparent; }
 .wf-name:hover { border-color: var(--line); }
 /* "Ajouter un bloc" — a single dropdown button + palette (was a long chip row) */
@@ -454,11 +455,16 @@ table.dt td.idx, table.dt th.idx { background: #fafbfc; color: var(--muted); tex
 .route-toolbar { display: flex; gap: 14px; align-items: flex-end; }
 .route-flow-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .route-total { margin-left: auto; font-size: 12px; color: var(--muted); font-weight: 600; }
+.flow-sort { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line); background: #fff;
+  border-radius: var(--radius); padding: 4px 9px; font-size: 12px; color: var(--muted); }
+.flow-sort:hover { background: #f1f3f7; color: var(--ink); }
+.flow-sort.on { background: var(--accent); color: #fff; border-color: var(--accent); }
 .flow-svg { width: 100%; height: auto; }
 .flow-in { font-size: 11px; font-weight: 700; fill: var(--ink-soft); }
 .flow-in-n { font-size: 12px; font-weight: 700; fill: var(--ink); }
 .flow-lbl { font-size: 12px; font-weight: 600; fill: var(--ink); }
 .flow-cnt { font-size: 11px; fill: var(--muted); }
+.flow-pct { font-size: 11px; font-weight: 600; fill: var(--ink-soft); }
 .flow-empty { font-size: 12px; fill: var(--muted); }
 
 .ocard { border: 1px solid var(--line); border-left-width: 4px; border-radius: var(--radius); padding: 9px 11px; background: #fff; }

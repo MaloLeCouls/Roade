@@ -377,16 +377,13 @@ def _run_validate(con, pid, node, ins):
     col = d.get("target_column")
     if not col or col not in df.columns:
         raise ValueError("choisissez la colonne à contrôler")
-    flags, motifs = [], []
+    flags = []
     for v in df[col].tolist():
-        ok, motif = _validate_one(v, d)
+        ok, _ = _validate_one(v, d)
         flags.append(ok)
-        motifs.append(motif)
     out = df.copy()
     if d.get("add_flag"):
         out["valide"] = ["oui" if f else "non" for f in flags]
-    if d.get("add_reason"):
-        out["motif"] = ["" if f else m for f, m in zip(flags, motifs)]
     mask = pd.Series(flags, index=out.index)
     return {
         "valid": out[mask].reset_index(drop=True),
@@ -544,9 +541,9 @@ def _output_mask(df: pd.DataFrame, o: dict, conds: dict, cs: bool, default_col: 
 
 
 def _augment_diagnostics(d: dict, df: pd.DataFrame, cs: bool, default_col: str) -> pd.DataFrame:
-    """Conformity preset (intent 'control'): add the optional 'valide'/'motif'
-    columns, computed against the first condition. No-op when neither is requested."""
-    if not (d.get("add_flag") or d.get("add_reason")):
+    """Conformity preset (intent 'control'): add the optional 'valide' column,
+    computed against the first condition. No-op when it isn't requested."""
+    if not d.get("add_flag"):
         return df
     conds = d.get("conditions") or []
     if not conds:
@@ -558,16 +555,12 @@ def _augment_diagnostics(d: dict, df: pd.DataFrame, cs: bool, default_col: str) 
     if not col or col not in df.columns:
         return df
     out = df.copy()
-    flags, motifs = [], []
+    flags = []
     for v in out[col].tolist():
         s = "" if _is_null(v) else str(v)
-        ok, motif, _ = _condition_eval_str(s, cond, cs)
+        ok, _, _ = _condition_eval_str(s, cond, cs)
         flags.append(ok)
-        motifs.append(motif)
-    if d.get("add_flag"):
-        out["valide"] = ["oui" if f else "non" for f in flags]
-    if d.get("add_reason"):
-        out["motif"] = ["" if f else m for f, m in zip(flags, motifs)]
+    out["valide"] = ["oui" if f else "non" for f in flags]
     return out
 
 

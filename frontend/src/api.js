@@ -55,6 +55,8 @@ export const api = {
     req(`/projects/${enc(pid)}/files/${enc(name)}`, { method: 'DELETE' }),
   openFile: (pid, name) =>
     sendJSON(`/projects/${enc(pid)}/files/${enc(name)}/open`, 'POST'),
+  openFilesFolder: (pid) =>
+    sendJSON(`/projects/${enc(pid)}/files/open-folder`, 'POST'),
   downloadUrl: (pid, name) => `${BASE}/projects/${enc(pid)}/files/${enc(name)}`,
   peek: (pid, file, sheet, headerRow) =>
     getJSON(`/projects/${enc(pid)}/peek${qs({ file, sheet, header_row: headerRow })}`),
