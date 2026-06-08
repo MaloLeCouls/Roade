@@ -61,7 +61,7 @@ function BlockView({ pid, wid, node, status, onChange, onRun, onPreview }) {
       <div className="be-view-empty">
         <Icon name="download" size={28} />
         <p>Le bloc Export écrit un fichier dans <b>files/</b>. Exécutez le workflow pour le générer.</p>
-        <button className="primary" onClick={onRun}>Exécuter</button>
+        <button className="primary" onClick={() => onRun()}>Exécuter</button>
       </div>
     )
   }
@@ -108,7 +108,10 @@ function OutputPreview({ pid, wid, node, status, onRun, onPreview, initialHandle
       <div className="route-flow-head">
         <span className="ports-title">Aperçu de la sortie</span>
         <div className="be-view-actions">
-          <button className="ghost small" onClick={onRun} title="Exécuter ce bloc"><Icon name="play" /> Exécuter</button>
+          {/* one "Exécuter" at a time: here once there is data, else the big CTA below */}
+          {data?.available && (
+            <button className="ghost small" onClick={() => onRun()} title="Exécuter ce bloc"><Icon name="play" /> Exécuter</button>
+          )}
           <button className="ghost small" disabled={!data?.available} onClick={() => onPreview(node.id, handle)}><Icon name="eye" /> Plein écran</button>
         </div>
       </div>
@@ -124,7 +127,7 @@ function OutputPreview({ pid, wid, node, status, onRun, onPreview, initialHandle
           <div className="be-view-empty">
             <Icon name="play" size={26} />
             <p>Ce bloc n'a pas encore été exécuté.</p>
-            <button className="primary" onClick={onRun}>Exécuter</button>
+            <button className="primary" onClick={() => onRun()}>Exécuter</button>
           </div>
         ) : (
           <>
