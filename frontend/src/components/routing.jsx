@@ -20,7 +20,7 @@ import {
 export function useRoutePreview(pid, wid, node) {
   const d = node.data
   const [dist, setDist] = useState({ total: 0, counts: {}, error: null, loading: false })
-  const cfgKey = JSON.stringify({ o: d.outputs, cn: d.conditions, r: d.routing, e: d.else_enabled, cs: d.case_sensitive, tc: d.target_column })
+  const cfgKey = JSON.stringify({ o: d.outputs, cn: d.conditions, r: d.routing, e: d.else_enabled, cs: d.case_sensitive, tc: d.target_column, sp: d.split })
   useEffect(() => {
     setDist((s) => ({ ...s, loading: true }))
     const h = setTimeout(() => {
@@ -397,10 +397,32 @@ export function OutputsPane({ pid, wid, node, onChange, onPreview }) {
   const conditions = d.conditions || []
   const outputs = d.outputs || []
   const routing = d.routing || 'first'
+  const split = d.split || {}
+  const isSplit = !!split.enabled
 
   // display-only sort of the flow map (does NOT touch the outputs' real order —
   // in 'first' mode that order drives the partition routing).
   const [sortDesc, setSortDesc] = useState(false)
+
+  // "Split by value": scan the input for distinct extracted values and turn each
+  // into an output. Re-scanning reuses an existing output's id for a value already
+  // present, so downstream wiring survives.
+  const [scan, setScan] = useState({ loading: false, error: null, info: null })
+  const scanSplit = () => {
+    setScan({ loading: true, error: null, info: null })
+    api.splitScan(pid, wid, node.id, d).then((r) => {
+      const byVal = new Map(outputs.filter((o) => 'value' in o).map((o) => [o.value, o]))
+      const next = (r.values || []).map((v, i) => {
+        const ex = byVal.get(v.value)
+        return ex ? { ...ex, value: v.value }
+          : { id: uid(), label: v.value || '(vide)', color: OUTPUT_COLORS[i % OUTPUT_COLORS.length], value: v.value }
+      })
+      // sort outputs alphabetically (natural order: 01, 02, 10) by value
+      next.sort((a, b) => String(a.value || '').localeCompare(String(b.value || ''), 'fr', { numeric: true }))
+      onChange({ outputs: next })
+      setScan({ loading: false, error: null, info: { distinct: r.distinct, truncated: r.truncated, total: r.total, found: next.length, samples: r.samples || [] } })
+    }).catch((e) => setScan({ loading: false, error: e.message, info: null }))
+  }
 
   const items = [
     ...outputs.map((o) => ({ id: o.id, label: o.label || o.id, color: o.color, count: dist.counts[o.id] ?? 0 })),
@@ -429,14 +451,16 @@ export function OutputsPane({ pid, wid, node, onChange, onPreview }) {
         <div className="route-flow-head">
           <span className="ports-title">Carte des flux</span>
           {dist.loading && <span className="vtest-spin">…</span>}
-          <div className="route-mode">
-            <div className="mode-toggle sm">
-              <button className={routing === 'first' ? 'on' : ''} onClick={() => onChange({ routing: 'first' })}
-                title="Chaque ligne va dans la PREMIÈRE sortie dont la condition est vraie (ensembles disjoints).">Partition</button>
-              <button className={routing === 'all' ? 'on' : ''} onClick={() => onChange({ routing: 'all' })}
-                title="Une ligne peut aller dans PLUSIEURS sorties.">Chevauchement</button>
+          {!isSplit && (
+            <div className="route-mode">
+              <div className="mode-toggle sm">
+                <button className={routing === 'first' ? 'on' : ''} onClick={() => onChange({ routing: 'first' })}
+                  title="Chaque ligne va dans la PREMIÈRE sortie dont la condition est vraie (ensembles disjoints).">Partition</button>
+                <button className={routing === 'all' ? 'on' : ''} onClick={() => onChange({ routing: 'all' })}
+                  title="Une ligne peut aller dans PLUSIEURS sorties.">Chevauchement</button>
+              </div>
             </div>
-          </div>
+          )}
           <button className={`flow-sort ${sortDesc ? 'on' : ''}`} onClick={() => setSortDesc((v) => !v)}
             title={sortDesc ? 'Ordre des sorties' : 'Trier par effectif décroissant'}>
             <Icon name="sort" size={13} /> {sortDesc ? 'décroissant' : 'trier'}
@@ -449,15 +473,48 @@ export function OutputsPane({ pid, wid, node, onChange, onPreview }) {
       <div className="opane-outs">
         <div className="ports-head">
           <span className="ports-title">Sorties</span>
-          <span className="qb-hint" style={{ marginLeft: 'auto' }}>chaque sortie reçoit une condition</span>
+          {isSplit ? (
+            <button className="ghost route-add" style={{ marginLeft: 'auto' }} disabled={scan.loading}
+              onClick={scanSplit} title="Analyser la colonne et créer une sortie par valeur distincte">
+              <Icon name="refresh" size={13} /> {scan.loading ? 'Scan…' : 'Scanner les valeurs'}
+            </button>
+          ) : (
+            <span className="qb-hint" style={{ marginLeft: 'auto' }}>chaque sortie reçoit une condition</span>
+          )}
         </div>
+        {isSplit && (scan.error || scan.info) && (
+          scan.error
+            ? <div className="qb-warn">{scan.error}</div>
+            : <>
+                <div className="qb-hint">
+                  {scan.info.found} sortie(s) sur {scan.info.distinct} valeur(s) distincte(s).
+                  {scan.info.truncated && ' Plus de 200 valeurs — affinez l\'extraction.'}
+                </div>
+                {scan.info.samples?.length > 0 && (
+                  <div className="split-preview">
+                    <div className="split-prev-title">Aperçu de l'extraction</div>
+                    {scan.info.samples.map((sp, i) => (
+                      <div className="split-prev-row" key={i}>
+                        <span className="split-prev-raw" title={sp.raw}>{sp.raw}</span>
+                        <span className="split-prev-arrow">→</span>
+                        <code className="split-val">{sp.key === '' ? '(vide)' : sp.key}</code>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+        )}
+        {isSplit && outputs.length === 0 && !scan.loading && (
+          <div className="qb-hint">Définissez l'extraction à gauche, puis cliquez sur <b>Scanner les valeurs</b>.</div>
+        )}
         <div className="opane-outs-list">
           {outputs.map((o, i) => (
             <OutputRow key={o.id} o={o} index={i} last={i === outputs.length - 1} conditions={conditions}
+              splitMode={isSplit}
               count={dist.counts[o.id]} onChange={(patch) => setOutput(i, patch)} onDelete={() => delOutput(i)}
               onMove={(dir) => moveOutput(i, dir)} onPreview={() => onPreview(o.id)} />
           ))}
-          <button className="ghost route-add" onClick={addOutput}><Icon name="plus" /> Ajouter une sortie</button>
+          {!isSplit && <button className="ghost route-add" onClick={addOutput}><Icon name="plus" /> Ajouter une sortie</button>}
           <div className="route-else">
             <label className="qb-check">
               <input type="checkbox" checked={d.else_enabled !== false} onChange={(e) => onChange({ else_enabled: e.target.checked })} />
@@ -479,7 +536,7 @@ export function OutputsPane({ pid, wid, node, onChange, onPreview }) {
   )
 }
 
-function OutputRow({ o, index, last, conditions, count, onChange, onDelete, onMove, onPreview }) {
+function OutputRow({ o, index, last, conditions, count, splitMode, onChange, onDelete, onMove, onPreview }) {
   const match = o.match || { conditionId: '', negate: false }
   const setMatch = (patch) => onChange({ match: { ...match, ...patch } })
   return (
@@ -493,6 +550,13 @@ function OutputRow({ o, index, last, conditions, count, onChange, onDelete, onMo
         <button className="mini" onClick={() => onMove(1)} disabled={last}><Icon name="down" /></button>
         <button className="ghost danger small" onClick={onDelete}><Icon name="x" /></button>
       </div>
+      {splitMode ? (
+        <div className="ocard-attr">
+          <span className="qb-lbl">valeur</span>
+          <code className="split-val">{o.value === '' ? '(vide)' : o.value}</code>
+        </div>
+      ) : (
+      <>
       <div className="ocard-attr">
         <span className="qb-lbl">reçoit</span>
         <button className={`neg ${match.negate ? 'on' : ''}`} onClick={() => setMatch({ negate: !match.negate })}
@@ -503,6 +567,8 @@ function OutputRow({ o, index, last, conditions, count, onChange, onDelete, onMo
         </select>
       </div>
       {!match.conditionId && <div className="qb-hint">Sans condition attribuée, cette sortie reste vide.</div>}
+      </>
+      )}
     </div>
   )
 }

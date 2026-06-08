@@ -516,6 +516,13 @@ table.dt td.idx, table.dt th.idx { background: #fafbfc; color: var(--muted); tex
 .ocard-attr .neg { flex: 0 0 auto; font-size: 10px; font-weight: 800; color: var(--muted); background: #eef1f6; border: 1px solid var(--line); border-radius: var(--radius); padding: 3px 6px; cursor: pointer; }
 .ocard-attr .neg.on { background: var(--danger); color: #fff; border-color: var(--danger); }
 .ocard-attr .qb-select { flex: 1; min-width: 0; }
+.split-val { font-size: 12px; font-weight: 700; color: var(--ink); background: #eef1f6; border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 2px 8px; word-break: break-all; }
+.split-preview { margin: 6px 0 4px; padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+.split-prev-title { font-size: 11px; font-weight: 700; color: var(--muted); margin-bottom: 5px; }
+.split-prev-row { display: flex; align-items: center; gap: 7px; font-size: 11px; margin-top: 3px; }
+.split-prev-raw { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-family: ui-monospace, monospace; }
+.split-prev-arrow { color: var(--muted); flex: 0 0 auto; }
 
 /* "où va la ligne" mini schema (conformity intent) */
 .route-mini { border: 1px solid var(--line); border-radius: var(--radius); background: #fafbfc; padding: 9px 12px; display: flex; flex-direction: column; gap: 6px; }

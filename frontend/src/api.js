@@ -93,6 +93,9 @@ export const api = {
   // ---- routing: live distribution preview (no materialization) ----
   routePreview: (pid, wid, nodeId, config) =>
     sendJSON(`/projects/${enc(pid)}/workflows/${enc(wid)}/nodes/${enc(nodeId)}/route-preview`, 'POST', config),
+  // ---- split by value: discover distinct extracted values ----
+  splitScan: (pid, wid, nodeId, config) =>
+    sendJSON(`/projects/${enc(pid)}/workflows/${enc(wid)}/nodes/${enc(nodeId)}/split-scan`, 'POST', config),
 
   // ---- streaming run (Server-Sent Events) ----
   runStream: (pid, wid, onlyNode, onEvent, force = false, allExports = false) => {

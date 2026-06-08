@@ -3,6 +3,7 @@ import { api } from '../api'
 import QueryBuilder from './QueryBuilder'
 import Icon from './Icon'
 import { ConditionsEditor, RuleRow, MaskBuilder } from './routing'
+import { EXTRACTOR_TYPES, defaultExtractor } from './validateHelpers'
 
 export default function Inspector({ pid, node, files, inputs, onChange, onSchema, onDelete, wfName }) {
   if (!node) {
@@ -68,17 +69,107 @@ export function typeLabel(t) {
 
 function ValidateConfig({ node, inputs, set }) {
   const cols = inputs[0]?.columns || []
+  const d = node.data
+  const split = d.split || {}
+  const isSplit = !!split.enabled
   return (
     <div className="insp-body">
       {inputs.length === 0 && <div className="qb-warn">Connectez une entrée puis exécutez l'amont pour charger les colonnes.</div>}
+      <div className="mode-toggle">
+        <button className={!isSplit ? 'on' : ''}
+          onClick={() => { if (isSplit) set({ split: { ...split, enabled: false }, outputs: [] }) }}>Conditions</button>
+        <button className={isSplit ? 'on' : ''}
+          onClick={() => { if (!isSplit) set({ split: { column: split.column || d.target_column || '', extractor: split.extractor || defaultExtractor(), enabled: true }, outputs: [] }) }}>
+          Éclater par valeur
+        </button>
+      </div>
+
+      {isSplit ? (
+        <SplitConfig node={node} cols={cols} set={set} />
+      ) : (
+        <>
+          <div className="ports-head">
+            <span className="ports-title">Conditions</span>
+            <InfoBubble>
+              Définissez des <b>conditions</b> nommées (en <b>règles</b> ou en <b>masque</b>). À droite, attribuez chaque
+              condition à une <b>sortie</b> — un contrôle « conforme / non conforme » n'est qu'un aiguillage à deux sorties.
+            </InfoBubble>
+          </div>
+          <ConditionsEditor node={node} cols={cols} onChange={set} />
+        </>
+      )}
+    </div>
+  )
+}
+
+// "Split by value" settings: a column + an extraction rule (the "part to watch").
+// The distinct values are turned into outputs by the "Scanner" button (right pane).
+function SplitConfig({ node, cols, set }) {
+  const d = node.data
+  const split = d.split || {}
+  const ex = split.extractor || defaultExtractor()
+  const setEx = (patch) => set({ split: { ...split, extractor: { ...ex, ...patch } } })
+  return (
+    <div>
       <div className="ports-head">
-        <span className="ports-title">Conditions</span>
+        <span className="ports-title">Éclater par valeur</span>
         <InfoBubble>
-          Définissez des <b>conditions</b> nommées (en <b>règles</b> ou en <b>masque</b>). À droite, attribuez chaque
-          condition à une <b>sortie</b> — un contrôle « conforme / non conforme » n'est qu'un aiguillage à deux sorties.
+          Définissez la <b>partie à observer</b> d'une colonne (ex. ce qui suit le dernier « . » = l'extension).
+          Puis, à droite, cliquez sur <b>Scanner</b> : une <b>sortie</b> est créée automatiquement pour chaque
+          valeur distincte trouvée. Les sorties restent figées jusqu'au prochain scan.
         </InfoBubble>
       </div>
-      <ConditionsEditor node={node} cols={cols} onChange={set} />
+      <label className="fld">
+        <span>Colonne à éclater</span>
+        <select value={split.column || ''} onChange={(e) => set({ split: { ...split, column: e.target.value } })}>
+          <option value="">—</option>
+          {cols.length === 0 && <option value="">(exécutez l'amont)</option>}
+          {cols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+        </select>
+      </label>
+      <label className="fld">
+        <span>Méthode d'extraction</span>
+        <select value={ex.type || 'after_last'} onChange={(e) => {
+          const t = e.target.value
+          const sep = { before_first: '_', segment: '\\', after_last: '.' }[t]
+          setEx(sep !== undefined ? { type: t, sep } : { type: t })
+        }}>
+          {EXTRACTOR_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+      </label>
+      {(ex.type === 'after_last' || !ex.type || ex.type === 'before_first' || ex.type === 'segment') && (
+        <label className="fld">
+          <span>Séparateur</span>
+          <input className="qb-input" value={ex.sep ?? (ex.type === 'before_first' ? '_' : ex.type === 'segment' ? '\\' : '.')}
+            onChange={(e) => setEx({ sep: e.target.value })} style={{ width: 80 }} />
+        </label>
+      )}
+      {ex.type === 'segment' && (
+        <label className="fld">
+          <span>Niveau (Nᵉ segment ; négatif = depuis la fin, -1 = dernier)</span>
+          <input className="qb-input" type="number" value={ex.index ?? 2}
+            onChange={(e) => setEx({ index: e.target.value })} style={{ width: 90 }} />
+        </label>
+      )}
+      {ex.type === 'substring' && (
+        <div className="qb-row">
+          <label className="fld"><span>Position (1ᵉʳ caractère)</span>
+            <input className="qb-input" type="number" min="1" value={ex.start ?? 1} onChange={(e) => setEx({ start: e.target.value })} style={{ width: 80 }} /></label>
+          <label className="fld"><span>Longueur (vide = jusqu'à la fin)</span>
+            <input className="qb-input" type="number" min="1" value={ex.length ?? ''} onChange={(e) => setEx({ length: e.target.value })} style={{ width: 110 }} /></label>
+        </div>
+      )}
+      {ex.type === 'regex' && (
+        <label className="fld">
+          <span>Expression régulière (1ᵉʳ groupe capturé = clé)</span>
+          <input className="qb-input" value={ex.pattern || ''} placeholder="ex. \.(\w+)$"
+            onChange={(e) => setEx({ pattern: e.target.value })} />
+        </label>
+      )}
+      <label className="qb-check" style={{ marginTop: 4 }}>
+        <input type="checkbox" checked={!!d.case_sensitive} onChange={(e) => set({ case_sensitive: e.target.checked })} />
+        Sensible à la casse
+      </label>
     </div>
   )
 }

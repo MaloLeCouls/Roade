@@ -277,6 +277,14 @@ def route_preview(pid: str, wid: str, nid: str, payload: dict = Body(...)):
         raise HTTPException(400, str(e))
 
 
+@app.post("/api/projects/{pid}/workflows/{wid}/nodes/{nid}/split-scan")
+def split_scan(pid: str, wid: str, nid: str, payload: dict = Body(...)):
+    try:
+        return engine.split_scan(pid, wid, nid, payload)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, str(e))
+
+
 # --------------------------------------------------------------------------- #
 # Validation tester
 # --------------------------------------------------------------------------- #

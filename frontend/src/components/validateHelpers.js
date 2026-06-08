@@ -29,6 +29,29 @@ export const needs = {
 export const OUTPUT_COLORS = ['#4E79A7', '#59A14F', '#E15759', '#F28E2B', '#B07AA1', '#76B7B2', '#EDC948', '#9C755F', '#FF9DA7', '#86BCB6']
 export const uid = () => 'o' + Math.random().toString(36).slice(2, 8)
 
+// "Split by value" extractor: which part of a column value becomes the grouping key.
+// Mirrors backend engine._extract_key.
+export const EXTRACTOR_TYPES = [
+  ['after_last', 'Après le dernier séparateur'],
+  ['before_first', 'Avant le premier séparateur'],
+  ['segment', 'Nᵉ segment entre séparateurs'],
+  ['substring', 'Sous-chaîne (position)'],
+  ['regex', 'Regex (groupe capturé)'],
+]
+export const defaultExtractor = () => ({ type: 'after_last', sep: '.', index: 2, start: 1, length: 1, pattern: '' })
+
+// Human-readable summary of an extractor, for hints.
+export function extractorSummary(ex) {
+  const e = ex || {}
+  switch (e.type) {
+    case 'before_first': return `avant le premier « ${e.sep || '_'} »`
+    case 'segment': return `${e.index || 1}ᵉ segment selon « ${e.sep || '\\'} »`
+    case 'substring': return `caractères ${e.start || 1}${e.length ? `…${Number(e.start || 1) + Number(e.length) - 1}` : '→'}`
+    case 'regex': return `1er groupe de ${e.pattern || '(…)'}`
+    default: return `après le dernier « ${e.sep || '.'} »`
+  }
+}
+
 // segment kinds for the positional-mask builder
 export const SEG_TYPES = [
   ['literal', 'Texte exact'], ['letter', 'Lettres'], ['upper', 'Majuscules'], ['lower', 'Minuscules'],

@@ -564,7 +564,78 @@ def _augment_diagnostics(d: dict, df: pd.DataFrame, cs: bool, default_col: str) 
     return out
 
 
+def _extract_key(series: pd.Series, extractor: dict, cs: bool) -> pd.Series:
+    """Extract the 'part to watch' of each value as a string Series — the grouping
+    key for the 'split by value' routing. Non-extractable values yield '' (→ else)."""
+    s = series.astype("string").fillna("")
+    ex = extractor or {}
+    kind = ex.get("type", "after_last")
+    if kind == "after_last":
+        sep = ex.get("sep", ".")
+        if sep:
+            has = s.str.contains(re.escape(sep), regex=True)
+            key = s.str.rpartition(sep)[2].where(has, "")   # part after last sep; none → ''
+        else:
+            key = s
+    elif kind == "before_first":
+        sep = ex.get("sep", "_")
+        # part before the first separator; no separator → whole value
+        key = s.str.partition(sep)[0] if sep else s
+    elif kind == "segment":
+        # Nth segment when split by a separator (e.g. a path level between '\').
+        # index is 1-based; negative counts from the end (-1 = last). Out of range → ''.
+        sep = ex.get("sep") or "\\"
+        idx = int(ex.get("index") or 1)
+        i = idx - 1 if idx > 0 else idx
+        def _seg(v):
+            parts = str(v).split(sep)
+            return parts[i] if -len(parts) <= i < len(parts) else ""
+        key = s.apply(_seg) if sep else s
+    elif kind == "substring":
+        start = max(1, int(ex.get("start") or 1)) - 1
+        length = ex.get("length")
+        end = start + int(length) if length not in (None, "", 0) else None
+        key = s.str.slice(start, end)
+    elif kind == "regex":
+        pat = ex.get("pattern") or ""
+        try:
+            key = s.str.extract(f"({pat})" if "(" not in pat else pat, expand=True).iloc[:, 0]
+        except re.error:
+            key = pd.Series("", index=s.index, dtype="string")
+        key = key.fillna("")
+    else:
+        key = s
+    key = key.astype("string").fillna("")
+    return key if cs else key.str.lower()
+
+
+def _run_split(d: dict, df: pd.DataFrame):
+    """Route rows by an extracted key: one output per distinct value (each output
+    carries its 'value'); rows whose key matches none go to 'else'."""
+    sp = d.get("split") or {}
+    col = sp.get("column") or d.get("target_column")
+    if not col or col not in df.columns:
+        raise ValueError("choisissez la colonne à éclater")
+    cs = bool(d.get("case_sensitive"))
+    key = _extract_key(df[col], sp.get("extractor") or {}, cs)
+    result, assigned = {}, pd.Series(False, index=df.index)
+    for o in d.get("outputs") or []:
+        oid = o.get("id")
+        if not oid:
+            continue
+        val = o.get("value", "")
+        val = val if cs else str(val).lower()
+        m = (key == val) & ~assigned
+        assigned |= m
+        result[oid] = df[m].reset_index(drop=True)
+    if d.get("else_enabled", True):
+        result["else"] = df[~assigned].reset_index(drop=True)
+    return result, {}
+
+
 def _run_route(d: dict, df: pd.DataFrame, diagnostics: bool = True):
+    if (d.get("split") or {}).get("enabled"):
+        return _run_split(d, df)
     cs = bool(d.get("case_sensitive"))
     default_col = d.get("target_column")
     routing = d.get("routing", "first")
@@ -600,6 +671,42 @@ def route_preview(pid, wid, node_id, config: dict) -> dict:
     df = _single(ins)
     outs, _ = _run_route(config or {}, df, diagnostics=False)
     return {"total": int(len(df)), "counts": {h: int(len(v)) for h, v in outs.items()}}
+
+
+def split_scan(pid, wid, node_id, config: dict) -> dict:
+    """Discover the distinct extracted values of the 'split by value' config against
+    the node's current input — feeds the 'Scan' that generates one output per value.
+    Capped at 200 distinct values (truncated=True beyond)."""
+    wf = storage.get_workflow(pid, wid)
+    if not wf:
+        raise ValueError("Workflow introuvable")
+    node = next((n for n in wf.get("nodes", []) if n["id"] == node_id), None)
+    if not node:
+        raise ValueError("Bloc introuvable")
+    ins = _node_inputs(pid, wid, node, wf.get("edges", []))
+    df = _single(ins)
+    sp = (config or {}).get("split") or {}
+    col = sp.get("column") or (config or {}).get("target_column")
+    if not col or col not in df.columns:
+        raise ValueError("choisissez la colonne à éclater")
+    cs = bool((config or {}).get("case_sensitive"))
+    key = _extract_key(df[col], sp.get("extractor") or {}, cs)
+    counts = key[key != ""].value_counts()
+    cap = 200
+    values = [{"value": str(v), "count": int(c)} for v, c in counts.head(cap).items()]
+    # a few raw → key examples so the user can immediately verify the extraction
+    raw = df[col].astype("string").fillna("")
+    seen, samples = set(), []
+    for i in range(len(df)):
+        r = str(raw.iloc[i])
+        if r in seen:
+            continue
+        seen.add(r)
+        samples.append({"raw": r[:160], "key": str(key.iloc[i])})
+        if len(samples) >= 5:
+            break
+    return {"total": int(len(df)), "values": values, "samples": samples,
+            "distinct": int(counts.size), "truncated": bool(counts.size > cap)}
 
 
 def _run_pivot(con, pid, node, ins):
