@@ -102,12 +102,27 @@ _VERB_MANY = {"equals": "vaut l'une des valeurs", "contains": "contient l'un de"
               "starts_with": "commence par l'un de", "ends_with": "finit par l'un de"}
 
 
+_RULE_OPPOSITE = {
+    "contains": "not_contains", "not_contains": "contains",
+    "equals": "not_equals", "not_equals": "equals",
+    "is_empty": "not_empty", "not_empty": "is_empty",
+}
+
+
 def _rule_phrase(r: dict, default_col) -> str:
-    """One non-consolidated rule, e.g. « Code » commence par « FR »."""
+    """One non-consolidated rule, e.g. « Code » commence par « FR ». A negated rule
+    folds into its positive twin when it has one (NON + « ne contient pas » reads as
+    « contient ») so the documentation never shows a double negative."""
     test = r.get("test")
+    neg = ""
+    if r.get("negate"):
+        opp = _RULE_OPPOSITE.get(test)
+        if opp:
+            test = opp                          # « ne contient pas » negated -> « contient »
+        else:
+            neg = "NON — "
     v = r.get("value", "")
     col = r.get("column") or default_col
-    neg = "NON — " if r.get("negate") else ""
     start = int(r.get("start") or 1)
     length = int(r.get("length") or 1)
     cls = {"letter": "une lettre", "upper": "une majuscule", "lower": "une minuscule",

@@ -103,14 +103,23 @@ export function buildMaskPattern(segs, caseSensitive) {
   return (caseSensitive ? '' : '(?i)') + parts.join('')
 }
 
+// A negated rule reads as its positive twin when it has one, so the UI never
+// shows a double negative ("NON ne contient pas" -> "contient").
+const RULE_OPPOSITE = {
+  contains: 'not_contains', not_contains: 'contains', equals: 'not_equals',
+  not_equals: 'equals', is_empty: 'not_empty', not_empty: 'is_empty',
+}
+
 export function ruleSummary(r) {
   const v = r.value ?? ''
   const cls = CLASS_FR[r.charclass] || r.charclass || ''
   const end = Number(r.start || 1) + Number(r.length || 1) - 1
   const col = r.column ? `[${r.column}] ` : ''
-  const neg = r.negate ? 'NON ' : ''
+  let test = r.test
+  let neg = r.negate ? 'NON ' : ''
+  if (r.negate && RULE_OPPOSITE[test]) { test = RULE_OPPOSITE[test]; neg = '' }
   let body
-  switch (r.test) {
+  switch (test) {
     case 'starts_with': body = `commence par « ${v} »`; break
     case 'ends_with': body = `finit par « ${v} »`; break
     case 'contains': body = `contient « ${v} »`; break

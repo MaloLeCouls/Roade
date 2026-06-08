@@ -1138,6 +1138,30 @@ def _rule_label(r: dict) -> str:
     return labels.get(test, test or "règle non respectée")
 
 
+# Tests that have a clean opposite — so a negated rule reads as its positive twin
+# instead of an unreadable double negative ("NON ne doit pas contenir" -> "doit
+# contenir").
+_RULE_OPPOSITE = {
+    "contains": "not_contains", "not_contains": "contains",
+    "equals": "not_equals", "not_equals": "equals",
+    "is_empty": "not_empty", "not_empty": "is_empty",
+}
+
+
+def _signed_label(r: dict) -> str:
+    """Human label for a (possibly negated) rule, folding the NON into the wording
+    so it never reads as a double negative."""
+    if not r.get("negate"):
+        return _rule_label(r)
+    opp = _RULE_OPPOSITE.get(r.get("test"))
+    if opp:
+        return _rule_label({**r, "test": opp})
+    base = _rule_label(r)                      # no clean opposite: « doit … » -> « ne doit pas … »
+    if "doit " in base:
+        return base.replace("doit ", "ne doit pas ", 1)
+    return "NON — " + base
+
+
 def _rule_ok(s: str, r: dict, cs: bool) -> bool:
     test = r.get("test")
     v = r.get("value")
@@ -1243,7 +1267,7 @@ def _condition_eval_str(s: str, cond: dict, cs: bool) -> tuple[bool, str, list]:
             if r.get("negate"):
                 rok = not rok
             oks.append(rok)
-            label = ("NON " if r.get("negate") else "") + _rule_label(r)
+            label = _signed_label(r)
             steps.append({"label": label, "status": "ok" if rok else "fail"})
             if not rok and first_fail is None:
                 first_fail = label
