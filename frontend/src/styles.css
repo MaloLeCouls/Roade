@@ -29,12 +29,14 @@
   --t-union: #8a7560;
   --t-export: #c08436;
 
-  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-family: 'Inter', 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif;
 }
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
-body { background: var(--bg); color: var(--ink); font-size: 14px; }
+body { background: var(--bg); color: var(--ink); font-size: 14px;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11'; letter-spacing: -0.005em; }
 button { font-family: inherit; cursor: pointer; }
 input, select, textarea { font-family: inherit; color: var(--ink); }
 
@@ -106,23 +108,21 @@ button.small { padding: 4px 8px; font-size: 12px; }
 .editor-toolbar { display: flex; align-items: center; gap: 12px; padding: 7px 14px; background: var(--panel); border-bottom: 1px solid var(--line); z-index: 4; }
 .wf-name { font-weight: 600; font-size: 14px; border: 1px solid transparent; min-width: 170px; background: transparent; }
 .wf-name:hover { border-color: var(--line); }
-.tb-add { display: flex; gap: 6px; }
-.chip { border: 1px solid var(--line); background: #fff; border-radius: var(--radius); padding: 5px 10px; font-size: 12.5px; font-weight: 600; color: var(--ink-soft); display: inline-flex; align-items: center; gap: 6px; }
-.chip:hover { background: #f1f3f7; }
-.chip .swatch { width: 9px; height: 9px; border-radius: 2px; }
-.chip.src .swatch { background: var(--t-source); }
-.chip.sql .swatch { background: var(--t-sql); }
-.chip.dup .swatch { background: var(--t-dedup); }
-.chip.val .swatch { background: var(--t-validate); }
-.chip.piv .swatch { background: var(--t-pivot); }
-.chip.cln .swatch { background: var(--t-clean); }
-.chip.calc .swatch { background: var(--t-calc); }
-.chip.flt .swatch { background: var(--t-filter); }
-.chip.cols .swatch { background: var(--t-cols); }
-.chip.rep .swatch { background: var(--t-report); }
-.chip.uni .swatch { background: var(--t-union); }
-.chip.exp .swatch { background: var(--t-export); }
-.chip.grp .swatch { background: #5b6bb0; }
+/* "Ajouter un bloc" — a single dropdown button + palette (was a long chip row) */
+.tb-add { position: relative; display: flex; }
+.add-btn { border: 1px solid var(--line); background: #fff; border-radius: 7px; padding: 6px 11px;
+  font-size: 13px; font-weight: 600; color: var(--ink-soft); display: inline-flex; align-items: center; gap: 6px; }
+.add-btn:hover { background: #f1f3f7; border-color: #c7cdd8; color: var(--ink); }
+.add-palette { position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; width: 320px;
+  background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 10px 30px rgba(20,28,48,.18);
+  padding: 5px; max-height: 70vh; overflow-y: auto; }
+.add-item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: none;
+  background: none; border-radius: 6px; padding: 7px 9px; }
+.add-item:hover { background: #f1f4f9; }
+.add-swatch { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; }
+.add-item-txt { display: flex; flex-direction: column; line-height: 1.25; }
+.add-item-lbl { font-size: 13px; font-weight: 600; color: var(--ink); }
+.add-item-desc { font-size: 11.5px; color: var(--muted); }
 .tb-right { margin-left: auto; display: flex; align-items: center; gap: 14px; }
 .save { font-size: 12px; color: var(--muted); }
 .save.saving { color: var(--warn); } .save.error { color: var(--danger); }
@@ -555,6 +555,16 @@ table.dt td.idx, table.dt th.idx { background: #fafbfc; color: var(--muted); tex
 .rc-tv-bar { height: 8px; background: #eef1f6; border-radius: 999px; overflow: hidden; }
 .rc-tv-bar > span { display: block; height: 100%; background: var(--t-report); border-radius: 999px; }
 .rc-tv-c { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+.rc-pie { display: flex; gap: 14px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+.rc-pie svg { flex: 0 0 auto; }
+.rc-legend { display: flex; flex-direction: column; gap: 3px; min-width: 150px; flex: 1; }
+.rc-leg { display: grid; grid-template-columns: 12px minmax(40px, 1fr) auto; align-items: center; gap: 7px; font-size: 12px; }
+.rc-dot { width: 10px; height: 10px; border-radius: 2px; }
+.rc-leg-lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rc-leg-c { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+.rc-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12.5px; }
+.rc-table td { border-bottom: 1px solid var(--line-soft); padding: 4px 6px; }
+.rc-table td:last-child { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; width: 90px; }
 
 /* validate editor: conditions (left, in the inspector) + outputs pane (right) */
 .conditions-editor { display: flex; flex-direction: column; gap: 10px; }

@@ -194,10 +194,10 @@ function ReportView({ pid, wid, node, status, onRun, onPreview }) {
           <div className="be-view-empty"><p className="muted">Analyse indisponible — réexécutez le bloc.</p></div>
         ) : (
           <>
-            <div className="be-rowcount">{report.row_count.toLocaleString('fr-FR')} lignes · {report.columns.length} colonne(s) analysée(s)</div>
+            <div className="be-rowcount">{report.row_count.toLocaleString('fr-FR')} lignes · {(report.analyses || []).length} analyse(s)</div>
             <div className="report-cards">
-              {report.columns.map((c) => <ReportCard key={c.name} c={c} />)}
-              {report.columns.length === 0 && <p className="muted">Aucune colonne à analyser.</p>}
+              {(report.analyses || []).map((a, i) => <AnalysisCardView key={i} a={a} />)}
+              {(report.analyses || []).length === 0 && <p className="muted">Aucune analyse configurée — ajoutez-en dans les paramètres.</p>}
             </div>
           </>
         )}
@@ -205,41 +205,72 @@ function ReportView({ pid, wid, node, status, onRun, onPreview }) {
   )
 }
 
-function ReportCard({ c }) {
-  const ns = c.numeric_stats
-  const tops = c.top_values || []
-  const max = Math.max(...tops.map((v) => v.count), 1)
+const PIE_COLORS = ['#4E79A7', '#59A14F', '#E15759', '#F28E2B', '#B07AA1', '#76B7B2',
+  '#EDC948', '#9C755F', '#FF9DA7', '#86BCB6', '#bab0ac', '#8cd17d']
+
+function AnalysisCardView({ a }) {
+  const slices = [...(a.buckets || [])]
+  if (a.other > 0) slices.push({ key: 'Autres', count: a.other })
+  const chart = a.chart || 'bar'
   return (
     <div className="report-card">
-      <div className="rc-head"><b>{c.name}</b><span className="coltype">{c.type}</span></div>
+      <div className="rc-head"><b>{a.title}</b><span className="coltype">{a.column}</span></div>
       <div className="rc-metrics">
-        <span><b>{c.distinct.toLocaleString('fr-FR')}</b> distinctes</span>
-        <span><b>{c.nulls.toLocaleString('fr-FR')}</b> vides ({c.null_pct}%)</span>
+        <span><b>{(a.distinct ?? 0).toLocaleString('fr-FR')}</b> distinctes</span>
+        <span><b>{(a.nulls ?? 0).toLocaleString('fr-FR')}</b> vides ({a.null_pct}%)</span>
+        <span><b>{(a.total ?? 0).toLocaleString('fr-FR')}</b> lignes</span>
       </div>
-      {ns && (
-        <div className="rc-metrics rc-num">
-          <span>min <b>{fmtNum(ns.min)}</b></span><span>max <b>{fmtNum(ns.max)}</b></span>
-          <span>moy <b>{fmtNum(ns.avg)}</b></span><span>méd <b>{fmtNum(ns.median)}</b></span>
-        </div>
-      )}
-      {tops.length > 0 && (
-        <div className="rc-top">
-          {tops.map((v, i) => (
-            <div className="rc-tv" key={i}>
-              <span className="rc-tv-lbl" title={v.value == null ? 'vide' : String(v.value)}>
-                {v.value == null ? <span className="null">vide</span> : String(v.value)}
-              </span>
-              <span className="rc-tv-bar"><span style={{ width: `${(v.count / max) * 100}%` }} /></span>
-              <span className="rc-tv-c">{v.count.toLocaleString('fr-FR')}</span>
-            </div>
-          ))}
-        </div>
-      )}
+      {slices.length === 0 ? <p className="muted">Aucune valeur.</p>
+        : chart === 'pie' ? <PieChart slices={slices} />
+        : chart === 'table' ? (
+          <table className="rc-table"><tbody>
+            {slices.map((s, i) => <tr key={i}><td>{s.key}</td><td>{s.count.toLocaleString('fr-FR')}</td></tr>)}
+          </tbody></table>
+        ) : <BarList slices={slices} />}
     </div>
   )
 }
 
-function fmtNum(v) {
-  if (v === null || v === undefined) return '—'
-  return typeof v === 'number' ? v.toLocaleString('fr-FR', { maximumFractionDigits: 4 }) : String(v)
+function BarList({ slices }) {
+  const max = Math.max(...slices.map((s) => s.count), 1)
+  return (
+    <div className="rc-top">
+      {slices.map((s, i) => (
+        <div className="rc-tv" key={i}>
+          <span className="rc-tv-lbl" title={s.key}>{s.key}</span>
+          <span className="rc-tv-bar"><span style={{ width: `${(s.count / max) * 100}%`, background: PIE_COLORS[i % PIE_COLORS.length] }} /></span>
+          <span className="rc-tv-c">{s.count.toLocaleString('fr-FR')}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function PieChart({ slices }) {
+  const total = slices.reduce((acc, s) => acc + s.count, 0) || 1
+  const R = 54, C = 60
+  let acc = 0
+  const arcs = slices.map((s, i) => {
+    const a0 = (acc / total) * 2 * Math.PI; acc += s.count; const a1 = (acc / total) * 2 * Math.PI
+    const color = PIE_COLORS[i % PIE_COLORS.length]
+    if (slices.length === 1) return <circle key={i} cx={C} cy={C} r={R} fill={color} />
+    const large = (a1 - a0) > Math.PI ? 1 : 0
+    const x0 = C + R * Math.sin(a0), y0 = C - R * Math.cos(a0)
+    const x1 = C + R * Math.sin(a1), y1 = C - R * Math.cos(a1)
+    return <path key={i} d={`M${C},${C} L${x0.toFixed(2)},${y0.toFixed(2)} A${R},${R} 0 ${large},1 ${x1.toFixed(2)},${y1.toFixed(2)} Z`} fill={color} />
+  })
+  return (
+    <div className="rc-pie">
+      <svg width="120" height="120" viewBox="0 0 120 120">{arcs}</svg>
+      <div className="rc-legend">
+        {slices.map((s, i) => (
+          <div className="rc-leg" key={i}>
+            <span className="rc-dot" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
+            <span className="rc-leg-lbl" title={s.key}>{s.key}</span>
+            <span className="rc-leg-c">{s.count.toLocaleString('fr-FR')} · {Math.round(s.count / total * 100)}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }

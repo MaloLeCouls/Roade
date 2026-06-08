@@ -119,6 +119,23 @@ const DEFAULT_DATA = {
   frame: { label: 'Groupe', w: 460, h: 300, color: '#5b6bb0' },
 }
 
+// The "add a block" palette (replaces a long chip row that overflowed the toolbar).
+const BLOCK_PALETTE = [
+  ['source', 'Source', 'Lit un fichier Excel/CSV'],
+  ['sql', 'SQL', 'Sélection, filtres, jointures, regroupements'],
+  ['dedup', 'Doublons', 'Repère / sépare les doublons'],
+  ['validate', 'Validation', 'Classe les lignes selon des conditions'],
+  ['pivot', 'Pivot', 'Pivote / dépivote (tableau croisé)'],
+  ['clean', 'Nettoyage', 'Opérations de nettoyage en série'],
+  ['calc', 'Calcul', 'Colonnes calculées (formules)'],
+  ['filter', 'Filtre', 'Garde / exclut selon un autre tableau'],
+  ['cols', 'Colonnes', 'Réordonne / supprime / renomme'],
+  ['report', 'Analyse', 'État des lieux des données (reporting)'],
+  ['union', 'Union', 'Empile plusieurs entrées'],
+  ['export', 'Export', 'Écrit un fichier de sortie'],
+  ['frame', 'Cadre', 'Regroupe visuellement des blocs'],
+]
+
 // Output anchors per node type (the first is the primary, used for the badge).
 const NODE_OUTPUTS = {
   source: [{ handle: 'out', label: '' }],
@@ -194,6 +211,7 @@ function Editor({ pid, wid, onBack }) {
   const [flowOpen, setFlowOpen] = useState(false)        // global workflow flow map
   const [menu, setMenu] = useState(null)                 // right-click context menu {id, x, y}
   const [runMenu, setRunMenu] = useState(false)          // run-button dropdown (force recompute)
+  const [addMenu, setAddMenu] = useState(false)          // "add a block" palette dropdown
   const [previewPrefs, setPreviewPrefs] = useState({ tab: 'rows', column: null })
   const [banner, setBanner] = useState(null)
   const [saveState, setSaveState] = useState('saved')
@@ -373,13 +391,13 @@ function Editor({ pid, wid, onBack }) {
 
   // close the context menu / run dropdown on any left click or Escape
   useEffect(() => {
-    if (!menu && !runMenu) return
-    const close = () => { setMenu(null); setRunMenu(false) }
+    if (!menu && !runMenu && !addMenu) return
+    const close = () => { setMenu(null); setRunMenu(false); setAddMenu(false) }
     const onKey = (e) => { if (e.key === 'Escape') close() }
     window.addEventListener('click', close)
     window.addEventListener('keydown', onKey)
     return () => { window.removeEventListener('click', close); window.removeEventListener('keydown', onKey) }
-  }, [menu, runMenu])
+  }, [menu, runMenu, addMenu])
 
   const onSchema = useCallback((id, cols) => {
     setSchemas((s) => ({ ...s, [id]: cols }))
@@ -607,19 +625,22 @@ function Editor({ pid, wid, onBack }) {
           <button className="ghost" onClick={onBack}>← Projet</button>
           <input className="wf-name" value={wfName} onChange={(e) => setWfName(e.target.value)} />
           <div className="tb-add">
-            <button className="chip src" onClick={() => addNode('source')}><span className="swatch" />Source</button>
-            <button className="chip sql" onClick={() => addNode('sql')}><span className="swatch" />SQL</button>
-            <button className="chip dup" onClick={() => addNode('dedup')}><span className="swatch" />Doublons</button>
-            <button className="chip val" onClick={() => addNode('validate')}><span className="swatch" />Validation</button>
-            <button className="chip piv" onClick={() => addNode('pivot')}><span className="swatch" />Pivot</button>
-            <button className="chip cln" onClick={() => addNode('clean')}><span className="swatch" />Nettoyage</button>
-            <button className="chip calc" onClick={() => addNode('calc')}><span className="swatch" />Calcul</button>
-            <button className="chip flt" onClick={() => addNode('filter')} title="Filtre : ne garde (ou exclut) que les lignes dont une colonne figure dans un autre tableau"><span className="swatch" />Filtre</button>
-            <button className="chip cols" onClick={() => addNode('cols')} title="Colonnes : réordonner, supprimer ou renommer les colonnes"><span className="swatch" />Colonnes</button>
-            <button className="chip rep" onClick={() => addNode('report')} title="Analyse : bloc d'information (non exporté) qui profile les données pour le reporting et la documentation"><span className="swatch" />Analyse</button>
-            <button className="chip uni" onClick={() => addNode('union')}><span className="swatch" />Union</button>
-            <button className="chip exp" onClick={() => addNode('export')}><span className="swatch" />Export</button>
-            <button className="chip grp" onClick={() => addNode('frame')} title="Cadre : regroupe visuellement des blocs ; le déplacer déplace son contenu"><span className="swatch" />Cadre</button>
+            <button className="add-btn" onClick={(e) => { e.stopPropagation(); setAddMenu((v) => !v) }} title="Ajouter un bloc au workflow">
+              <Icon name="plus" size={14} /> Ajouter un bloc <Icon name="down" size={11} />
+            </button>
+            {addMenu && (
+              <div className="add-palette" onClick={(e) => e.stopPropagation()}>
+                {BLOCK_PALETTE.map(([type, label, desc]) => (
+                  <button key={type} className="add-item" onClick={() => { addNode(type); setAddMenu(false) }}>
+                    <span className="add-swatch" style={{ background: TYPE_COLOR[type] || '#888' }} />
+                    <span className="add-item-txt">
+                      <span className="add-item-lbl">{label}</span>
+                      <span className="add-item-desc">{desc}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div className="tb-right">
             <span className={`save ${saveState}`}>

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api'
 import QueryBuilder from './QueryBuilder'
 import Icon from './Icon'
-import { ConditionsEditor } from './routing'
+import { ConditionsEditor, RuleRow, MaskBuilder } from './routing'
 
 export default function Inspector({ pid, node, files, inputs, onChange, onSchema, onDelete, wfName }) {
   if (!node) {
@@ -871,45 +871,112 @@ function ColsConfig({ node, inputs, set }) {
   )
 }
 
+const ANALYSIS_KINDS = [
+  ['values', 'Valeurs (les plus fréquentes)'],
+  ['prefix', 'Préfixe'],
+  ['suffix', 'Suffixe'],
+  ['length', 'Longueur (nb de caractères)'],
+  ['rule', 'Respect d’une règle'],
+  ['mask', 'Respect d’un format (masque)'],
+]
+const CHART_KINDS = [['bar', 'Barres'], ['pie', 'Camembert'], ['table', 'Tableau']]
+const _aid = () => 'a' + Math.random().toString(36).slice(2, 8)
+
+function AnalysisCard({ a, cols, index, count, onChange, onMove, onDelete }) {
+  const kind = a.kind || 'values'
+  const by = a.by || 'sep'
+  return (
+    <div className="clean-op">
+      <div className="qb-row">
+        <select className="qb-select" value={a.column || ''} onChange={(e) => onChange({ column: e.target.value })} title="Colonne analysée">
+          <option value="">— colonne —</option>
+          {cols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+        </select>
+        <select className="qb-select" value={kind} onChange={(e) => onChange({ kind: e.target.value })} title="Ce qu'on regarde">
+          {ANALYSIS_KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        <button className="ghost danger small" onClick={onDelete}><Icon name="x" /></button>
+      </div>
+
+      {(kind === 'prefix' || kind === 'suffix') && (
+        <div className="qb-row indent">
+          <select className="qb-select" value={by} onChange={(e) => onChange({ by: e.target.value })}>
+            <option value="sep">{kind === 'prefix' ? 'avant le séparateur' : 'après le séparateur'}</option>
+            <option value="chars">nombre de caractères</option>
+          </select>
+          {by === 'sep'
+            ? <><span className="qb-lbl">séparateur</span>
+                <input className="qb-input narrow" value={a.sep ?? '-'} placeholder={'-  \\  .  _'} onChange={(e) => onChange({ sep: e.target.value })} /></>
+            : <><span className="qb-lbl">combien</span>
+                <input className="qb-input narrow" type="number" min="1" value={a.n ?? 3} onChange={(e) => onChange({ n: Number(e.target.value) })} /></>}
+        </div>
+      )}
+
+      {kind === 'rule' && (
+        <div className="indent">
+          <RuleRow r={a.rule || { test: 'starts_with', value: '' }} cols={cols} defaultCol={a.column}
+            onChange={(p) => onChange({ rule: { ...(a.rule || { test: 'starts_with' }), ...p } })} />
+          <label className="qb-check tiny"><input type="checkbox" checked={!!a.case_sensitive}
+            onChange={(e) => onChange({ case_sensitive: e.target.checked })} /> sensible à la casse</label>
+        </div>
+      )}
+      {kind === 'mask' && (
+        <div className="indent">
+          <MaskBuilder segments={a.segments || []} caseSensitive={!!a.case_sensitive} onChange={(segs) => onChange({ segments: segs })} />
+        </div>
+      )}
+
+      <div className="qb-row indent">
+        <span className="qb-lbl">graphique</span>
+        <select className="qb-select" value={a.chart || 'bar'} onChange={(e) => onChange({ chart: e.target.value })}>
+          {CHART_KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        <span className="qb-lbl">max</span>
+        <input className="qb-input narrow" type="number" min="2" value={a.top ?? 12} onChange={(e) => onChange({ top: Number(e.target.value) })} />
+        <button className="mini" onClick={() => onMove(-1)} disabled={index === 0}><Icon name="up" /></button>
+        <button className="mini" onClick={() => onMove(1)} disabled={index === count - 1}><Icon name="down" /></button>
+      </div>
+    </div>
+  )
+}
+
 function ReportConfig({ node, inputs, set }) {
   const d = node.data
   const cols = inputs[0]?.columns || []
-  const selected = d.columns || []
-  const toggle = (name) => set({ columns: selected.includes(name) ? selected.filter((c) => c !== name) : [...selected, name] })
+  const items = d.analyses || []
+  const upd = (i, patch) => set({ analyses: items.map((o, j) => (j === i ? { ...o, ...patch } : o)) })
+  const del = (i) => set({ analyses: items.filter((_, j) => j !== i) })
+  const move = (i, dir) => { const j = i + dir; if (j < 0 || j >= items.length) return; const a = [...items];[a[i], a[j]] = [a[j], a[i]]; set({ analyses: a }) }
+  const add = () => set({ analyses: [...items, { id: _aid(), column: cols[0]?.name || '', kind: 'values', chart: 'bar', top: 12 }] })
   return (
     <div className="insp-body">
       {inputs.length === 0 && <div className="qb-warn">Connectez une entrée puis exécutez l'amont pour charger les colonnes.</div>}
       <div className="ports-head">
-        <span className="ports-title">Analyse (état des lieux)</span>
+        <span className="ports-title">Analyses (état des lieux)</span>
         <InfoBubble>
-          Bloc <b>à titre d'information</b> : il n'écrit aucun fichier et ne se branche sur rien en aval. Il
-          <b> profile</b> les données reçues (composition d'une colonne, valeurs fréquentes, vides, statistiques)
-          pour le <b>reporting</b>. Le résultat s'affiche au clic et apparaît dans la <b>documentation Excel</b>.
+          Bloc <b>à titre d'information</b> (non exporté, sans sortie). Chaque analyse <b>ventile</b> une colonne selon un
+          critère — <b>valeurs</b>, <b>préfixe</b>, <b>suffixe</b>, <b>longueur</b>, ou le <b>respect d'une règle / d'un
+          masque</b> (comme dans la Validation) — et l'affiche en <b>camembert</b>, barres ou tableau.
+          Ex. : préfixe des noms de fichiers en camembert → quels préfixes, combien d'occurrences. Visible au clic et
+          dans la <b>documentation Excel</b>.
         </InfoBubble>
       </div>
 
       <label className="fld insp-desc">
-        <span>Note pour le rapport (le « pourquoi » de cette analyse)</span>
-        <textarea rows={2} placeholder="Ex. : lignes non conformes — voir la composition pour comprendre les rejets…"
+        <span>Note pour le rapport (le « pourquoi » de ces analyses)</span>
+        <textarea rows={2} placeholder="Ex. : composition des lignes non conformes pour comprendre les rejets…"
           value={d.note || ''} onChange={(e) => set({ note: e.target.value })} />
       </label>
 
-      <div className="fld">
-        <div className="fld-head">
-          <span>Colonnes à analyser</span>
-          <InfoBubble>Aucune cochée → <b>toutes</b> les colonnes sont analysées. Cochez-en pour cibler l'état des lieux.</InfoBubble>
-        </div>
-        <div className="checklist">
-          {cols.length === 0 && <div className="qb-hint">— colonnes non chargées —</div>}
-          {cols.map((c) => (
-            <label key={c.name} className="qb-check">
-              <input type="checkbox" checked={selected.includes(c.name)} onChange={() => toggle(c.name)} />
-              {c.name} <span className="coltype-inline">{c.type}</span>
-            </label>
-          ))}
-        </div>
+      <button className="ghost small" onClick={add}>+ Analyse</button>
+      <div className="clean-ops">
+        {items.map((o, i) => (
+          <AnalysisCard key={o.id || i} a={o} cols={cols} index={i} count={items.length}
+            onChange={(p) => upd(i, p)} onMove={(dir) => move(i, dir)} onDelete={() => del(i)} />
+        ))}
+        {items.length === 0 && <div className="qb-hint">Aucune analyse. Cliquez « + Analyse » (ex. préfixe des noms de fichiers, en camembert).</div>}
       </div>
-      <p className="qb-hint">Exécutez le bloc pour générer l'analyse (visible ici et dans la documentation).</p>
+      <p className="qb-hint">Exécutez le bloc pour générer les graphiques (visibles ici et dans la documentation).</p>
     </div>
   )
 }

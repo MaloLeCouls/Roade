@@ -911,51 +911,98 @@ def _run_cols(con, pid, node, ins):
     return {"out": out}, {}
 
 
-def _report_column(con, rel, name, type_str, total, top_n=8) -> dict:
-    """État des lieux d'une colonne : type, vides, valeurs distinctes, valeurs les
-    plus fréquentes et — si numérique — min/max/moyenne/médiane. Calculé sur la
-    relation DuckDB déjà enregistrée (même logique que column_profile)."""
-    ident = q_ident(name)
-    nulls = con.execute(f"SELECT count(*) FROM {rel} WHERE {ident} IS NULL").fetchone()[0]
-    distinct = con.execute(f"SELECT count(DISTINCT {ident}) FROM {rel}").fetchone()[0]
-    numeric = _is_numeric_type(type_str)
-    out = {
-        "name": name, "type": type_str, "nulls": int(nulls),
-        "null_pct": round(nulls / total * 100, 1) if total else 0.0,
-        "distinct": int(distinct), "numeric": numeric,
-        "numeric_stats": None, "top_values": [],
+# Analyse block — configurable breakdowns of a column, inspired by the Validation
+# filters. Each analysis derives a *category key* per row, then counts occurrences.
+_ANALYSIS_TITLE = {
+    "values": "Valeurs de {col}", "prefix": "Préfixes de {col}",
+    "suffix": "Suffixes de {col}", "length": "Longueurs de {col}",
+    "rule": "Respect d'une règle — {col}", "mask": "Respect d'un format — {col}",
+}
+
+
+def _bucket_label(k) -> str:
+    if k is None or (isinstance(k, str) and k == ""):
+        return "(vide)"
+    if isinstance(k, float) and float(k).is_integer():
+        return str(int(k))
+    return str(k)
+
+
+def _analysis_keys(s: pd.Series, spec: dict, kind: str) -> pd.Series:
+    """Per-row category key for an analysis (a pandas Series; None = excluded)."""
+    cs = bool(spec.get("case_sensitive"))
+    if kind == "length":
+        return s.map(lambda v: None if _is_null(v) else len(str(v)))
+    if kind in ("prefix", "suffix"):
+        by = spec.get("by") or "sep"
+        sep = spec.get("sep") or ""
+        n = int(spec.get("n") or 3)
+
+        def key(v):
+            if _is_null(v):
+                return None
+            t = str(v)
+            if by == "chars":
+                return t[:n] if kind == "prefix" else (t[-n:] if n else "")
+            if not sep:
+                return t
+            return t.split(sep, 1)[0] if kind == "prefix" else t.rsplit(sep, 1)[-1]
+        return s.map(key)
+    if kind in ("rule", "mask"):
+        if kind == "mask":
+            pat = _mask_pattern(spec.get("segments") or [], cs)
+            flags = 0 if cs else re.IGNORECASE
+            ok = (lambda t: bool(re.fullmatch(pat, t, flags))) if pat else (lambda t: t == "")
+        else:
+            rule = spec.get("rule") or {}
+            ok = lambda t: _rule_ok(t, rule, cs)               # noqa: E731
+        return s.map(lambda v: "Respecté" if ok("" if _is_null(v) else str(v)) else "Non respecté")
+    return s.where(s.notna(), None)                            # values
+
+
+def _compute_analysis(df: pd.DataFrame, spec: dict, col: str, type_str: str, total: int) -> dict:
+    kind = spec.get("kind") or "values"
+    s = df[col]
+    nulls = int(s.isna().sum())
+    keys = _analysis_keys(s, spec, kind)
+    vc = keys.dropna().value_counts()
+    top = max(1, int(spec.get("top") or 12))
+    head = vc.head(top)
+    buckets = [{"key": _bucket_label(k), "count": int(c)} for k, c in head.items()]
+    shown = int(head.sum())
+    other = max(0, int(len(s) - nulls) - shown)
+    title = (spec.get("title") or "").strip() or _ANALYSIS_TITLE.get(kind, "{col}").format(col=col)
+    return {
+        "title": title, "column": col, "type": type_str, "kind": kind,
+        "chart": spec.get("chart") or "bar", "total": int(total),
+        "nulls": nulls, "null_pct": round(nulls / total * 100, 1) if total else 0.0,
+        "distinct": int(keys.dropna().nunique()), "buckets": buckets, "other": other,
     }
-    if numeric and (total - nulls) > 0:
-        mn, mx, avg, med = con.execute(
-            f"SELECT min({ident}), max({ident}), avg({ident}), median({ident}) "
-            f"FROM {rel} WHERE {ident} IS NOT NULL").fetchone()
-        out["numeric_stats"] = {"min": _json_safe(mn), "max": _json_safe(mx),
-                                "avg": _json_safe(avg), "median": _json_safe(med)}
-    top = con.execute(
-        f"SELECT {ident} AS v, count(*) AS c FROM {rel} GROUP BY v "
-        f"ORDER BY c DESC LIMIT {int(top_n)}").fetchall()
-    out["top_values"] = [{"value": _json_safe(r[0]), "count": int(r[1])} for r in top]
-    return out
 
 
 def _run_report(con, pid, node, ins):
-    """Analyse block ('État des lieux'): a terminal block that doesn't feed any
-    downstream block. It passes its input through (materialized so it stays
-    previewable) and computes a per-column profile stored in the meta, picked up
-    by the block's view and by the documentation export."""
+    """Analyse block: terminal (no downstream output). Passes its input through
+    (materialized so it stays previewable) and computes the configured analyses —
+    column breakdowns with a chosen chart — stored on the meta for the block view
+    and the documentation export."""
     d = node["data"]
     df = _single(ins)
     con.register("_rep_in", df)
     try:
-        cols = _describe(con, "_rep_in")
-        wanted = list(d.get("columns") or [])
-        targets = [c for c in cols if (not wanted or c["name"] in wanted)]
+        types = {c["name"]: c["type"] for c in _describe(con, "_rep_in")}
         total = con.execute("SELECT count(*) FROM _rep_in").fetchone()[0]
-        report_cols = [_report_column(con, "_rep_in", c["name"], c["type"], total) for c in targets]
     finally:
         con.unregister("_rep_in")
-    report = {"note": (d.get("note") or "").strip(), "row_count": int(total),
-              "analyzed": [c["name"] for c in targets], "columns": report_cols}
+    specs = d.get("analyses")
+    if not specs:                          # back-compat: one 'values' analysis per chosen column
+        specs = [{"column": c, "kind": "values", "chart": "bar"}
+                 for c in (d.get("columns") or list(types)) if c in types]
+    analyses = []
+    for spec in specs:
+        col = spec.get("column")
+        if col and col in types:
+            analyses.append(_compute_analysis(df, spec, col, types[col], total))
+    report = {"note": (d.get("note") or "").strip(), "row_count": int(total), "analyses": analyses}
     return {"out": df}, {"report": report}
 
 

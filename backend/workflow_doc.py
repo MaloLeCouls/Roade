@@ -17,6 +17,7 @@ from io import BytesIO
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+from openpyxl.chart import PieChart, BarChart, Reference
 
 import storage
 import engine
@@ -633,38 +634,13 @@ def _steps_table(ws, start_row, step_ids, nodes, incoming, label_of, wf_name):
     return r
 
 
-def _num(v) -> str:
-    if v is None:
-        return "—"
-    if isinstance(v, float):
-        return f"{v:g}"
-    return str(v)
-
-
-def _composition(c: dict) -> str:
-    """One-cell summary of a column's content: numeric bounds, or the most
-    frequent values."""
-    if c.get("numeric") and c.get("numeric_stats"):
-        ns = c["numeric_stats"]
-        return (f"min {_num(ns.get('min'))} · max {_num(ns.get('max'))} · "
-                f"moyenne {_num(ns.get('avg'))} · médiane {_num(ns.get('median'))}")
-    tops = c.get("top_values") or []
-    if not tops:
-        return "—"
-    parts = []
-    for v in tops[:6]:
-        val = "(vide)" if v.get("value") is None else str(v.get("value"))
-        parts.append(f"« {val} » ×{v.get('count')}")
-    return " · ".join(parts)
-
-
 def _write_report_analysis(ws, start_row, pid, wid, node_id, d):
-    """Below the lineage, the column-by-column état des lieux stored on the block's
-    output meta during the last run (empty until the block has been executed)."""
+    """Below the lineage, the configured analyses stored on the block's output meta
+    during the last run: one small table + a native Excel chart per analysis."""
     meta = storage.read_node_meta(pid, wid, node_id, "out") or {}
     report = meta.get("report")
     r = start_row
-    ws.cell(r, 1, "Analyse des colonnes (état des lieux)").font = _SECTION
+    ws.cell(r, 1, "Analyses (états des lieux)").font = _SECTION
     for col in range(1, 6):
         ws.cell(r, col).fill = _SECTION_FILL
     r += 1
@@ -678,32 +654,57 @@ def _write_report_analysis(ws, start_row, pid, wid, node_id, d):
         _autoheight(ws, r, "Note : " + note)
         r += 1
     if not report:
-        ws.cell(r, 2, "Exécutez le workflow pour générer l'analyse (le bloc n'a pas encore tourné).").font = _META
+        ws.cell(r, 2, "Exécutez le workflow pour générer les analyses (le bloc n'a pas encore tourné).").font = _META
         return r + 1
-
-    total = report.get("row_count", 0)
-    ws.cell(r, 2, f"{total:,}".replace(",", " ") + " ligne(s) au total.").font = _BODY
-    r += 1
-    for col, title in ((2, "Colonne"), (3, "Type"), (4, "Vides / distinctes"),
-                       (5, "Aperçu du contenu (valeurs fréquentes ou bornes)")):
-        cell = ws.cell(r, col, title)
-        cell.font = _HEAD; cell.fill = _HEAD_FILL; cell.alignment = _TOP; cell.border = _HEAD_BORDER
-    r += 1
-    for c in report.get("columns", []):
-        etat = f"{c['nulls']} vides ({c['null_pct']}%)\n{c['distinct']} distinctes"
-        comp = _composition(c)
-        ws.cell(r, 2, c["name"]).font = _BODY_STRONG
-        ws.cell(r, 3, c["type"]).font = _BODY
-        ws.cell(r, 4, etat).font = _BODY
-        ws.cell(r, 5, comp).font = _BODY
-        for col in range(2, 6):
-            cell = ws.cell(r, col)
-            cell.border = _ROW_BORDER
-            cell.alignment = _TOPWRAP if col in (4, 5) else _TOP
-        lines = max(2, math.ceil((len(comp) + 1) / _DESC_WRAP))   # ≥2 for the two-line « Vides/distinctes »
-        ws.row_dimensions[r].height = min(409, max(16, lines * 14.5))
-        r += 1
+    analyses = report.get("analyses") or []
+    if not analyses:
+        ws.cell(r, 2, "Aucune analyse configurée dans ce bloc.").font = _META
+        return r + 1
+    for a in analyses:
+        r = _write_one_analysis(ws, r + 1, a)
     return r
+
+
+def _write_one_analysis(ws, r, a):
+    """One analysis: a sub-title, a (Catégorie | Occurrences) table, and — unless the
+    chart is 'table' — a native pie or bar chart anchored to the right."""
+    ws.cell(r, 1, a.get("title") or a.get("column") or "Analyse").font = _BODY_STRONG
+    ws.cell(r, 3, f"colonne « {a.get('column')} » · {a.get('distinct', 0)} distinctes · "
+                  f"{a.get('nulls', 0)} vides ({a.get('null_pct', 0)}%) · "
+                  f"{a.get('total', 0)} lignes").font = _META
+    r += 1
+    header_row = r
+    for col, t in ((2, "Catégorie"), (3, "Occurrences")):
+        cell = ws.cell(r, col, t)
+        cell.font = _HEAD; cell.fill = _HEAD_FILL; cell.border = _HEAD_BORDER
+    r += 1
+    data_first = r
+    buckets = list(a.get("buckets") or [])
+    if a.get("other", 0) > 0:
+        buckets.append({"key": "Autres", "count": a["other"]})
+    for b in buckets:
+        ws.cell(r, 2, str(b.get("key"))).font = _BODY
+        ws.cell(r, 3, int(b.get("count") or 0)).font = _BODY
+        for col in (2, 3):
+            ws.cell(r, col).border = _ROW_BORDER
+        r += 1
+    data_last = r - 1
+
+    chart_bottom = r
+    if a.get("chart") != "table" and data_last >= data_first:
+        chart = PieChart() if a.get("chart") == "pie" else BarChart()
+        if isinstance(chart, BarChart):
+            chart.type = "bar"            # horizontal bars read better with text categories
+            chart.legend = None
+        data = Reference(ws, min_col=3, min_row=header_row, max_row=data_last)   # incl. header as series name
+        cats = Reference(ws, min_col=2, min_row=data_first, max_row=data_last)
+        chart.add_data(data, titles_from_data=True)
+        chart.set_categories(cats)
+        chart.title = a.get("title")
+        chart.height, chart.width = 6.5, 11
+        ws.add_chart(chart, f"E{header_row}")
+        chart_bottom = header_row + 13    # reserve ~ the chart's vertical span
+    return max(r, chart_bottom)
 
 
 def build_workbook(pid: str, wid: str) -> bytes:

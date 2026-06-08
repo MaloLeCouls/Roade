@@ -240,7 +240,7 @@ function ConditionGroup({ rules, cols, defaultCol, onChange, onDelete }) {
   )
 }
 
-function RuleRow({ r, cols, defaultCol, onChange, onDelete }) {
+export function RuleRow({ r, cols, defaultCol, onChange, onDelete }) {
   return (
     <div className="rrow">
       <button className={`neg ${r.negate ? 'on' : ''}`} onClick={() => onChange({ negate: !r.negate })}
@@ -273,12 +273,12 @@ function RuleRow({ r, cols, defaultCol, onChange, onDelete }) {
       {needs.value.includes(r.test) && (
         <input className="qb-input" placeholder={r.test === 'is_in' ? 'F0, F1, FE…' : 'valeur'} value={r.value ?? ''} onChange={(e) => onChange({ value: e.target.value })} />
       )}
-      <button className="ghost danger small rrow-del" onClick={onDelete}><Icon name="x" /></button>
+      {onDelete && <button className="ghost danger small rrow-del" onClick={onDelete}><Icon name="x" /></button>}
     </div>
   )
 }
 
-function MaskBuilder({ segments, caseSensitive, onChange }) {
+export function MaskBuilder({ segments, caseSensitive, onChange }) {
   const updSeg = (i, patch) => onChange(segments.map((s, j) => (j === i ? { ...s, ...patch } : s)))
   const moveSeg = (i, dir) => { const j = i + dir; if (j < 0 || j >= segments.length) return; const a = [...segments];[a[i], a[j]] = [a[j], a[i]]; onChange(a) }
   const delSeg = (i) => onChange(segments.filter((_, j) => j !== i))
