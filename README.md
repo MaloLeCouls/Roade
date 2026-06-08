@@ -1,5 +1,7 @@
 # Roade
 
+Du breton "Roadenn", "Donnée" en français :)
+
 Petite application web pour transformer des fichiers **Excel/CSV** en assemblant
 des **blocs** sur un canevas — l'idée de ce qu'on ferait en SQL, mais sans écrire
 de SQL.
