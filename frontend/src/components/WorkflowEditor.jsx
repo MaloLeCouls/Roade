@@ -387,6 +387,22 @@ function Editor({ pid, wid, onBack }) {
     setSaveState('saved')
   }
 
+  // Download the human-readable Excel documentation. The doc is built from the
+  // *stored* workflow, so we flush any pending edits first.
+  const documentWorkflow = async () => {
+    setBanner(null)
+    try {
+      await flushSave()
+      const a = document.createElement('a')
+      a.href = api.documentUrl(pid, wid)
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+    } catch (e) {
+      setBanner({ type: 'error', text: `Impossible de générer la documentation : ${e.message || e}` })
+    }
+  }
+
   const applyOneResult = (nid, r) => {
     setStatus((prev) => ({
       ...prev,
@@ -608,6 +624,9 @@ function Editor({ pid, wid, onBack }) {
             </span>
             <button className="ghost" onClick={() => setFlowOpen(true)} title="Vue d'ensemble : qui va où, des sources aux exports">
               <Icon name="flow" /> Carte des flux
+            </button>
+            <button className="ghost" onClick={documentWorkflow} title="Exporter un Excel expliquant, étape par étape, comment chaque fichier de sortie est produit">
+              <Icon name="download" /> Documenter (Excel)
             </button>
             <div className="run-split">
               <button className="primary" disabled={busy} onClick={() => doRun(null)}>

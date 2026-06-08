@@ -9,6 +9,8 @@ import json
 import os
 import subprocess
 import sys
+from io import BytesIO
+from urllib.parse import quote
 
 from fastapi import FastAPI, Body, UploadFile, File, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +18,7 @@ from fastapi.responses import StreamingResponse, FileResponse
 
 import storage
 import engine
+import workflow_doc
 
 app = FastAPI(title="Roade API")
 
@@ -181,6 +184,31 @@ def run_workflow(pid: str, wid: str, only_node: str | None = Query(None)):
         return engine.run_workflow(pid, wid, only_node)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, str(e))
+
+
+@app.get("/api/projects/{pid}/workflows/{wid}/document")
+def document_workflow(pid: str, wid: str):
+    """Human-readable Excel documentation of the workflow (one sheet per output
+    file, tracing every treatment that leads to it)."""
+    wf = storage.get_workflow(pid, wid)
+    if not wf:
+        raise HTTPException(404, "Workflow introuvable")
+    try:
+        data = workflow_doc.build_workbook(pid, wid)
+    except Exception as e:  # noqa: BLE001 - surfaced to the UI
+        raise HTTPException(400, str(e))
+    name = (wf.get("name") or "Workflow").strip() or "Workflow"
+    fname = f"Documentation - {name}.xlsx"
+    ascii_name = fname.encode("ascii", "ignore").decode().strip() or "documentation.xlsx"
+    headers = {
+        "Content-Disposition": f"attachment; filename=\"{ascii_name}\"; "
+                               f"filename*=UTF-8''{quote(fname)}"
+    }
+    return StreamingResponse(
+        BytesIO(data),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=headers,
+    )
 
 
 @app.get("/api/projects/{pid}/workflows/{wid}/run-stream")

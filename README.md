@@ -37,6 +37,10 @@ résultat (un fichier Parquet) ; tout se recalcule en cascade à l'exécution.
   propose *Tout recalculer* (ignore le cache) et *Super run* (génère aussi les
   exports désactivés).
 - **Carte des flux** : vue d'ensemble, des sources aux exports.
+- **Documenter (Excel)** : génère un classeur explicatif, lisible sans l'application —
+  une feuille par fichier de sortie qui retrace, étape par étape, tous les traitements
+  qui mènent à ce fichier (idéal pour présenter un workflow). Les conditions de
+  Validation en « OU » sont regroupées (« vaut l'une des valeurs : … »).
 
 ## Démarrage rapide
 

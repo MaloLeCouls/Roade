@@ -64,6 +64,7 @@ export const api = {
   createWorkflow: (pid, name) =>
     sendJSON(`/projects/${enc(pid)}/workflows`, 'POST', { name }),
   getWorkflow: (pid, wid) => getJSON(`/projects/${enc(pid)}/workflows/${enc(wid)}`),
+  documentUrl: (pid, wid) => `${BASE}/projects/${enc(pid)}/workflows/${enc(wid)}/document`,
   saveWorkflow: (pid, wf) =>
     sendJSON(`/projects/${enc(pid)}/workflows/${enc(wf.id)}`, 'PUT', wf),
   deleteWorkflow: (pid, wid) =>
