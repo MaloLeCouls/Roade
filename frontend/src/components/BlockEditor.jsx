@@ -56,6 +56,9 @@ function BlockView({ pid, wid, node, status, onChange, onRun, onPreview }) {
     return <ValidateView pid={pid} wid={wid} node={node} status={status}
       onChange={(patch) => onChange(node.id, patch)} onRun={onRun} onPreview={onPreview} />
   }
+  if (node.type === 'report') {
+    return <ReportView pid={pid} wid={wid} node={node} status={status} onRun={onRun} onPreview={onPreview} />
+  }
   if (node.type === 'export') {
     return (
       <div className="be-view-empty">
@@ -154,4 +157,89 @@ function fmtCell(v) {
   if (v === null || v === undefined) return <span className="null">vide</span>
   if (typeof v === 'number') return v.toLocaleString('fr-FR', { maximumFractionDigits: 6 })
   return String(v)
+}
+
+// "Analyse" block: an état des lieux of the input — per-column composition, for
+// reporting. Reads the profile the backend stored on the block's output meta.
+function ReportView({ pid, wid, node, status, onRun, onPreview }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const ran = status?.ran ? JSON.stringify(status.outputs || status.rows) : ''
+  useEffect(() => {
+    setLoading(true)
+    api.preview(pid, wid, node.id, { limit: 1, handle: 'out' })
+      .then((d) => { setData(d); setLoading(false) })
+      .catch(() => { setData({ available: false }); setLoading(false) })
+  }, [pid, wid, node.id, ran])
+
+  const report = data?.report
+  return (
+    <div className="be-view-inner">
+      <div className="route-flow-head">
+        <span className="ports-title">État des lieux</span>
+        <div className="be-view-actions">
+          {data?.available && <button className="ghost small" onClick={() => onRun()} title="Recalculer l'analyse"><Icon name="play" /> Exécuter</button>}
+          <button className="ghost small" disabled={!data?.available} onClick={() => onPreview(node.id, 'out')}><Icon name="eye" /> Plein écran</button>
+        </div>
+      </div>
+      {node.data.note && <div className="report-note">{node.data.note}</div>}
+      {loading ? <div className="be-view-empty"><p className="muted">Chargement…</p></div>
+        : !data?.available ? (
+          <div className="be-view-empty">
+            <Icon name="play" size={26} />
+            <p>Ce bloc n'a pas encore été exécuté.</p>
+            <button className="primary" onClick={() => onRun()}>Exécuter</button>
+          </div>
+        ) : !report ? (
+          <div className="be-view-empty"><p className="muted">Analyse indisponible — réexécutez le bloc.</p></div>
+        ) : (
+          <>
+            <div className="be-rowcount">{report.row_count.toLocaleString('fr-FR')} lignes · {report.columns.length} colonne(s) analysée(s)</div>
+            <div className="report-cards">
+              {report.columns.map((c) => <ReportCard key={c.name} c={c} />)}
+              {report.columns.length === 0 && <p className="muted">Aucune colonne à analyser.</p>}
+            </div>
+          </>
+        )}
+    </div>
+  )
+}
+
+function ReportCard({ c }) {
+  const ns = c.numeric_stats
+  const tops = c.top_values || []
+  const max = Math.max(...tops.map((v) => v.count), 1)
+  return (
+    <div className="report-card">
+      <div className="rc-head"><b>{c.name}</b><span className="coltype">{c.type}</span></div>
+      <div className="rc-metrics">
+        <span><b>{c.distinct.toLocaleString('fr-FR')}</b> distinctes</span>
+        <span><b>{c.nulls.toLocaleString('fr-FR')}</b> vides ({c.null_pct}%)</span>
+      </div>
+      {ns && (
+        <div className="rc-metrics rc-num">
+          <span>min <b>{fmtNum(ns.min)}</b></span><span>max <b>{fmtNum(ns.max)}</b></span>
+          <span>moy <b>{fmtNum(ns.avg)}</b></span><span>méd <b>{fmtNum(ns.median)}</b></span>
+        </div>
+      )}
+      {tops.length > 0 && (
+        <div className="rc-top">
+          {tops.map((v, i) => (
+            <div className="rc-tv" key={i}>
+              <span className="rc-tv-lbl" title={v.value == null ? 'vide' : String(v.value)}>
+                {v.value == null ? <span className="null">vide</span> : String(v.value)}
+              </span>
+              <span className="rc-tv-bar"><span style={{ width: `${(v.count / max) * 100}%` }} /></span>
+              <span className="rc-tv-c">{v.count.toLocaleString('fr-FR')}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function fmtNum(v) {
+  if (v === null || v === undefined) return '—'
+  return typeof v === 'number' ? v.toLocaleString('fr-FR', { maximumFractionDigits: 4 }) : String(v)
 }

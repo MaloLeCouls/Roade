@@ -29,7 +29,7 @@ from engine import _sanitize_filename, _sanitize_sheet_name
 TYPE_LABEL = {
     "source": "Source", "sql": "SQL", "dedup": "Doublons", "validate": "Validation",
     "pivot": "Pivot", "clean": "Nettoyage", "calc": "Calcul", "filter": "Filtre",
-    "cols": "Colonnes", "union": "Union", "export": "Export",
+    "cols": "Colonnes", "report": "Analyse", "union": "Union", "export": "Export",
 }
 TYPE_DESC = {
     "source": "Lecture d'un fichier Excel/CSV",
@@ -41,6 +41,7 @@ TYPE_DESC = {
     "calc": "Colonnes calculées",
     "filter": "Filtrage par appartenance à un autre tableau",
     "cols": "Réorganisation / suppression / renommage de colonnes",
+    "report": "État des lieux des données (profil de colonnes), pour le reporting — non exporté",
     "union": "Empilement de plusieurs tableaux",
     "export": "Écriture d'un fichier de sortie",
 }
@@ -537,10 +538,21 @@ def _d_export(d, ins, a2l, wf):
     return out
 
 
+def _d_report(d, ins, a2l, wf):
+    out = ["État des lieux (bloc d'analyse — n'écrit aucun fichier, rien ne se branche en aval)."]
+    note = (d.get("note") or "").strip()
+    if note:
+        out.append(f"Note : {note}")
+    cols = d.get("columns") or []
+    out.append("Analyse de " + (", ".join(_q(c) for c in cols) if cols else "toutes les colonnes")
+               + " — voir « Analyse des colonnes » plus bas.")
+    return out
+
+
 _DESCRIBERS = {
     "source": _d_source, "sql": _d_sql, "dedup": _d_dedup, "validate": _d_validate,
     "pivot": _d_pivot, "clean": _d_clean, "calc": _d_calc, "filter": _d_filter,
-    "cols": _d_cols, "union": _d_union, "export": _d_export,
+    "cols": _d_cols, "report": _d_report, "union": _d_union, "export": _d_export,
 }
 
 
@@ -621,6 +633,79 @@ def _steps_table(ws, start_row, step_ids, nodes, incoming, label_of, wf_name):
     return r
 
 
+def _num(v) -> str:
+    if v is None:
+        return "—"
+    if isinstance(v, float):
+        return f"{v:g}"
+    return str(v)
+
+
+def _composition(c: dict) -> str:
+    """One-cell summary of a column's content: numeric bounds, or the most
+    frequent values."""
+    if c.get("numeric") and c.get("numeric_stats"):
+        ns = c["numeric_stats"]
+        return (f"min {_num(ns.get('min'))} · max {_num(ns.get('max'))} · "
+                f"moyenne {_num(ns.get('avg'))} · médiane {_num(ns.get('median'))}")
+    tops = c.get("top_values") or []
+    if not tops:
+        return "—"
+    parts = []
+    for v in tops[:6]:
+        val = "(vide)" if v.get("value") is None else str(v.get("value"))
+        parts.append(f"« {val} » ×{v.get('count')}")
+    return " · ".join(parts)
+
+
+def _write_report_analysis(ws, start_row, pid, wid, node_id, d):
+    """Below the lineage, the column-by-column état des lieux stored on the block's
+    output meta during the last run (empty until the block has been executed)."""
+    meta = storage.read_node_meta(pid, wid, node_id, "out") or {}
+    report = meta.get("report")
+    r = start_row
+    ws.cell(r, 1, "Analyse des colonnes (état des lieux)").font = _SECTION
+    for col in range(1, 6):
+        ws.cell(r, col).fill = _SECTION_FILL
+    r += 1
+
+    note = (d.get("note") or "").strip()
+    if note:
+        cell = ws.cell(r, 1, "Note : " + note)
+        cell.font = _META
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=5)
+        cell.alignment = _TOPWRAP
+        _autoheight(ws, r, "Note : " + note)
+        r += 1
+    if not report:
+        ws.cell(r, 2, "Exécutez le workflow pour générer l'analyse (le bloc n'a pas encore tourné).").font = _META
+        return r + 1
+
+    total = report.get("row_count", 0)
+    ws.cell(r, 2, f"{total:,}".replace(",", " ") + " ligne(s) au total.").font = _BODY
+    r += 1
+    for col, title in ((2, "Colonne"), (3, "Type"), (4, "Vides / distinctes"),
+                       (5, "Aperçu du contenu (valeurs fréquentes ou bornes)")):
+        cell = ws.cell(r, col, title)
+        cell.font = _HEAD; cell.fill = _HEAD_FILL; cell.alignment = _TOP; cell.border = _HEAD_BORDER
+    r += 1
+    for c in report.get("columns", []):
+        etat = f"{c['nulls']} vides ({c['null_pct']}%)\n{c['distinct']} distinctes"
+        comp = _composition(c)
+        ws.cell(r, 2, c["name"]).font = _BODY_STRONG
+        ws.cell(r, 3, c["type"]).font = _BODY
+        ws.cell(r, 4, etat).font = _BODY
+        ws.cell(r, 5, comp).font = _BODY
+        for col in range(2, 6):
+            cell = ws.cell(r, col)
+            cell.border = _ROW_BORDER
+            cell.alignment = _TOPWRAP if col in (4, 5) else _TOP
+        lines = max(2, math.ceil((len(comp) + 1) / _DESC_WRAP))   # ≥2 for the two-line « Vides/distinctes »
+        ws.row_dimensions[r].height = min(409, max(16, lines * 14.5))
+        r += 1
+    return r
+
+
 def build_workbook(pid: str, wid: str) -> bytes:
     wf = storage.get_workflow(pid, wid)
     if not wf:
@@ -646,38 +731,49 @@ def build_workbook(pid: str, wid: str) -> bytes:
     synth.title = "Synthèse"
 
     export_ids = [nid for nid in order if nodes[nid]["type"] == "export"]
+    report_ids = [nid for nid in order if nodes[nid]["type"] == "report"]
+    sink_ids = [nid for nid in order if nodes[nid]["type"] in ("export", "report")]
     used_names = {"synthèse"}
     tab_of = {}
 
-    if export_ids:
-        for eid in export_ids:
-            d = nodes[eid].get("data") or {}
-            base = _sanitize_sheet_name(_sanitize_filename(d.get("filename"), "resultat"))
-            sn = _unique_sheet_name(base, used_names)
-            tab_of[eid] = sn
+    if sink_ids:
+        # one sheet per terminal block (export file OR analysis), tracing its lineage
+        for sid in sink_ids:
+            node = nodes[sid]
+            d = node.get("data") or {}
+            is_report = node["type"] == "report"
+            base = (label_of(sid) if is_report
+                    else _sanitize_filename(d.get("filename"), "resultat"))
+            sn = _unique_sheet_name(_sanitize_sheet_name(base), used_names)
+            tab_of[sid] = sn
             ws = wb.create_sheet(sn)
-            anc = engine._ancestors(eid, edges) | {eid}
+            anc = engine._ancestors(sid, edges) | {sid}
             steps = [nid for nid in order if nid in anc]
 
-            ws.cell(1, 1, f"Fichier de sortie : {_output_target(d, name)}").font = _TITLE
-            sub = f"Bloc Export « {label_of(eid)} » — {_describe_block(nodes[eid], [], {}, name)[0]}"
-            ws.cell(2, 1, sub).font = _META
+            if is_report:
+                ws.cell(1, 1, f"État des lieux : {label_of(sid)}").font = _TITLE
+                ws.cell(2, 1, "Bloc d'analyse (non exporté) — profil des données plus bas.").font = _META
+            else:
+                ws.cell(1, 1, f"Fichier de sortie : {_output_target(d, name)}").font = _TITLE
+                ws.cell(2, 1, f"Bloc Export « {label_of(sid)} » — {_describe_block(node, [], {}, name)[0]}").font = _META
             ws.cell(3, 1, f"Produit par {len(steps)} étape(s) de traitement, dans l'ordre d'exécution ci-dessous :").font = _BODY
-            _steps_table(ws, 5, steps, nodes, incoming, label_of, name)
+            next_row = _steps_table(ws, 5, steps, nodes, incoming, label_of, name)
+            if is_report:
+                _write_report_analysis(ws, next_row + 1, pid, wid, sid, d)
     else:
         ws = wb.create_sheet(_unique_sheet_name("Traitements", used_names))
         ws.cell(1, 1, "Traitements du workflow").font = _TITLE
         ws.cell(2, 1, "Ce workflow n'a pas de bloc Export ; voici tous ses traitements, dans l'ordre.").font = _META
         _steps_table(ws, 4, order, nodes, incoming, label_of, name)
 
-    _build_synthesis(synth, name, nodes, order, export_ids, tab_of, label_of)
+    _build_synthesis(synth, name, nodes, order, export_ids, report_ids, tab_of, label_of)
 
     bio = BytesIO()
     wb.save(bio)
     return bio.getvalue()
 
 
-def _build_synthesis(ws, name, nodes, order, export_ids, tab_of, label_of):
+def _build_synthesis(ws, name, nodes, order, export_ids, report_ids, tab_of, label_of):
     ws.column_dimensions["A"].width = 4
     ws.column_dimensions["B"].width = 46
     ws.column_dimensions["C"].width = 60
@@ -698,6 +794,8 @@ def _build_synthesis(ws, name, nodes, order, export_ids, tab_of, label_of):
     for line in (
         "• Une feuille par fichier de sortie (onglets en bas) détaille, étape par étape, tous les",
         "   traitements qui mènent à ce fichier — des fichiers sources jusqu'à l'écriture finale.",
+        "• Les blocs « Analyse » ont aussi leur feuille : un état des lieux des données (composition,",
+        "   valeurs fréquentes, vides) pour le reporting, sans écrire de fichier.",
         "• Les étapes sont listées dans l'ordre d'exécution ; la colonne « Traitement » explique chaque bloc.",
     ):
         ws.cell(r, 1, line).font = _BODY
@@ -741,9 +839,26 @@ def _build_synthesis(ws, name, nodes, order, export_ids, tab_of, label_of):
             ws.cell(r, 3, tab_of.get(eid, "")).font = _BODY
             r += 1
     else:
-        ws.cell(r, 2, "(aucun bloc Export — voir l'onglet « Traitements »)").font = _META
+        msg = ("(aucun fichier exporté — ce workflow ne fait que des analyses, voir ci-dessous)"
+               if report_ids else "(aucun bloc Export — voir l'onglet « Traitements »)")
+        ws.cell(r, 2, msg).font = _META
         r += 1
     r += 1
+
+    # Analysis blocks (états des lieux) — informational, not exported
+    if report_ids:
+        r = section(r, "États des lieux (analyses, non exportées)")
+        ws.cell(r, 2, "Analyse").font = _HEAD
+        ws.cell(r, 3, "Détaillée dans l'onglet").font = _HEAD
+        r += 1
+        for rid in report_ids:
+            d = nodes[rid].get("data") or {}
+            note = (d.get("note") or "").strip()
+            ws.cell(r, 1, "•").font = _BODY
+            ws.cell(r, 2, label_of(rid) + (f"  — {note}" if note else "")).font = _BODY
+            ws.cell(r, 3, tab_of.get(rid, "")).font = _BODY
+            r += 1
+        r += 1
 
     # Legend of block types actually used
     used_types = []

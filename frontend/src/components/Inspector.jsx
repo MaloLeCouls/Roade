@@ -49,6 +49,7 @@ export default function Inspector({ pid, node, files, inputs, onChange, onSchema
       {node.type === 'calc' && <CalcConfig node={node} inputs={inputs} set={set} />}
       {node.type === 'filter' && <FilterConfig node={node} inputs={inputs} set={set} />}
       {node.type === 'cols' && <ColsConfig node={node} inputs={inputs} set={set} />}
+      {node.type === 'report' && <ReportConfig node={node} inputs={inputs} set={set} />}
       {node.type === 'union' && <UnionConfig node={node} inputs={inputs} set={set} />}
       {node.type === 'export' && <ExportConfig node={node} set={set} wfName={wfName} />}
     </div>
@@ -59,7 +60,8 @@ export function typeLabel(t) {
   return {
     source: 'Bloc Source', sql: 'Bloc SQL', dedup: 'Bloc Doublons', validate: 'Bloc Validation',
     pivot: 'Bloc Pivot', clean: 'Bloc Nettoyage', calc: 'Bloc Calcul',
-    filter: 'Bloc Filtre', cols: 'Bloc Colonnes', union: 'Bloc Union', export: 'Bloc Export',
+    filter: 'Bloc Filtre', cols: 'Bloc Colonnes', report: 'Bloc Analyse',
+    union: 'Bloc Union', export: 'Bloc Export',
     frame: 'Cadre',
   }[t] || t
 }
@@ -865,6 +867,49 @@ function ColsConfig({ node, inputs, set }) {
         ))}
         {present.length === 0 && <div className="qb-hint">— colonnes non chargées —</div>}
       </div>
+    </div>
+  )
+}
+
+function ReportConfig({ node, inputs, set }) {
+  const d = node.data
+  const cols = inputs[0]?.columns || []
+  const selected = d.columns || []
+  const toggle = (name) => set({ columns: selected.includes(name) ? selected.filter((c) => c !== name) : [...selected, name] })
+  return (
+    <div className="insp-body">
+      {inputs.length === 0 && <div className="qb-warn">Connectez une entrée puis exécutez l'amont pour charger les colonnes.</div>}
+      <div className="ports-head">
+        <span className="ports-title">Analyse (état des lieux)</span>
+        <InfoBubble>
+          Bloc <b>à titre d'information</b> : il n'écrit aucun fichier et ne se branche sur rien en aval. Il
+          <b> profile</b> les données reçues (composition d'une colonne, valeurs fréquentes, vides, statistiques)
+          pour le <b>reporting</b>. Le résultat s'affiche au clic et apparaît dans la <b>documentation Excel</b>.
+        </InfoBubble>
+      </div>
+
+      <label className="fld insp-desc">
+        <span>Note pour le rapport (le « pourquoi » de cette analyse)</span>
+        <textarea rows={2} placeholder="Ex. : lignes non conformes — voir la composition pour comprendre les rejets…"
+          value={d.note || ''} onChange={(e) => set({ note: e.target.value })} />
+      </label>
+
+      <div className="fld">
+        <div className="fld-head">
+          <span>Colonnes à analyser</span>
+          <InfoBubble>Aucune cochée → <b>toutes</b> les colonnes sont analysées. Cochez-en pour cibler l'état des lieux.</InfoBubble>
+        </div>
+        <div className="checklist">
+          {cols.length === 0 && <div className="qb-hint">— colonnes non chargées —</div>}
+          {cols.map((c) => (
+            <label key={c.name} className="qb-check">
+              <input type="checkbox" checked={selected.includes(c.name)} onChange={() => toggle(c.name)} />
+              {c.name} <span className="coltype-inline">{c.type}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+      <p className="qb-hint">Exécutez le bloc pour générer l'analyse (visible ici et dans la documentation).</p>
     </div>
   )
 }

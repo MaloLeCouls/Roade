@@ -33,7 +33,7 @@ from formula import compile_formula, FormulaError
 OUTPUTS = {
     "source": ["out"], "sql": ["out"], "pivot": ["out"], "clean": ["out"],
     "calc": ["out"], "union": ["out"], "export": [],
-    "filter": ["out"], "cols": ["out"],
+    "filter": ["out"], "cols": ["out"], "report": ["out"],
     "dedup": ["kept", "dups", "uniques"],
     "validate": ["valid", "invalid"],
 }
@@ -911,6 +911,54 @@ def _run_cols(con, pid, node, ins):
     return {"out": out}, {}
 
 
+def _report_column(con, rel, name, type_str, total, top_n=8) -> dict:
+    """État des lieux d'une colonne : type, vides, valeurs distinctes, valeurs les
+    plus fréquentes et — si numérique — min/max/moyenne/médiane. Calculé sur la
+    relation DuckDB déjà enregistrée (même logique que column_profile)."""
+    ident = q_ident(name)
+    nulls = con.execute(f"SELECT count(*) FROM {rel} WHERE {ident} IS NULL").fetchone()[0]
+    distinct = con.execute(f"SELECT count(DISTINCT {ident}) FROM {rel}").fetchone()[0]
+    numeric = _is_numeric_type(type_str)
+    out = {
+        "name": name, "type": type_str, "nulls": int(nulls),
+        "null_pct": round(nulls / total * 100, 1) if total else 0.0,
+        "distinct": int(distinct), "numeric": numeric,
+        "numeric_stats": None, "top_values": [],
+    }
+    if numeric and (total - nulls) > 0:
+        mn, mx, avg, med = con.execute(
+            f"SELECT min({ident}), max({ident}), avg({ident}), median({ident}) "
+            f"FROM {rel} WHERE {ident} IS NOT NULL").fetchone()
+        out["numeric_stats"] = {"min": _json_safe(mn), "max": _json_safe(mx),
+                                "avg": _json_safe(avg), "median": _json_safe(med)}
+    top = con.execute(
+        f"SELECT {ident} AS v, count(*) AS c FROM {rel} GROUP BY v "
+        f"ORDER BY c DESC LIMIT {int(top_n)}").fetchall()
+    out["top_values"] = [{"value": _json_safe(r[0]), "count": int(r[1])} for r in top]
+    return out
+
+
+def _run_report(con, pid, node, ins):
+    """Analyse block ('État des lieux'): a terminal block that doesn't feed any
+    downstream block. It passes its input through (materialized so it stays
+    previewable) and computes a per-column profile stored in the meta, picked up
+    by the block's view and by the documentation export."""
+    d = node["data"]
+    df = _single(ins)
+    con.register("_rep_in", df)
+    try:
+        cols = _describe(con, "_rep_in")
+        wanted = list(d.get("columns") or [])
+        targets = [c for c in cols if (not wanted or c["name"] in wanted)]
+        total = con.execute("SELECT count(*) FROM _rep_in").fetchone()[0]
+        report_cols = [_report_column(con, "_rep_in", c["name"], c["type"], total) for c in targets]
+    finally:
+        con.unregister("_rep_in")
+    report = {"note": (d.get("note") or "").strip(), "row_count": int(total),
+              "analyzed": [c["name"] for c in targets], "columns": report_cols}
+    return {"out": df}, {"report": report}
+
+
 def _run_union(con, pid, node, ins):
     d = node["data"]
     if not ins:
@@ -1032,7 +1080,7 @@ _RUNNERS = {
     "source": _run_source, "sql": _run_sql, "dedup": _run_dedup,
     "validate": _run_validate, "pivot": _run_pivot, "clean": _run_clean,
     "calc": _run_calc, "union": _run_union, "export": _run_export,
-    "filter": _run_filter, "cols": _run_cols,
+    "filter": _run_filter, "cols": _run_cols, "report": _run_report,
 }
 
 
@@ -1344,7 +1392,7 @@ def _reuse_result(pid, wid, node, handles, ntype, locked, signature) -> dict:
         outputs[h] = m.get("row_count", 0)
         if i == 0:
             columns = m.get("columns", [])
-            for k in ("compiled_sql", "clean_report"):
+            for k in ("compiled_sql", "clean_report", "report"):
                 if k in m:
                     extra[k] = m[k]
     return {"type": ntype, "locked": locked, "cached": True, "signature": signature,
@@ -1402,7 +1450,7 @@ def _execute_node(con, pid, wid, node, edges, bypass_cache=False, bypass_lock=Fa
             columns = meta["columns"]
     result = {"type": ntype, "locked": False, "cached": False, "signature": signature,
               "outputs": outputs, "row_count": outputs.get(handles[0], 0), "columns": columns}
-    for k in ("compiled_sql", "clean_report"):
+    for k in ("compiled_sql", "clean_report", "report"):
         if k in extra:
             result[k] = extra[k]
     return result
@@ -1531,6 +1579,7 @@ def preview_node(pid, wid, node_id, handle="out", limit=200, offset=0,
             "row_count": int(row_count), "total_count": int(total),
             "compiled_sql": meta.get("compiled_sql"),
             "clean_report": meta.get("clean_report"),
+            "report": meta.get("report"),
             "stats": meta.get("stats"),
         }
     finally:

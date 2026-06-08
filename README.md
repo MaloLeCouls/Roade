@@ -24,6 +24,10 @@ résultat (un fichier Parquet) ; tout se recalcule en cascade à l'exécution.
   colonne d'un autre tableau (semi-jointure / anti-jointure ; la référence n'est
   pas fusionnée).
 - **Colonnes** — réordonne, supprime et renomme les colonnes.
+- **Analyse** — bloc d'information (non exporté, sans sortie) : fait un *état des
+  lieux* des données reçues (composition d'une colonne, valeurs fréquentes, vides,
+  statistiques). S'affiche au clic et apparaît dans la documentation Excel — utile
+  pour le reporting (ex. comprendre pourquoi des lignes sont rejetées).
 - **Union** — empile plusieurs entrées.
 - **Export** — écrit le résultat en `.xlsx` ou `.csv` (ou comme feuille d'un classeur).
 - **Cadre** — un rectangle pour regrouper visuellement des blocs (le déplacer

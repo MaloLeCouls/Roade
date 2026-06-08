@@ -25,6 +25,7 @@
   --t-calc: #b05a86;
   --t-filter: #3f8c8c;
   --t-cols: #7a6cb0;
+  --t-report: #6b8e3d;
   --t-union: #8a7560;
   --t-export: #c08436;
 
@@ -118,6 +119,7 @@ button.small { padding: 4px 8px; font-size: 12px; }
 .chip.calc .swatch { background: var(--t-calc); }
 .chip.flt .swatch { background: var(--t-filter); }
 .chip.cols .swatch { background: var(--t-cols); }
+.chip.rep .swatch { background: var(--t-report); }
 .chip.uni .swatch { background: var(--t-union); }
 .chip.exp .swatch { background: var(--t-export); }
 .chip.grp .swatch { background: #5b6bb0; }
@@ -147,6 +149,7 @@ button.small { padding: 4px 8px; font-size: 12px; }
 .node-calc { --type: var(--t-calc); }
 .node-filter { --type: var(--t-filter); }
 .node-cols { --type: var(--t-cols); }
+.node-report { --type: var(--t-report); }
 .node-union { --type: var(--t-union); }
 .node-export { --type: var(--t-export); }
 
@@ -534,6 +537,24 @@ table.dt td.idx, table.dt th.idx { background: #fafbfc; color: var(--muted); tex
 .be-view-actions { margin-left: auto; display: flex; gap: 6px; }
 .be-rowcount { font-size: 12px; color: var(--muted); margin: 8px 0 6px; }
 .be-table { max-height: calc(92vh - 170px); overflow: auto; }
+
+/* "Analyse" block view: a note + one card per analysed column */
+.report-note { background: #f3f7ec; border-left: 3px solid var(--t-report); border-radius: var(--radius);
+  padding: 9px 12px; font-size: 13px; color: #36422a; margin: 4px 0 8px; white-space: pre-wrap; }
+.report-cards { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+.report-card { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; }
+.rc-head { display: flex; align-items: baseline; gap: 8px; }
+.rc-head b { font-size: 13.5px; }
+.rc-head .coltype { font-size: 10px; color: var(--muted); text-transform: none; }
+.rc-metrics { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 5px; font-size: 12px; color: var(--muted); }
+.rc-metrics b { color: var(--ink); }
+.rc-num { color: var(--ink-soft); }
+.rc-top { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; }
+.rc-tv { display: grid; grid-template-columns: minmax(60px, 1fr) 90px auto; align-items: center; gap: 8px; font-size: 12px; }
+.rc-tv-lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rc-tv-bar { height: 8px; background: #eef1f6; border-radius: 999px; overflow: hidden; }
+.rc-tv-bar > span { display: block; height: 100%; background: var(--t-report); border-radius: 999px; }
+.rc-tv-c { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
 
 /* validate editor: conditions (left, in the inspector) + outputs pane (right) */
 .conditions-editor { display: flex; flex-direction: column; gap: 10px; }
