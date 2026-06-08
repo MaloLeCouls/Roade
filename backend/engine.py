@@ -33,6 +33,7 @@ from formula import compile_formula, FormulaError
 OUTPUTS = {
     "source": ["out"], "sql": ["out"], "pivot": ["out"], "clean": ["out"],
     "calc": ["out"], "union": ["out"], "export": [],
+    "filter": ["out"], "cols": ["out"],
     "dedup": ["kept", "dups", "uniques"],
     "validate": ["valid", "invalid"],
 }
@@ -849,6 +850,67 @@ def _run_calc(con, pid, node, ins):
     return {"out": out}, {}
 
 
+def _run_filter(con, pid, node, ins):
+    """Membership filter (semi-join / anti-join). Keeps — or excludes — the rows
+    of the main input whose value in a chosen column appears in a chosen column of
+    the reference input. The reference table is only consulted, never merged."""
+    d = node["data"]
+    main = next((df for a, df in ins if a == "in"), None)
+    ref = next((df for a, df in ins if a == "ref"), None)
+    if main is None:
+        raise ValueError("entrée principale « données » non connectée")
+    if ref is None:
+        raise ValueError("entrée de référence « réf » non connectée — branchez le tableau dont on lit les valeurs")
+    col = d.get("column")
+    ref_col = d.get("ref_column")
+    if not col or col not in main.columns:
+        raise ValueError("choisissez la colonne à comparer (côté données)")
+    if not ref_col or ref_col not in ref.columns:
+        raise ValueError("choisissez la colonne de référence (côté réf)")
+
+    mv = main[col]
+    rv = ref[ref_col].dropna()
+    if d.get("case_insensitive"):                  # compare on lowered text
+        rset = set(rv.astype(str).str.lower())
+        present = mv.notna() & mv.astype(str).str.lower().isin(rset)
+    else:
+        present = mv.isin(set(rv.tolist()))
+    keep = d.get("mode", "keep") != "exclude"      # keep = semi-join, exclude = anti-join
+    out = main[present if keep else ~present].reset_index(drop=True)
+    return {"out": out}, {}
+
+
+def _run_cols(con, pid, node, ins):
+    """Reorder / drop / rename columns. The config holds an ordered list of
+    {name, keep, rename}; listed columns come out in that order, dropped ones are
+    removed, and any column that appeared upstream after the list was built is
+    appended unchanged so nothing is silently lost."""
+    d = node["data"]
+    df = _single(ins)
+    items = d.get("columns") or []
+    pairs, seen = [], set()                         # (source_name, output_name)
+    for it in items:
+        name = it.get("name")
+        if not name or name not in df.columns or name in seen:
+            continue
+        seen.add(name)
+        if it.get("keep") is False:
+            continue
+        pairs.append((name, (it.get("rename") or "").strip() or name))
+    for c in df.columns:                            # columns added upstream since: keep as-is
+        if c not in seen:
+            pairs.append((c, c))
+    if not pairs:
+        raise ValueError("aucune colonne conservée — gardez-en au moins une")
+    out_names = [o for _, o in pairs]
+    dups = {n for n in out_names if out_names.count(n) > 1}
+    if dups:
+        raise ValueError("noms de colonnes en double après renommage : " + ", ".join(sorted(dups)))
+    out = df[[s for s, _ in pairs]].copy()
+    out.columns = out_names
+    return {"out": out}, {}
+
+
 def _run_union(con, pid, node, ins):
     d = node["data"]
     if not ins:
@@ -970,6 +1032,7 @@ _RUNNERS = {
     "source": _run_source, "sql": _run_sql, "dedup": _run_dedup,
     "validate": _run_validate, "pivot": _run_pivot, "clean": _run_clean,
     "calc": _run_calc, "union": _run_union, "export": _run_export,
+    "filter": _run_filter, "cols": _run_cols,
 }
 
 

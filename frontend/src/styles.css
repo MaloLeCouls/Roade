@@ -23,6 +23,8 @@
   --t-pivot: #b1605f;
   --t-clean: #4f9a93;
   --t-calc: #b05a86;
+  --t-filter: #3f8c8c;
+  --t-cols: #7a6cb0;
   --t-union: #8a7560;
   --t-export: #c08436;
 
@@ -114,6 +116,8 @@ button.small { padding: 4px 8px; font-size: 12px; }
 .chip.piv .swatch { background: var(--t-pivot); }
 .chip.cln .swatch { background: var(--t-clean); }
 .chip.calc .swatch { background: var(--t-calc); }
+.chip.flt .swatch { background: var(--t-filter); }
+.chip.cols .swatch { background: var(--t-cols); }
 .chip.uni .swatch { background: var(--t-union); }
 .chip.exp .swatch { background: var(--t-export); }
 .chip.grp .swatch { background: #5b6bb0; }
@@ -141,6 +145,8 @@ button.small { padding: 4px 8px; font-size: 12px; }
 .node-pivot { --type: var(--t-pivot); }
 .node-clean { --type: var(--t-clean); }
 .node-calc { --type: var(--t-calc); }
+.node-filter { --type: var(--t-filter); }
+.node-cols { --type: var(--t-cols); }
 .node-union { --type: var(--t-union); }
 .node-export { --type: var(--t-export); }
 
@@ -170,9 +176,9 @@ button.small { padding: 4px 8px; font-size: 12px; }
 .anchor-out { background: var(--type) !important; }
 .port-label { position: absolute; font-size: 9px; font-weight: 700; color: var(--muted); pointer-events: none; }
 
-/* sql inputs labelled 1 (principal) / 2 (jointure) */
-.node-sql .anchor-in2 { background: #c2c8d2 !important; }
-.node-sql .node-body { padding-left: 24px; min-height: 58px; display: flex; flex-direction: column; justify-content: center; }
+/* sql / filter inputs labelled 1 (principal) / 2 (jointure ou référence) */
+.node-sql .anchor-in2, .node-filter .anchor-in2 { background: #c2c8d2 !important; }
+.node-sql .node-body, .node-filter .node-body { padding-left: 24px; min-height: 58px; display: flex; flex-direction: column; justify-content: center; }
 .sql-inlabel { position: absolute; left: 9px; transform: translateY(-50%); font-size: 9px; line-height: 1;
   font-weight: 700; color: var(--muted); pointer-events: none; }
 

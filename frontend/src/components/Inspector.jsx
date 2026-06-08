@@ -47,6 +47,8 @@ export default function Inspector({ pid, node, files, inputs, onChange, onSchema
       {node.type === 'pivot' && <PivotConfig node={node} inputs={inputs} set={set} />}
       {node.type === 'clean' && <CleanConfig node={node} inputs={inputs} set={set} />}
       {node.type === 'calc' && <CalcConfig node={node} inputs={inputs} set={set} />}
+      {node.type === 'filter' && <FilterConfig node={node} inputs={inputs} set={set} />}
+      {node.type === 'cols' && <ColsConfig node={node} inputs={inputs} set={set} />}
       {node.type === 'union' && <UnionConfig node={node} inputs={inputs} set={set} />}
       {node.type === 'export' && <ExportConfig node={node} set={set} wfName={wfName} />}
     </div>
@@ -56,7 +58,8 @@ export default function Inspector({ pid, node, files, inputs, onChange, onSchema
 export function typeLabel(t) {
   return {
     source: 'Bloc Source', sql: 'Bloc SQL', dedup: 'Bloc Doublons', validate: 'Bloc Validation',
-    pivot: 'Bloc Pivot', clean: 'Bloc Nettoyage', calc: 'Bloc Calcul', union: 'Bloc Union', export: 'Bloc Export',
+    pivot: 'Bloc Pivot', clean: 'Bloc Nettoyage', calc: 'Bloc Calcul',
+    filter: 'Bloc Filtre', cols: 'Bloc Colonnes', union: 'Bloc Union', export: 'Bloc Export',
     frame: 'Cadre',
   }[t] || t
 }
@@ -732,6 +735,136 @@ function UnionConfig({ node, inputs, set }) {
         <input type="checkbox" checked={!!d.distinct} onChange={(e) => set({ distinct: e.target.checked })} />
         Supprimer les lignes en double après empilement
       </label>
+    </div>
+  )
+}
+
+function FilterConfig({ node, inputs, set }) {
+  const d = node.data
+  const main = inputs.find((i) => i.alias === 'in')
+  const ref = inputs.find((i) => i.alias === 'ref')
+  const mainCols = main?.columns || []
+  const refCols = ref?.columns || []
+  const keep = d.mode !== 'exclude'
+  return (
+    <div className="insp-body">
+      <div className="ports">
+        <div className="ports-head">
+          <span className="ports-title">Entrées</span>
+          <InfoBubble>
+            <b>Données</b> (ancre <b>D</b>) — le tableau à filtrer.<br />
+            <b>Référence</b> (ancre <b>R</b>) — le tableau dont on lit les valeurs. Il n'est jamais fusionné,
+            seulement consulté.<br />
+            On garde (ou on exclut) les lignes des <b>données</b> dont la colonne choisie figure dans la colonne
+            de <b>référence</b>.
+          </InfoBubble>
+        </div>
+        <div className="ports-row">
+          <PortTag num="D" name="données" source={main} />
+          <PortTag num="R" name="référence" source={ref} />
+        </div>
+      </div>
+
+      <div className="mode-toggle">
+        <button className={keep ? 'on' : ''} onClick={() => set({ mode: 'keep' })}>Garder si présent</button>
+        <button className={!keep ? 'on' : ''} onClick={() => set({ mode: 'exclude' })}>Exclure si présent</button>
+      </div>
+      <p className="qb-hint">
+        {keep
+          ? 'Ne conserve que les lignes des données dont la valeur existe dans la référence (semi-jointure).'
+          : 'Retire les lignes des données dont la valeur existe dans la référence (anti-jointure).'}
+      </p>
+
+      <label className="fld">
+        <span>Colonne à comparer (côté données)</span>
+        <select value={d.column || ''} onChange={(e) => set({ column: e.target.value })}>
+          <option value="">— colonne —</option>
+          {mainCols.length === 0 && <option value="" disabled>(exécutez l'amont « données »)</option>}
+          {mainCols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+        </select>
+      </label>
+
+      <label className="fld">
+        <span>Colonne de référence (côté réf)</span>
+        <select value={d.ref_column || ''} onChange={(e) => set({ ref_column: e.target.value })}>
+          <option value="">— colonne —</option>
+          {refCols.length === 0 && <option value="" disabled>(exécutez l'amont « référence »)</option>}
+          {refCols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+        </select>
+      </label>
+
+      <label className="qb-check">
+        <input type="checkbox" checked={!!d.case_insensitive} onChange={(e) => set({ case_insensitive: e.target.checked })} />
+        Ignorer la casse (comparer le texte sans tenir compte des majuscules)
+      </label>
+      <p className="qb-hint">Le bloc ne garde que les colonnes des données — il n'ajoute aucune colonne de la référence.</p>
+    </div>
+  )
+}
+
+function ColsConfig({ node, inputs, set }) {
+  const d = node.data
+  const cols = inputs[0]?.columns || []
+  const items = d.columns || []
+
+  // Keep the stored list in sync with the upstream schema: append newly-appeared
+  // columns (kept by default), so the user always sees every available column.
+  useEffect(() => {
+    if (cols.length === 0) return
+    const known = new Set(items.map((i) => i.name))
+    const missing = cols.filter((c) => !known.has(c.name))
+    if (missing.length) {
+      set({ columns: [...items, ...missing.map((c) => ({ name: c.name, keep: true, rename: '' }))] })
+    }
+  }, [cols]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const present = items.filter((it) => cols.some((c) => c.name === it.name))
+  const typeOf = (name) => cols.find((c) => c.name === name)?.type
+  const upd = (name, patch) => set({ columns: items.map((it) => (it.name === name ? { ...it, ...patch } : it)) })
+  const move = (i, dir) => {
+    const list = present
+    const j = i + dir
+    if (j < 0 || j >= list.length) return
+    const a = [...list];[a[i], a[j]] = [a[j], a[i]]
+    // re-thread the moved sublist into the full items array order
+    set({ columns: a })
+  }
+  const allKept = present.every((it) => it.keep !== false)
+  const toggleAll = () => set({ columns: items.map((it) => ({ ...it, keep: !allKept })) })
+
+  return (
+    <div className="insp-body">
+      {inputs.length === 0 && <div className="qb-warn">Connectez une entrée puis exécutez l'amont pour charger les colonnes.</div>}
+      <div className="ports-head">
+        <span className="ports-title">Colonnes</span>
+        <InfoBubble>
+          <b>Décochez</b> pour supprimer une colonne, utilisez <b>↑ ↓</b> pour réordonner, et le champ de droite
+          pour <b>renommer</b> (laissez vide pour garder le nom). Les colonnes apparues en amont après coup sont
+          ajoutées automatiquement à la fin.
+        </InfoBubble>
+      </div>
+      {present.length > 0 && (
+        <button className="ghost small" onClick={toggleAll}>{allKept ? 'Tout décocher' : 'Tout cocher'}</button>
+      )}
+      <div className="clean-ops">
+        {present.map((it, i) => (
+          <div className={`clean-op ${it.keep === false ? 'off' : ''}`} key={it.name}>
+            <div className="qb-row">
+              <input type="checkbox" checked={it.keep !== false} onChange={(e) => upd(it.name, { keep: e.target.checked })} title="Garder / supprimer" />
+              <span className="qb-lbl" style={{ flex: 1, fontWeight: 600 }}>{it.name}</span>
+              <span className="coltype-inline">{typeOf(it.name)}</span>
+            </div>
+            <div className="qb-row indent">
+              <span className="qb-lbl">→</span>
+              <input className="qb-input" placeholder={it.name} value={it.rename || ''}
+                onChange={(e) => upd(it.name, { rename: e.target.value })} />
+              <button className="mini" onClick={() => move(i, -1)} disabled={i === 0}><Icon name="up" /></button>
+              <button className="mini" onClick={() => move(i, 1)} disabled={i === present.length - 1}><Icon name="down" /></button>
+            </div>
+          </div>
+        ))}
+        {present.length === 0 && <div className="qb-hint">— colonnes non chargées —</div>}
+      </div>
     </div>
   )
 }

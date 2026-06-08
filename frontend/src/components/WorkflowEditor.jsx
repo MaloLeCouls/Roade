@@ -14,6 +14,8 @@ import ValidateNode from './nodes/ValidateNode'
 import PivotNode from './nodes/PivotNode'
 import CleanNode from './nodes/CleanNode'
 import CalcNode from './nodes/CalcNode'
+import FilterNode from './nodes/FilterNode'
+import ColsNode from './nodes/ColsNode'
 import UnionNode from './nodes/UnionNode'
 import ExportNode from './nodes/ExportNode'
 import GroupNode from './nodes/GroupNode'
@@ -69,7 +71,8 @@ function withComment(Comp) {
 const nodeTypes = {
   source: withComment(SourceNode), sql: withComment(SqlNode), dedup: withComment(DedupNode),
   validate: withComment(ValidateNode), pivot: withComment(PivotNode), clean: withComment(CleanNode),
-  calc: withComment(CalcNode), union: withComment(UnionNode), export: withComment(ExportNode),
+  calc: withComment(CalcNode), filter: withComment(FilterNode), cols: withComment(ColsNode),
+  union: withComment(UnionNode), export: withComment(ExportNode),
   frame: GroupNode,
 }
 const edgeTypes = { deletable: ButtonEdge }
@@ -77,7 +80,8 @@ const edgeTypes = { deletable: ButtonEdge }
 // data-type identity colours (must match CSS --t-*) for ports & links
 const TYPE_COLOR = {
   source: '#4E79A7', sql: '#59734F', dedup: '#8d6ea0', validate: '#5b6bb0',
-  pivot: '#b1605f', clean: '#4f9a93', calc: '#b05a86', union: '#8a7560', export: '#c08436',
+  pivot: '#b1605f', clean: '#4f9a93', calc: '#b05a86', filter: '#3f8c8c', cols: '#7a6cb0',
+  union: '#8a7560', export: '#c08436',
   frame: '#5b6bb0',
 }
 // multi-output handles carry their own role colours
@@ -106,6 +110,8 @@ const DEFAULT_DATA = {
   pivot: { label: 'Pivot', mode: 'pivot', index_columns: [], value_columns: [], pivot_column: '', value_column: '', agg: 'SUM', name_column: 'variable' },
   clean: { label: 'Nettoyage', operations: [] },
   calc: { label: 'Calcul', columns: [] },
+  filter: { label: 'Filtre', mode: 'keep', column: '', ref_column: '', case_insensitive: false },
+  cols: { label: 'Colonnes', columns: [] },
   union: { label: 'Union', by_name: true, distinct: false },
   export: { label: 'Export', filename: 'resultat', format: 'xlsx', auto_name: true, enabled: true, to_workbook: false },
   frame: { label: 'Groupe', w: 460, h: 300, color: '#5b6bb0' },
@@ -118,6 +124,8 @@ const NODE_OUTPUTS = {
   pivot: [{ handle: 'out', label: '' }],
   clean: [{ handle: 'out', label: '' }],
   calc: [{ handle: 'out', label: '' }],
+  filter: [{ handle: 'out', label: '' }],
+  cols: [{ handle: 'out', label: '' }],
   union: [{ handle: 'out', label: '' }],
   export: [],
   frame: [],
@@ -495,7 +503,7 @@ function Editor({ pid, wid, onBack }) {
   // ---- inputs for the selected SQL node ----
   const selectedNode = nodes.find((n) => n.id === selectedId) || null
   const inspectorInputs = useMemo(() => {
-    const withInputs = ['sql', 'dedup', 'validate', 'pivot', 'clean', 'calc', 'union']
+    const withInputs = ['sql', 'dedup', 'validate', 'pivot', 'clean', 'calc', 'filter', 'cols', 'union']
     if (!selectedNode || !withInputs.includes(selectedNode.type)) return []
     const ins = edges
       .filter((e) => e.target === selectedNode.id)
@@ -588,6 +596,8 @@ function Editor({ pid, wid, onBack }) {
             <button className="chip piv" onClick={() => addNode('pivot')}><span className="swatch" />Pivot</button>
             <button className="chip cln" onClick={() => addNode('clean')}><span className="swatch" />Nettoyage</button>
             <button className="chip calc" onClick={() => addNode('calc')}><span className="swatch" />Calcul</button>
+            <button className="chip flt" onClick={() => addNode('filter')} title="Filtre : ne garde (ou exclut) que les lignes dont une colonne figure dans un autre tableau"><span className="swatch" />Filtre</button>
+            <button className="chip cols" onClick={() => addNode('cols')} title="Colonnes : réordonner, supprimer ou renommer les colonnes"><span className="swatch" />Colonnes</button>
             <button className="chip uni" onClick={() => addNode('union')}><span className="swatch" />Union</button>
             <button className="chip exp" onClick={() => addNode('export')}><span className="swatch" />Export</button>
             <button className="chip grp" onClick={() => addNode('frame')} title="Cadre : regroupe visuellement des blocs ; le déplacer déplace son contenu"><span className="swatch" />Cadre</button>

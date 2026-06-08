@@ -20,6 +20,10 @@ résultat (un fichier Parquet) ; tout se recalcule en cascade à l'exécution.
 - **Pivot** — pivote / dépivote.
 - **Nettoyage** — opérations de nettoyage en série, avec rapport.
 - **Calcul** — colonnes calculées par formules (style Excel), et fonctions par groupe.
+- **Filtre** — ne garde (ou exclut) que les lignes dont une colonne figure dans la
+  colonne d'un autre tableau (semi-jointure / anti-jointure ; la référence n'est
+  pas fusionnée).
+- **Colonnes** — réordonne, supprime et renomme les colonnes.
 - **Union** — empile plusieurs entrées.
 - **Export** — écrit le résultat en `.xlsx` ou `.csv` (ou comme feuille d'un classeur).
 - **Cadre** — un rectangle pour regrouper visuellement des blocs (le déplacer
