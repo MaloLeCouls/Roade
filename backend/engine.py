@@ -1159,8 +1159,7 @@ def _run_export(con, pid, node, ins, export_sink=None, workflow_name=None, force
         wb_path = storage.files_dir(pid) / f"{wb}.xlsx"
         sheet = _sanitize_sheet_name(fn)
         export_sink.setdefault(str(wb_path), []).append((sheet, df))
-        # df is also returned (under 'out') so the editor can preview the exported data
-        return {"out": df}, {"exported": f"{wb}.xlsx", "sheet": sheet, "row_count": n, "deferred": True}
+        return {}, {"exported": f"{wb}.xlsx", "sheet": sheet, "row_count": n, "deferred": True}
 
     fmt = (d.get("format") or "xlsx").lower()
     if fmt == "csv":
@@ -1169,7 +1168,7 @@ def _run_export(con, pid, node, ins, export_sink=None, workflow_name=None, force
     else:
         out_path = storage.files_dir(pid) / f"{fn}.xlsx"
         df.to_excel(out_path, index=False)
-    return {"out": df}, {"exported": out_path.name, "row_count": n}
+    return {}, {"exported": out_path.name, "row_count": n}
 
 
 def _write_workbook(path, sheets, fresh=True):
@@ -1581,10 +1580,6 @@ def _execute_node(con, pid, wid, node, edges, bypass_cache=False, bypass_lock=Fa
         out_dfs, extra = runner(con, pid, node, ins)
 
     if not handles:  # export (always runs; nothing to cache)
-        # Materialize the exported data under handle 'out' so the editor can preview
-        # it — without exposing an output anchor (export stays a terminal sink).
-        if ntype == "export" and isinstance(out_dfs.get("out"), pd.DataFrame):
-            _write_output(pid, wid, node, "out", out_dfs["out"], {})
         return {"type": ntype, "locked": False, "cached": False, "signature": signature,
                 "row_count": extra.get("row_count", 0), "outputs": {}, "columns": [], **extra}
 
@@ -1702,8 +1697,29 @@ def _build_where(columns, filters, q) -> str:
     return " AND ".join(clauses)
 
 
+def _passthrough_source(pid, wid, node_id, handle):
+    """Where to read a node's preview from. An Export block is a pass-through sink
+    (it writes a file, transforms nothing) and stores no output of its own — so its
+    preview is read straight from its upstream input. Returns (node_id, handle) of
+    the parquet to read, falling back to the node itself when no redirect applies."""
+    path = storage.node_parquet(pid, wid, node_id, handle)
+    if path.exists():
+        return node_id, handle
+    wf = storage.get_workflow(pid, wid)
+    if not wf:
+        return node_id, handle
+    node = next((n for n in wf.get("nodes", []) if n["id"] == node_id), None)
+    if not node or node.get("type") != "export":
+        return node_id, handle
+    for e in wf.get("edges", []):                       # the export's single input edge
+        if e.get("target") == node_id:
+            return e.get("source"), e.get("sourceHandle") or "out"
+    return node_id, handle
+
+
 def preview_node(pid, wid, node_id, handle="out", limit=200, offset=0,
                  sort=None, direction="asc", filters=None, q=None) -> dict:
+    node_id, handle = _passthrough_source(pid, wid, node_id, handle)
     path = storage.node_parquet(pid, wid, node_id, handle)
     if not path.exists():
         return {"available": False}
@@ -1739,6 +1755,7 @@ def preview_node(pid, wid, node_id, handle="out", limit=200, offset=0,
 
 
 def column_profile(pid, wid, node_id, column, handle="out") -> dict:
+    node_id, handle = _passthrough_source(pid, wid, node_id, handle)
     path = storage.node_parquet(pid, wid, node_id, handle)
     if not path.exists():
         return {"available": False}

@@ -62,7 +62,7 @@ function BlockView({ pid, wid, node, status, onChange, onRun, onPreview }) {
   if (node.type === 'export') {
     return <OutputPreview pid={pid} wid={wid} node={node} status={status} onRun={onRun} onPreview={onPreview}
       title="Données exportées"
-      note={<><Icon name="download" size={13} /> Ce bloc écrit un fichier dans <b>files/</b>. L'aperçu ci-dessous montre les données écrites.</>} />
+      note={<><Icon name="download" size={13} /> Ce bloc écrit un fichier dans <b>files/</b>. L'aperçu ci-dessous montre les données à exporter (lues depuis le bloc amont).</>} />
   }
   return <OutputPreview pid={pid} wid={wid} node={node} status={status} onRun={onRun} onPreview={onPreview} />
 }
