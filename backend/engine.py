@@ -1620,8 +1620,9 @@ def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False):
         run_set = _ancestors(only_node, edges) | {only_node}
     else:
         run_set = set(nodes)
-    # frames (visual-only containers; legacy type name "group") never execute
-    run_ids = [nid for nid in order if nid in run_set and nodes[nid]["type"] not in ("frame", "group")]
+    # visual-only nodes never execute: frames (legacy name "group") and "stop"
+    # caps (mark an output as closed on purpose; they consume but produce nothing)
+    run_ids = [nid for nid in order if nid in run_set and nodes[nid]["type"] not in ("frame", "group", "stop")]
 
     yield {"event": "start", "total": len(run_ids)}
     con = duckdb.connect()

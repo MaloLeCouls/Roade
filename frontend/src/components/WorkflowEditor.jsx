@@ -20,6 +20,7 @@ import ReportNode from './nodes/ReportNode'
 import UnionNode from './nodes/UnionNode'
 import ExportNode from './nodes/ExportNode'
 import GroupNode from './nodes/GroupNode'
+import StopNode from './nodes/StopNode'
 import DataPreview from './DataPreview'
 import BlockEditor from './BlockEditor'
 import WorkflowFlow from './WorkflowFlow'
@@ -74,7 +75,7 @@ const nodeTypes = {
   validate: withComment(ValidateNode), pivot: withComment(PivotNode), clean: withComment(CleanNode),
   calc: withComment(CalcNode), filter: withComment(FilterNode), cols: withComment(ColsNode),
   report: withComment(ReportNode), union: withComment(UnionNode), export: withComment(ExportNode),
-  frame: GroupNode,
+  frame: GroupNode, stop: StopNode,
 }
 const edgeTypes = { deletable: ButtonEdge }
 
@@ -83,7 +84,7 @@ const TYPE_COLOR = {
   source: '#4E79A7', sql: '#59734F', dedup: '#8d6ea0', validate: '#5b6bb0',
   pivot: '#b1605f', clean: '#4f9a93', calc: '#b05a86', filter: '#3f8c8c', cols: '#7a6cb0',
   report: '#6b8e3d', union: '#8a7560', export: '#c08436',
-  frame: '#5b6bb0',
+  frame: '#5b6bb0', stop: '#7d8590',
 }
 // multi-output handles carry their own role colours
 const HANDLE_COLOR = {
@@ -117,6 +118,7 @@ const DEFAULT_DATA = {
   union: { label: 'Union', by_name: true, distinct: false },
   export: { label: 'Export', filename: 'resultat', format: 'xlsx', auto_name: true, enabled: true, to_workbook: false },
   frame: { label: 'Groupe', w: 460, h: 300, color: '#5b6bb0' },
+  stop: { label: 'Bouchon', note: '' },
 }
 
 // The "add a block" palette (replaces a long chip row that overflowed the toolbar).
@@ -134,6 +136,7 @@ const BLOCK_PALETTE = [
   ['union', 'Union', 'Empile plusieurs entrées'],
   ['export', 'Export', 'Écrit un fichier de sortie'],
   ['frame', 'Cadre', 'Regroupe visuellement des blocs'],
+  ['stop', 'Bouchon', 'Marque une sortie laissée fermée volontairement (note au survol)'],
 ]
 
 // Blocks that can be dropped *onto a link* (split the link in two): they consume
@@ -156,6 +159,7 @@ const NODE_OUTPUTS = {
   report: [{ handle: 'out', label: '' }],
   export: [],
   frame: [],
+  stop: [],
   dedup: [
     { handle: 'kept', label: 'Dédoublonné' },
     { handle: 'dups', label: 'Doublons' },
@@ -171,7 +175,7 @@ const NODE_OUTPUTS = {
 // (user-defined outputs + optional 'else'). Mirrors backend _output_handles.
 function nodeOutputs(node) {
   if (!node) return [{ handle: 'out', label: '' }]
-  if (node.type === 'frame') return []          // frames produce no data
+  if (node.type === 'frame' || node.type === 'stop') return []   // produce no data
   if (node.type === 'validate' && node.data?.mode === 'route') {
     const outs = (node.data.outputs || []).map((o) => ({ handle: o.id, label: o.label || o.id, color: o.color }))
     if (node.data.else_enabled !== false) {
@@ -607,7 +611,7 @@ function Editor({ pid, wid, onBack }) {
   const dirtyMap = useMemo(() => {
     const self = {}
     for (const n of nodes) {
-      if (n.type === 'frame') { self[n.id] = false; continue }   // frames aren't computed
+      if (n.type === 'frame' || n.type === 'stop') { self[n.id] = false; continue }   // not computed
       const stamp = runStamps[n.id]
       self[n.id] = stamp === undefined ? true : nodeDataSig(n.data) !== stamp
     }
@@ -740,7 +744,7 @@ function Editor({ pid, wid, onBack }) {
               onNodeDrag={onNodeDrag}
               onNodeDragStop={onNodeDragStop}
               onNodesDelete={(dl) => setEdges((eds) => eds.filter((e) => !dl.some((n) => n.id === e.source || n.id === e.target)))}
-              onNodeClick={(_, n) => { setSelectedId(n.id); if (n.type !== 'frame') setEditorNode(n.id) }}
+              onNodeClick={(_, n) => { setSelectedId(n.id); if (n.type !== 'frame' && n.type !== 'stop') setEditorNode(n.id) }}
               onNodeContextMenu={(e, n) => { e.preventDefault(); setSelectedId(n.id); setMenu({ id: n.id, x: e.clientX, y: e.clientY }) }}
               onPaneClick={() => { setSelectedId(null); setMenu(null) }}
               nodeTypes={nodeTypes}
