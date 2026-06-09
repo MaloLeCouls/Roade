@@ -924,6 +924,12 @@ function ColsConfig({ node, inputs, set }) {
   }
   const allKept = present.every((it) => it.keep !== false)
   const toggleAll = () => set({ columns: items.map((it) => ({ ...it, keep: !allKept })) })
+  // Stable partition: checked columns float to the top (keeping their order), unchecked sink below.
+  const keptToTop = () => set({ columns: [
+    ...present.filter((it) => it.keep !== false),
+    ...present.filter((it) => it.keep === false),
+  ] })
+  const mixed = present.some((it) => it.keep === false) && present.some((it) => it.keep !== false)
 
   return (
     <div className="insp-body">
@@ -937,7 +943,12 @@ function ColsConfig({ node, inputs, set }) {
         </InfoBubble>
       </div>
       {present.length > 0 && (
-        <button className="ghost small" onClick={toggleAll}>{allKept ? 'Tout décocher' : 'Tout cocher'}</button>
+        <div className="qb-row">
+          <button className="ghost small" onClick={toggleAll}>{allKept ? 'Tout décocher' : 'Tout cocher'}</button>
+          {mixed && (
+            <button className="ghost small" onClick={keptToTop} title="Remonter les colonnes cochées tout en haut">Cochées en haut</button>
+          )}
+        </div>
       )}
       <div className="clean-ops">
         {present.map((it, i) => (
