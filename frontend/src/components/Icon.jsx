@@ -48,6 +48,8 @@ export default function Icon({ name, size = 14 }) {
       return <svg style={s} viewBox="0 0 16 16"><circle {...P} cx="8" cy="8" r="6.5" /><path {...P} d="M8 7.3v3.6" /><path {...P} d="M8 5.1h.01" /></svg>
     case 'external':
       return <svg style={s} viewBox="0 0 16 16"><path {...P} d="M12.5 9V13H3V3.5h4" /><path {...P} d="M9.5 3H13v3.5" /><path {...P} d="M13 3L7.5 8.5" /></svg>
+    case 'maximize':
+      return <svg style={s} viewBox="0 0 16 16"><path {...P} d="M6 2.5H2.5V6M10 2.5h3.5V6M6 13.5H2.5V10M10 13.5h3.5V10" /></svg>
     default:
       return null
   }

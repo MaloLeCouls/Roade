@@ -586,6 +586,15 @@ table.dt td.idx, table.dt th.idx { background: #fafbfc; color: var(--muted); tex
 .opane-flow .flow-svg { max-height: 240px; }
 .opane-flow .route-flow-head { margin-bottom: 14px; flex-wrap: wrap; }
 .opane-flow .route-mode { margin: 0 2px; }
+.opane-flow-body { position: relative; }
+/* explicit loading state over the flow map (covers the stale "connect an input" message) */
+.flow-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px;
+  background: rgba(255,255,255,.72); font-size: 12.5px; color: var(--muted); border-radius: var(--radius); }
+
+/* fullscreen flow map (Agrandir) — scrolls when there are many outputs */
+.modal.flowmap-modal { width: min(1100px, 92vw); height: min(820px, 92vh); }
+.flowmap-modal-body { flex: 1; min-height: 0; overflow: auto; padding: 16px 20px; }
+.flowmap-modal-body .flow-svg { max-height: none; }
 .opane-outs { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
 .opane-outs-list { display: flex; flex-direction: column; gap: 9px; overflow-y: auto; padding-right: 3px; }
 .opane-outs-list .route-else { margin-top: 2px; }

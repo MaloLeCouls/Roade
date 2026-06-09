@@ -60,13 +60,9 @@ function BlockView({ pid, wid, node, status, onChange, onRun, onPreview }) {
     return <ReportView pid={pid} wid={wid} node={node} status={status} onRun={onRun} onPreview={onPreview} />
   }
   if (node.type === 'export') {
-    return (
-      <div className="be-view-empty">
-        <Icon name="download" size={28} />
-        <p>Le bloc Export écrit un fichier dans <b>files/</b>. Exécutez le workflow pour le générer.</p>
-        <button className="primary" onClick={() => onRun()}>Exécuter</button>
-      </div>
-    )
+    return <OutputPreview pid={pid} wid={wid} node={node} status={status} onRun={onRun} onPreview={onPreview}
+      title="Données exportées"
+      note={<><Icon name="download" size={13} /> Ce bloc écrit un fichier dans <b>files/</b>. L'aperçu ci-dessous montre les données écrites.</>} />
   }
   return <OutputPreview pid={pid} wid={wid} node={node} status={status} onRun={onRun} onPreview={onPreview} />
 }
@@ -85,7 +81,7 @@ function ValidateView({ pid, wid, node, status, onChange, onRun, onPreview }) {
       </div>
       <div className="be-tabcontent">
         {tab === 'settings'
-          ? <OutputsPane pid={pid} wid={wid} node={node} onChange={onChange}
+          ? <OutputsPane pid={pid} wid={wid} node={node} onChange={onChange} onRun={onRun}
               onPreview={(h) => { setHandle(h); setTab('preview') }} />
           : <OutputPreview pid={pid} wid={wid} node={node} status={status} onRun={onRun} onPreview={onPreview} initialHandle={handle} />}
       </div>
@@ -93,7 +89,7 @@ function ValidateView({ pid, wid, node, status, onChange, onRun, onPreview }) {
   )
 }
 
-function OutputPreview({ pid, wid, node, status, onRun, onPreview, initialHandle }) {
+function OutputPreview({ pid, wid, node, status, onRun, onPreview, initialHandle, title, note }) {
   const outs = outputsOf(node)
   const [handle, setHandle] = useState(initialHandle || outs[0]?.handle || 'out')
   const [data, setData] = useState(null)
@@ -108,8 +104,9 @@ function OutputPreview({ pid, wid, node, status, onRun, onPreview, initialHandle
 
   return (
     <div className="be-view-inner">
+      {note && <div className="report-note">{note}</div>}
       <div className="route-flow-head">
-        <span className="ports-title">Aperçu de la sortie</span>
+        <span className="ports-title">{title || 'Aperçu de la sortie'}</span>
         <div className="be-view-actions">
           {/* one "Exécuter" at a time: here once there is data, else the big CTA below */}
           {data?.available && (

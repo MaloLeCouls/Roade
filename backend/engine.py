@@ -1159,7 +1159,8 @@ def _run_export(con, pid, node, ins, export_sink=None, workflow_name=None, force
         wb_path = storage.files_dir(pid) / f"{wb}.xlsx"
         sheet = _sanitize_sheet_name(fn)
         export_sink.setdefault(str(wb_path), []).append((sheet, df))
-        return {}, {"exported": f"{wb}.xlsx", "sheet": sheet, "row_count": n, "deferred": True}
+        # df is also returned (under 'out') so the editor can preview the exported data
+        return {"out": df}, {"exported": f"{wb}.xlsx", "sheet": sheet, "row_count": n, "deferred": True}
 
     fmt = (d.get("format") or "xlsx").lower()
     if fmt == "csv":
@@ -1168,7 +1169,7 @@ def _run_export(con, pid, node, ins, export_sink=None, workflow_name=None, force
     else:
         out_path = storage.files_dir(pid) / f"{fn}.xlsx"
         df.to_excel(out_path, index=False)
-    return {}, {"exported": out_path.name, "row_count": n}
+    return {"out": df}, {"exported": out_path.name, "row_count": n}
 
 
 def _write_workbook(path, sheets, fresh=True):
@@ -1580,6 +1581,10 @@ def _execute_node(con, pid, wid, node, edges, bypass_cache=False, bypass_lock=Fa
         out_dfs, extra = runner(con, pid, node, ins)
 
     if not handles:  # export (always runs; nothing to cache)
+        # Materialize the exported data under handle 'out' so the editor can preview
+        # it — without exposing an output anchor (export stays a terminal sink).
+        if ntype == "export" and isinstance(out_dfs.get("out"), pd.DataFrame):
+            _write_output(pid, wid, node, "out", out_dfs["out"], {})
         return {"type": ntype, "locked": False, "cached": False, "signature": signature,
                 "row_count": extra.get("row_count", 0), "outputs": {}, "columns": [], **extra}
 

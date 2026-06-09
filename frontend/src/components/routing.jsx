@@ -391,7 +391,7 @@ function ConditionTester({ cond, caseSensitive, onChange }) {
  *  RIGHT — flow map + outputs settings (the "where it goes") + preview
  * ======================================================================== */
 
-export function OutputsPane({ pid, wid, node, onChange, onPreview }) {
+export function OutputsPane({ pid, wid, node, onChange, onRun, onPreview }) {
   const dist = useRoutePreview(pid, wid, node)
   const d = node.data
   const conditions = d.conditions || []
@@ -403,6 +403,7 @@ export function OutputsPane({ pid, wid, node, onChange, onPreview }) {
   // display-only sort of the flow map (does NOT touch the outputs' real order —
   // in 'first' mode that order drives the partition routing).
   const [sortDesc, setSortDesc] = useState(false)
+  const [zoom, setZoom] = useState(false)        // enlarge the flow map (many outputs)
 
   // "Split by value": scan the input for distinct extracted values and turn each
   // into an output. Re-scanning reuses an existing output's id for a value already
@@ -465,10 +466,27 @@ export function OutputsPane({ pid, wid, node, onChange, onPreview }) {
             title={sortDesc ? 'Ordre des sorties' : 'Trier par effectif décroissant'}>
             <Icon name="sort" size={13} /> {sortDesc ? 'décroissant' : 'trier'}
           </button>
+          <button className="flow-sort" onClick={() => setZoom(true)} disabled={!flowItems.length}
+            title="Agrandir la carte des flux (utile quand il y a beaucoup de sorties)">
+            <Icon name="maximize" size={13} /> Agrandir
+          </button>
+          {onRun && (
+            <button className="ghost small" onClick={() => onRun()} title="Exécuter ce bloc">
+              <Icon name="play" size={13} /> Exécuter
+            </button>
+          )}
           <span className="route-total">Entrée : {dist.total.toLocaleString('fr-FR')}</span>
         </div>
-        {dist.error ? <div className="qb-warn">{dist.error}</div> : <FlowMap items={flowItems} total={dist.total} height={230} />}
+        <div className="opane-flow-body">
+          {dist.error && !dist.loading
+            ? <div className="qb-warn">{dist.error}</div>
+            : <FlowMap items={flowItems} total={dist.total} height={230} />}
+          {dist.loading && (
+            <div className="flow-loading"><span className="vtest-spin">…</span> Calcul de la répartition…</div>
+          )}
+        </div>
       </div>
+      {zoom && <FlowMapModal items={flowItems} total={dist.total} onClose={() => setZoom(false)} />}
 
       <div className="opane-outs">
         <div className="ports-head">
@@ -626,5 +644,30 @@ export function FlowMap({ items, total, height = 380 }) {
         )}
       </g>
     </svg>
+  )
+}
+
+// Fullscreen flow map — height scales with the number of outputs so every band
+// stays readable even with dozens of outputs (e.g. after a "split by value").
+function FlowMapModal({ items, total, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  const height = Math.max(440, items.length * 46)
+  return (
+    <div className="modal-backdrop" style={{ zIndex: 70 }} onClick={onClose}>
+      <div className="modal flowmap-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <h3>Carte des flux</h3>
+          <span className="route-total" style={{ marginLeft: 12 }}>Entrée : {total.toLocaleString('fr-FR')} · {items.length} sortie(s)</span>
+          <button className="ghost small" style={{ marginLeft: 'auto' }} onClick={onClose}><Icon name="x" /></button>
+        </div>
+        <div className="flowmap-modal-body">
+          <FlowMap items={items} total={total} height={height} />
+        </div>
+      </div>
+    </div>
   )
 }
