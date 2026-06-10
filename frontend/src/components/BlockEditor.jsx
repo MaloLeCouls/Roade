@@ -277,7 +277,7 @@ function PieChart({ slices }) {
 const _fmtNum = (n) => (typeof n === 'number' ? n.toLocaleString('fr-FR') : (n ?? '—'))
 const _keyLabel = (kobj) => Object.values(kobj || {})
   .map((v) => (v === null || v === undefined || v === '' ? '(vide)' : String(v))).join(' · ') || '(vide)'
-const _fmtCell = (v) => (v === null || v === undefined || v === '' ? '∅' : String(v))
+const _isEmpty = (v) => v === null || v === undefined || v === ''
 
 function KeysTile({ v, l }) {
   return <div className="keys-tile"><b>{_fmtNum(v)}</b><span>{l}</span></div>
@@ -309,7 +309,9 @@ function GroupBlock({ grp, keyCols, defaultOpen }) {
                   <tbody>{rows.map((r, i) => (
                     <tr key={i}>
                       <td className="rownum">{i + 1}</td>
-                      {cols.map((c) => <td key={c} title={_fmtCell(r[c])}>{_fmtCell(r[c])}</td>)}
+                      {cols.map((c) => _isEmpty(r[c])
+                        ? <td key={c} className="keys-null"><i>(vide)</i></td>
+                        : <td key={c} title={String(r[c])}>{String(r[c])}</td>)}
                     </tr>
                   ))}</tbody>
                 </table>

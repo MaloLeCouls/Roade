@@ -638,6 +638,7 @@ table.dt td.idx, table.dt th.idx { background: #fafbfc; color: var(--muted); tex
 .keys-grid thead th.rownum { z-index: 3; }
 .keys-grid tbody tr:hover td { background: #fafbff; }
 .keys-grid tbody tr:hover td.rownum { background: #eef1f7; }
+.keys-grid td.keys-null { color: #b6093b; background: #fdeef2; font-size: 11px; }
 
 /* validate editor: conditions (left, in the inspector) + outputs pane (right) */
 .conditions-editor { display: flex; flex-direction: column; gap: 10px; }
