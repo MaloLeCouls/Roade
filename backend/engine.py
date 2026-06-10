@@ -475,7 +475,12 @@ def _group_one_check_mask(work, df, keys, ck, cs, default_col):
             return work.groupby(keys, dropna=False)[col].transform(lambda s: s.notna().any()).astype(bool)
         return pd.Series(bool(work[col].notna().any()), index=df.index)
     if check == "unique":
-        return ~work.duplicated(subset=keys + [col], keep=False)
+        # group-atomic: the WHOLE group is OK iff every value is distinct
+        # (nunique == size), broadcast to all its rows — so a group is never split.
+        if keys:
+            g = work.groupby(keys, dropna=False)[col]
+            return g.transform(lambda s: s.nunique(dropna=False)) == g.transform("size")
+        return pd.Series(work[col].nunique(dropna=False) == len(work), index=df.index)
     if check == "constant":
         return _distinct() <= 1
     if check in ("distinct_eq", "distinct_min", "distinct_max"):
