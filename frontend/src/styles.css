@@ -591,6 +591,54 @@ table.dt td.idx, table.dt th.idx { background: #fafbfc; color: var(--muted); tex
 .rc-table td { border-bottom: 1px solid var(--line-soft); padding: 4px 6px; }
 .rc-table td:last-child { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; width: 90px; }
 
+/* « Clés multiples » key picker (inspector) */
+.keys-pick { display: flex; flex-wrap: wrap; gap: 3px 12px; margin-top: 3px; }
+.keys-pick .qb-check { margin: 0; }
+
+/* « Clés multiples » analysis */
+.keys-card { display: flex; flex-direction: column; gap: 10px; }
+.keys-verdict { font-size: 12.5px; padding: 6px 10px; border-radius: 6px; font-weight: 600; }
+.keys-verdict.ok { background: #e9f6ec; color: #1f7a3d; }
+.keys-verdict.warn { background: #fdf3e3; color: #9a6512; }
+.keys-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; }
+.keys-tile { border: 1px solid var(--line-soft); border-radius: 6px; padding: 6px 8px; display: flex; flex-direction: column; gap: 1px; }
+.keys-tile b { font-size: 15px; font-variant-numeric: tabular-nums; }
+.keys-tile span { font-size: 10.5px; color: var(--muted); }
+.keys-sec { display: flex; flex-direction: column; gap: 5px; }
+.keys-sec-h { font-size: 11.5px; font-weight: 600; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .03em;
+  display: flex; align-items: center; gap: 8px; }
+.keys-toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+.keys-toggle button { border: none; background: none; padding: 1px 9px; font-size: 10.5px; text-transform: none; cursor: pointer; color: var(--muted); }
+.keys-toggle button.on { background: var(--t-report); color: #fff; }
+.keys-cons { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.keys-cons td { border-bottom: 1px solid var(--line-soft); padding: 4px 6px; }
+.keys-cons td:last-child { text-align: right; }
+.keys-cons tr.varies td:first-child { font-weight: 600; }
+.keys-badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
+.keys-badge.ok { background: #eef3ee; color: #4a7a52; }
+.keys-badge.warn { background: #fbeede; color: #9a6512; cursor: help; }
+.keys-search { display: flex; align-items: center; gap: 6px; }
+.keys-search input { flex: 1; border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font-size: 12.5px; }
+.keys-hint { font-size: 11.5px; color: var(--muted); margin: 0; }
+.keys-groups { display: flex; flex-direction: column; gap: 4px; }
+.keys-group { border: 1px solid var(--line-soft); border-radius: 6px; overflow: hidden; }
+.keys-group-h { width: 100%; display: flex; align-items: center; gap: 7px; padding: 5px 8px; background: none; border: none;
+  cursor: pointer; font-size: 12.5px; text-align: left; }
+.keys-group-h.on { background: var(--bg-soft, #f6f7f9); }
+.keys-group-k { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.keys-group-n { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 11.5px; }
+.keys-group-body { border-top: 1px solid var(--line-soft); padding: 6px; display: flex; flex-direction: column; gap: 4px; }
+.keys-grid-wrap { max-height: 260px; overflow: auto; border: 1px solid var(--line-soft); border-radius: 4px; }
+.keys-grid { border-collapse: separate; border-spacing: 0; font-size: 12px; white-space: nowrap; }
+.keys-grid th, .keys-grid td { padding: 3px 9px; border-bottom: 1px solid var(--line-soft);
+  border-right: 1px solid var(--line-soft); text-align: left; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+.keys-grid thead th { position: sticky; top: 0; z-index: 2; background: #f1f4f9; color: var(--muted); font-weight: 600; }
+.keys-grid td.rownum, .keys-grid th.rownum { position: sticky; left: 0; z-index: 1; background: #f7f8fb; color: var(--muted);
+  text-align: right; font-variant-numeric: tabular-nums; width: 36px; min-width: 36px; }
+.keys-grid thead th.rownum { z-index: 3; }
+.keys-grid tbody tr:hover td { background: #fafbff; }
+.keys-grid tbody tr:hover td.rownum { background: #eef1f7; }
+
 /* validate editor: conditions (left, in the inspector) + outputs pane (right) */
 .conditions-editor { display: flex; flex-direction: column; gap: 10px; }
 .opane { display: flex; flex-direction: column; gap: 12px; height: 100%; min-height: 0; }

@@ -433,7 +433,9 @@ def _group_condition_mask(df: pd.DataFrame, cond: dict, cs: bool, default_col: s
         unique       : the value differs from every other in its group.
         constant     : the group holds a single distinct value.
         distinct_eq/min/max : the group has = / ≥ / ≤ N distinct values.
-        contains/not_contains : the group does / doesn't hold a given value."""
+        contains/not_contains : the group does / doesn't hold a given value.
+        no_null      : the column is never null/empty anywhere in the group.
+        not_all_null : the column has at least one non-null value in the group."""
     check = cond.get("check") or "unique"
     keys = [c for c in (cond.get("group_by") or []) if c in df.columns]
     false = pd.Series(False, index=df.index)
@@ -477,6 +479,18 @@ def _group_condition_mask(df: pd.DataFrame, cond: dict, cs: bool, default_col: s
             return work.groupby(keys, dropna=False)[col].transform(lambda s: s.nunique(dropna=False))
         return pd.Series(work[col].nunique(dropna=False), index=df.index)
 
+    if check == "no_null":                        # group OK iff col never null inside it
+        if keys:
+            ok = work.groupby(keys, dropna=False)[col].transform(lambda s: s.notna().all())
+        else:
+            ok = pd.Series(bool(work[col].notna().all()), index=df.index)
+        return ok.astype(bool)
+    if check == "not_all_null":                   # group OK iff col not entirely null
+        if keys:
+            ok = work.groupby(keys, dropna=False)[col].transform(lambda s: s.notna().any())
+        else:
+            ok = pd.Series(bool(work[col].notna().any()), index=df.index)
+        return ok.astype(bool)
     if check == "unique":
         return ~work.duplicated(subset=keys + [col], keep=False)
     if check == "constant":
@@ -1080,6 +1094,96 @@ def _compute_analysis(df: pd.DataFrame, spec: dict, col: str, type_str: str, tot
     }
 
 
+def _keys_size_bucket(n: int) -> str:
+    if n <= 3:
+        return str(n)
+    if n <= 5:
+        return "4–5"
+    if n <= 10:
+        return "6–10"
+    return "11+"
+
+
+_KEYS_BUCKET_ORDER = ["1", "2", "3", "4–5", "6–10", "11+"]
+
+
+def _compute_keys_analysis(df: pd.DataFrame, spec: dict, types: dict, total: int) -> dict:
+    """Multi-key / cardinality analysis. Groups rows by a key (one or several
+    columns) and profiles the *groups*: duplicate/uniqueness stats (is this a
+    candidate key?), the group-size distribution, the biggest groups with sample
+    rows, and per-column functional-dependency consistency — for each non-key
+    column, is it constant within a key (key → column) or does it vary?"""
+    key_cols = [c for c in (spec.get("key") or []) if c in types]
+    if not key_cols and spec.get("column") in types:
+        key_cols = [spec["column"]]
+    title = (spec.get("title") or "").strip() or ("Clés multiples — " + ", ".join(key_cols))
+    if not key_cols:
+        return {"kind": "keys", "title": title, "key": [], "total": int(total),
+                "error": "Aucune colonne clé valide — choisissez au moins une colonne."}
+
+    top = max(1, int(spec.get("top") or 12))
+    sample_rows = 20
+    g = df.groupby(key_cols, dropna=False, sort=False)
+    sizes = g.size()
+    sz = sizes.to_numpy()
+    distinct_keys = int(len(sizes))
+    dup_mask = sizes > 1
+    dup_keys = int(dup_mask.sum())
+    rows_in_dups = int(sizes[dup_mask].sum())
+    null_keys = int(df[key_cols].isna().any(axis=1).sum())
+
+    # group frames keyed by a normalized tuple (pandas yields scalar keys for a
+    # single grouper, tuples for several — normalize so lookups are uniform).
+    _astuple = lambda k: k if isinstance(k, tuple) else (k,)   # noqa: E731
+    frames = {_astuple(name): sub for name, sub in g}
+
+    counts: dict[str, int] = {}
+    for n in sz:
+        b = _keys_size_bucket(int(n))
+        counts[b] = counts.get(b, 0) + 1
+    distribution = [{"key": b, "count": int(counts[b])} for b in _KEYS_BUCKET_ORDER if counts.get(b)]
+
+    def _groups_from(sorted_sizes):
+        out = []
+        for kv, n in sorted_sizes.items():
+            kvt = _astuple(kv)
+            out.append({"key": {c: _json_safe(v) for c, v in zip(key_cols, kvt)},
+                        "size": int(n), "rows": _df_records(frames[kvt].head(sample_rows))})
+        return out
+
+    top_groups = _groups_from(sizes.sort_values(ascending=False, kind="stable").head(top))
+    small_groups = _groups_from(sizes.sort_values(ascending=True, kind="stable").head(top))
+
+    consistency = []
+    for c in (col for col in df.columns if col not in key_cols):
+        nun = g[c].nunique(dropna=False)
+        varying = int((nun > 1).sum())
+        entry = {"column": c, "varying_groups": varying, "constant": varying == 0}
+        if varying:
+            kvt = _astuple(nun[nun > 1].index[0])
+            vals = frames[kvt][c].dropna().unique().tolist()[:6]
+            entry["example"] = {
+                "key": {kc: _json_safe(v) for kc, v in zip(key_cols, kvt)},
+                "values": [_json_safe(v) for v in vals],
+            }
+        consistency.append(entry)
+    consistency.sort(key=lambda e: (e["constant"], -e["varying_groups"]))
+
+    return {
+        "kind": "keys", "title": title, "key": key_cols, "total": int(total),
+        "distinct_keys": distinct_keys, "dup_keys": dup_keys,
+        "singletons": int((sizes == 1).sum()), "rows_in_dups": rows_in_dups,
+        "null_keys": null_keys, "unique": bool(distinct_keys == total and total > 0),
+        "uniqueness_pct": round(distinct_keys / total * 100, 1) if total else 0.0,
+        "group_min": int(sz.min()) if len(sz) else 0,
+        "group_max": int(sz.max()) if len(sz) else 0,
+        "group_avg": round(float(sz.mean()), 2) if len(sz) else 0.0,
+        "group_median": float(np.median(sz)) if len(sz) else 0.0,
+        "distribution": distribution, "top_groups": top_groups,
+        "small_groups": small_groups, "consistency": consistency,
+    }
+
+
 def _run_report(con, pid, node, ins):
     """Analyse block: terminal (no downstream output). Passes its input through
     (materialized so it stays previewable) and computes the configured analyses —
@@ -1099,6 +1203,9 @@ def _run_report(con, pid, node, ins):
                  for c in (d.get("columns") or list(types)) if c in types]
     analyses = []
     for spec in specs:
+        if (spec.get("kind") or "values") == "keys":
+            analyses.append(_compute_keys_analysis(df, spec, types, total))
+            continue
         col = spec.get("column")
         if col and col in types:
             analyses.append(_compute_analysis(df, spec, col, types[col], total))
@@ -1808,5 +1915,37 @@ def column_profile(pid, wid, node_id, column, handle="out") -> dict:
         ).fetchall()
         res["top_values"] = [{"value": _json_safe(r[0]), "count": int(r[1])} for r in top]
         return res
+    finally:
+        con.close()
+
+
+def keys_group(pid, wid, node_id, key_cols, q, handle="out", limit=200) -> dict:
+    """Drill-down for the « Clés multiples » analysis: returns the rows of the
+    materialized node output whose key (any of the key columns, cast to text)
+    contains `q`, ordered by the key so the frontend can group them by tuple."""
+    node_id, handle = _passthrough_source(pid, wid, node_id, handle)
+    path = storage.node_parquet(pid, wid, node_id, handle)
+    if not path.exists():
+        return {"available": False}
+    key_cols = [c for c in (key_cols or []) if c]
+    con = duckdb.connect()
+    try:
+        rel = f"read_parquet({_lit(path)})"
+        columns = _describe(con, rel)
+        valid = [c for c in key_cols if any(col["name"] == c for col in columns)]
+        if not valid:
+            return {"available": False}
+        sql = f"SELECT * FROM {rel}"
+        text = (q or "").strip()
+        if text:
+            pat = "'%" + text.replace("'", "''").replace("\\", "\\\\") + "%'"
+            ors = " OR ".join(f"CAST({q_ident(c)} AS VARCHAR) ILIKE {pat}" for c in valid)
+            sql += f" WHERE {ors}"
+        row_count = con.execute(f"SELECT count(*) FROM ({sql})").fetchone()[0]
+        sql += " ORDER BY " + ", ".join(q_ident(c) for c in valid)
+        sql += f" LIMIT {int(limit)}"
+        rows = _df_records(con.execute(sql).df())
+        return {"available": True, "columns": columns, "key": valid,
+                "rows": rows, "row_count": int(row_count)}
     finally:
         con.close()

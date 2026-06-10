@@ -85,6 +85,10 @@ export const api = {
   profile: (pid, wid, nodeId, column, handle = 'out') =>
     getJSON(
       `/projects/${enc(pid)}/workflows/${enc(wid)}/nodes/${enc(nodeId)}/profile${qs({ column, handle })}`),
+  // ---- « Clés multiples » group drill-down ----
+  keysGroup: (pid, wid, nodeId, key, q, handle = 'out') =>
+    getJSON(
+      `/projects/${enc(pid)}/workflows/${enc(wid)}/nodes/${enc(nodeId)}/group${qs({ key: (key || []).join(','), q, handle })}`),
 
   // ---- validation tester ----
   validateTest: (config, samples) =>

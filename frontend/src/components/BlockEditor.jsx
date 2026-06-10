@@ -175,7 +175,7 @@ function ReportView({ pid, wid, node, status, onRun, onPreview }) {
       <div className="route-flow-head">
         <span className="ports-title">État des lieux</span>
         <div className="be-view-actions">
-          {data?.available && <button className="ghost small" onClick={() => onRun()} title="Recalculer l'analyse"><Icon name="play" /> Exécuter</button>}
+          {data?.available && <button className="ghost small" onClick={() => onRun(true)} title="Recalculer l'analyse"><Icon name="play" /> Exécuter</button>}
           <button className="ghost small" disabled={!data?.available} onClick={() => onPreview(node.id, 'out')}><Icon name="eye" /> Plein écran</button>
         </div>
       </div>
@@ -193,7 +193,7 @@ function ReportView({ pid, wid, node, status, onRun, onPreview }) {
           <>
             <div className="be-rowcount">{report.row_count.toLocaleString('fr-FR')} lignes · {(report.analyses || []).length} analyse(s)</div>
             <div className="report-cards">
-              {(report.analyses || []).map((a, i) => <AnalysisCardView key={i} a={a} />)}
+              {(report.analyses || []).map((a, i) => <AnalysisCardView key={i} a={a} pid={pid} wid={wid} nid={node.id} />)}
               {(report.analyses || []).length === 0 && <p className="muted">Aucune analyse configurée — ajoutez-en dans les paramètres.</p>}
             </div>
           </>
@@ -205,7 +205,8 @@ function ReportView({ pid, wid, node, status, onRun, onPreview }) {
 const PIE_COLORS = ['#4E79A7', '#59A14F', '#E15759', '#F28E2B', '#B07AA1', '#76B7B2',
   '#EDC948', '#9C755F', '#FF9DA7', '#86BCB6', '#bab0ac', '#8cd17d']
 
-function AnalysisCardView({ a }) {
+function AnalysisCardView({ a, pid, wid, nid }) {
+  if (a.kind === 'keys') return <KeysAnalysisView a={a} pid={pid} wid={wid} nid={nid} />
   const slices = [...(a.buckets || [])]
   if (a.other > 0) slices.push({ key: 'Autres', count: a.other })
   const chart = a.chart || 'bar'
@@ -268,6 +269,177 @@ function PieChart({ slices }) {
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+// ---- « Clés multiples » analysis -----------------------------------------
+const _fmtNum = (n) => (typeof n === 'number' ? n.toLocaleString('fr-FR') : (n ?? '—'))
+const _keyLabel = (kobj) => Object.values(kobj || {})
+  .map((v) => (v === null || v === undefined || v === '' ? '(vide)' : String(v))).join(' · ') || '(vide)'
+const _fmtCell = (v) => (v === null || v === undefined || v === '' ? '∅' : String(v))
+
+function KeysTile({ v, l }) {
+  return <div className="keys-tile"><b>{_fmtNum(v)}</b><span>{l}</span></div>
+}
+
+function GroupBlock({ grp, keyCols, defaultOpen }) {
+  const [open, setOpen] = useState(!!defaultOpen)
+  const rows = grp.rows || []
+  const allCols = rows.length ? Object.keys(rows[0]) : []
+  // the key is constant within the group (shown in the header) — show the other
+  // columns only, so the grid stays narrow; fall back to all if key == every col.
+  const dataCols = allCols.filter((c) => !keyCols.includes(c))
+  const cols = dataCols.length ? dataCols : allCols
+  const size = grp.size ?? rows.length
+  return (
+    <div className="keys-group">
+      <button className={`keys-group-h ${open ? 'on' : ''}`} onClick={() => setOpen(!open)}>
+        <Icon name={open ? 'down' : 'chev-right'} size={12} />
+        <span className="keys-group-k" title={_keyLabel(grp.key)}>{_keyLabel(grp.key)}</span>
+        <span className="keys-group-n">{_fmtNum(size)} lignes</span>
+      </button>
+      {open && (
+        <div className="keys-group-body">
+          {rows.length === 0 ? <p className="muted">Aucune ligne.</p> : (
+            <>
+              <div className="keys-grid-wrap">
+                <table className="keys-grid">
+                  <thead><tr><th className="rownum">#</th>{cols.map((c) => <th key={c}>{c}</th>)}</tr></thead>
+                  <tbody>{rows.map((r, i) => (
+                    <tr key={i}>
+                      <td className="rownum">{i + 1}</td>
+                      {cols.map((c) => <td key={c} title={_fmtCell(r[c])}>{_fmtCell(r[c])}</td>)}
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+              {size > rows.length && <p className="keys-hint">{rows.length} premières lignes sur {_fmtNum(size)}.</p>}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function KeysExplorer({ pid, wid, nid, keyCols, bigGroups, smallGroups }) {
+  const [q, setQ] = useState('')
+  const [res, setRes] = useState(null)     // { found: [groups] } | { error } | null
+  const [busy, setBusy] = useState(false)
+  const [mode, setMode] = useState('big')  // 'big' | 'small'
+
+  const search = async () => {
+    const text = q.trim()
+    if (!text) { setRes(null); return }
+    setBusy(true)
+    try {
+      const r = await api.keysGroup(pid, wid, nid, keyCols, text)
+      if (!r?.available) { setRes({ error: 'Sortie indisponible — réexécutez le bloc.' }); setBusy(false); return }
+      const map = new Map()
+      for (const row of (r.rows || [])) {
+        const kk = keyCols.map((c) => row[c]).join('')
+        if (!map.has(kk)) map.set(kk, { key: Object.fromEntries(keyCols.map((c) => [c, row[c]])), rows: [] })
+        map.get(kk).rows.push(row)
+      }
+      setRes({ found: [...map.values()], truncated: (r.row_count || 0) > (r.rows || []).length })
+    } catch (e) { setRes({ error: String(e.message || e) }) }
+    setBusy(false)
+  }
+
+  const browse = mode === 'small' ? smallGroups : bigGroups
+  const shown = res?.found ?? browse
+  return (
+    <div className="keys-sec">
+      <div className="keys-sec-h">
+        Explorer les groupes
+        <span className="keys-toggle">
+          <button className={mode === 'big' ? 'on' : ''} onClick={() => setMode('big')}>plus gros</button>
+          <button className={mode === 'small' ? 'on' : ''} onClick={() => setMode('small')}>plus petits</button>
+        </span>
+      </div>
+      <div className="keys-search">
+        <Icon name="search" size={13} />
+        <input value={q} placeholder="rechercher une valeur de clé…"
+          onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search()} />
+        <button className="ghost small" onClick={search} disabled={busy}>{busy ? '…' : 'Chercher'}</button>
+        {res && <button className="ghost small" onClick={() => { setQ(''); setRes(null) }}>Effacer</button>}
+      </div>
+      {res?.error && <p className="muted">{res.error}</p>}
+      {res && !res.error && <p className="keys-hint">{res.found.length} groupe(s) trouvé(s){res.truncated ? ' (aperçu tronqué)' : ''}.</p>}
+      {!res && <p className="keys-hint">Les {browse.length} {mode === 'small' ? 'plus petits' : 'plus gros'} groupes (dépliez pour voir les lignes) :</p>}
+      <div className="keys-groups">
+        {shown.length === 0 ? <p className="muted">Aucun groupe.</p>
+          : shown.map((g, i) => <GroupBlock key={i} grp={g} keyCols={keyCols} defaultOpen={!!res?.found && shown.length <= 3} />)}
+      </div>
+    </div>
+  )
+}
+
+function KeysAnalysisView({ a, pid, wid, nid }) {
+  const keyCols = a.key || []
+  // a.error = no valid key; missing distinct_keys = stale/incomplete report
+  // (e.g. backend not restarted) — show a clear message instead of "undefined%".
+  if (a.error || a.distinct_keys === undefined) {
+    return (
+      <div className="report-card keys-card">
+        <div className="rc-head"><b>{a.title || 'Clés multiples'}</b></div>
+        <p className="muted">{a.error || 'Analyse des clés indisponible — réexécutez le bloc (et vérifiez que le serveur est à jour).'}</p>
+      </div>
+    )
+  }
+  const dist = a.distribution || []
+  const cons = a.consistency || []
+  return (
+    <div className="report-card keys-card">
+      <div className="rc-head"><b>{a.title}</b><span className="coltype">{keyCols.join(' + ')}</span></div>
+      <div className={`keys-verdict ${a.unique ? 'ok' : 'warn'}`}>
+        {a.unique
+          ? '✓ Clé candidate — chaque combinaison identifie une seule ligne'
+          : `⚠ Non unique — ${_fmtNum(a.dup_keys)} clé(s) en doublon, ${_fmtNum(a.rows_in_dups)} lignes concernées`}
+      </div>
+      <div className="keys-tiles">
+        <KeysTile v={a.total} l="lignes" />
+        <KeysTile v={a.distinct_keys} l="clés distinctes" />
+        <KeysTile v={a.dup_keys} l="en doublon" />
+        <KeysTile v={a.singletons} l="uniques (×1)" />
+        <KeysTile v={a.group_max} l="+ gros groupe" />
+        <KeysTile v={a.group_min} l="+ petit groupe" />
+        <KeysTile v={a.group_avg} l="taille moy." />
+        <KeysTile v={a.group_median} l="taille méd." />
+        <KeysTile v={`${a.uniqueness_pct}%`} l="unicité" />
+        {a.null_keys > 0 && <KeysTile v={a.null_keys} l="clés vides" />}
+      </div>
+
+      {dist.length > 0 && (
+        <div className="keys-sec">
+          <div className="keys-sec-h">Distribution des tailles de groupe (nb de clés)</div>
+          <BarList slices={dist.map((d) => ({ key: `${d.key} ligne(s)`, count: d.count }))} />
+        </div>
+      )}
+
+      {cons.length > 0 && (
+        <div className="keys-sec">
+          <div className="keys-sec-h">Cohérence des autres colonnes par clé (dépendances fonctionnelles)</div>
+          <table className="keys-cons"><tbody>
+            {cons.map((e, i) => (
+              <tr key={i} className={e.constant ? '' : 'varies'}>
+                <td>{e.column}</td>
+                <td>{e.constant
+                  ? <span className="keys-badge ok">constante par clé</span>
+                  : <span className="keys-badge warn"
+                      title={e.example ? `ex. clé ${_keyLabel(e.example.key)} → ${(e.example.values || []).join('  /  ')}` : ''}>
+                      varie dans {_fmtNum(e.varying_groups)} groupe(s)
+                    </span>}
+                </td>
+              </tr>
+            ))}
+          </tbody></table>
+        </div>
+      )}
+
+      <KeysExplorer pid={pid} wid={wid} nid={nid} keyCols={keyCols}
+        bigGroups={a.top_groups || []} smallGroups={a.small_groups || []} />
     </div>
   )
 }

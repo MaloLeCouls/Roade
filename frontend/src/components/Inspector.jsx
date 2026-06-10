@@ -980,6 +980,7 @@ const ANALYSIS_KINDS = [
   ['length', 'Longueur (nb de caractères)'],
   ['rule', 'Respect d’une règle'],
   ['mask', 'Respect d’un format (masque)'],
+  ['keys', 'Clés multiples (groupes / doublons)'],
 ]
 const CHART_KINDS = [['bar', 'Barres'], ['pie', 'Camembert'], ['table', 'Tableau']]
 const _aid = () => 'a' + Math.random().toString(36).slice(2, 8)
@@ -987,18 +988,45 @@ const _aid = () => 'a' + Math.random().toString(36).slice(2, 8)
 function AnalysisCard({ a, cols, index, count, onChange, onMove, onDelete }) {
   const kind = a.kind || 'values'
   const by = a.by || 'sep'
+  const keyCols = a.key || (a.column ? [a.column] : [])
+  const toggleKey = (name) => {
+    const set = new Set(keyCols)
+    set.has(name) ? set.delete(name) : set.add(name)
+    onChange({ key: cols.map((c) => c.name).filter((n) => set.has(n)) })  // keep column order
+  }
+  const onKindChange = (v) => {
+    const patch = { kind: v }
+    if (v === 'keys' && (!a.key || a.key.length === 0)) patch.key = a.column ? [a.column] : (cols[0] ? [cols[0].name] : [])
+    onChange(patch)
+  }
   return (
     <div className="clean-op">
       <div className="qb-row">
-        <select className="qb-select" value={a.column || ''} onChange={(e) => onChange({ column: e.target.value })} title="Colonne analysée">
-          <option value="">— colonne —</option>
-          {cols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-        </select>
-        <select className="qb-select" value={kind} onChange={(e) => onChange({ kind: e.target.value })} title="Ce qu'on regarde">
+        {kind !== 'keys' && (
+          <select className="qb-select" value={a.column || ''} onChange={(e) => onChange({ column: e.target.value })} title="Colonne analysée">
+            <option value="">— colonne —</option>
+            {cols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+          </select>
+        )}
+        <select className="qb-select" value={kind} onChange={(e) => onKindChange(e.target.value)} title="Ce qu'on regarde">
           {ANALYSIS_KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </select>
         <button className="ghost danger small" onClick={onDelete}><Icon name="x" /></button>
       </div>
+
+      {kind === 'keys' && (
+        <div className="indent">
+          <div className="qb-lbl">Clé (cochez une ou plusieurs colonnes — clé composite) :</div>
+          <div className="keys-pick">
+            {cols.map((c) => (
+              <label key={c.name} className="qb-check tiny" title={c.type}>
+                <input type="checkbox" checked={keyCols.includes(c.name)} onChange={() => toggleKey(c.name)} /> {c.name}
+              </label>
+            ))}
+            {cols.length === 0 && <span className="qb-hint">Exécutez l'amont pour charger les colonnes.</span>}
+          </div>
+        </div>
+      )}
 
       {(kind === 'prefix' || kind === 'suffix') && (
         <div className="qb-row indent">
@@ -1029,11 +1057,13 @@ function AnalysisCard({ a, cols, index, count, onChange, onMove, onDelete }) {
       )}
 
       <div className="qb-row indent">
-        <span className="qb-lbl">graphique</span>
-        <select className="qb-select" value={a.chart || 'bar'} onChange={(e) => onChange({ chart: e.target.value })}>
-          {CHART_KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
-        <span className="qb-lbl">max</span>
+        {kind !== 'keys' && <>
+          <span className="qb-lbl">graphique</span>
+          <select className="qb-select" value={a.chart || 'bar'} onChange={(e) => onChange({ chart: e.target.value })}>
+            {CHART_KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </>}
+        <span className="qb-lbl">{kind === 'keys' ? 'groupes affichés' : 'max'}</span>
         <input className="qb-input narrow" type="number" min="2" value={a.top ?? 12} onChange={(e) => onChange({ top: Number(e.target.value) })} />
         <button className="mini" onClick={() => onMove(-1)} disabled={index === 0}><Icon name="up" /></button>
         <button className="mini" onClick={() => onMove(1)} disabled={index === count - 1}><Icon name="down" /></button>
@@ -1059,8 +1089,10 @@ function ReportConfig({ node, inputs, set }) {
           Bloc <b>à titre d'information</b> (non exporté, sans sortie). Chaque analyse <b>ventile</b> une colonne selon un
           critère — <b>valeurs</b>, <b>préfixe</b>, <b>suffixe</b>, <b>longueur</b>, ou le <b>respect d'une règle / d'un
           masque</b> (comme dans la Validation) — et l'affiche en <b>camembert</b>, barres ou tableau.
-          Ex. : préfixe des noms de fichiers en camembert → quels préfixes, combien d'occurrences. Visible au clic et
-          dans la <b>documentation Excel</b>.
+          Ex. : préfixe des noms de fichiers en camembert → quels préfixes, combien d'occurrences.
+          L'analyse <b>Clés multiples</b> regroupe les lignes par une clé (une ou plusieurs colonnes) : doublons,
+          unicité (clé candidate ?), taille des groupes, cohérence des autres colonnes par clé, et exploration des
+          plus gros groupes. Visible au clic et dans la <b>documentation Excel</b>.
         </InfoBubble>
       </div>
 

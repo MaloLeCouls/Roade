@@ -122,6 +122,8 @@ function ConditionBuilder({ cond, cols, defaultCol, caseSensitive, onChange }) {
 const GROUP_CHECKS = [
   ['unique', 'toutes différentes (unicité)', 'col', null],
   ['constant', 'toutes identiques (constance)', 'col', null],
+  ['no_null', 'jamais vide (toujours renseignée)', 'col', null],
+  ['not_all_null', 'pas entièrement vide (au moins une valeur)', 'col', null],
   ['distinct_eq', 'exactement N valeurs distinctes', 'col', 'number'],
   ['distinct_min', 'au moins N valeurs distinctes', 'col', 'number'],
   ['distinct_max', 'au plus N valeurs distinctes', 'col', 'number'],

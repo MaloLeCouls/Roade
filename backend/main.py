@@ -269,6 +269,16 @@ def profile(pid: str, wid: str, nid: str, column: str, handle: str = "out"):
         raise HTTPException(400, str(e))
 
 
+@app.get("/api/projects/{pid}/workflows/{wid}/nodes/{nid}/group")
+def keys_group(pid: str, wid: str, nid: str, key: str = "",
+               q: str | None = None, handle: str = "out", limit: int = 200):
+    key_cols = [c for c in key.split(",") if c.strip()]
+    try:
+        return engine.keys_group(pid, wid, nid, key_cols, q, handle=handle, limit=limit)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, str(e))
+
+
 @app.post("/api/projects/{pid}/workflows/{wid}/nodes/{nid}/route-preview")
 def route_preview(pid: str, wid: str, nid: str, payload: dict = Body(...)):
     try:

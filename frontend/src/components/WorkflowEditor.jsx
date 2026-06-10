@@ -790,7 +790,7 @@ function Editor({ pid, wid, onBack }) {
             onChange={updateNodeData}
             onSchema={onSchema}
             onDelete={(id) => { deleteNode(id); setEditorNode(null) }}
-            onRun={() => doRun(editorNode)}
+            onRun={(force = false) => doRun(editorNode, force)}
             onPreview={(id, handle) => setPreviewNode({ id, handle })}
             onClose={() => setEditorNode(null)}
           />

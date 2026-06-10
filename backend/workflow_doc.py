@@ -73,6 +73,8 @@ _GROUP_FN_FR = {
 _GROUP_CHECK_FR = {
     "unique": "toutes les valeurs sont différentes (unicité)",
     "constant": "toutes les valeurs sont identiques (constance)",
+    "no_null": "n'est jamais vide (toujours renseignée)",
+    "not_all_null": "n'est pas entièrement vide (au moins une valeur)",
     "distinct_eq": "exactement {n} valeurs distinctes",
     "distinct_min": "au moins {n} valeurs distinctes",
     "distinct_max": "au plus {n} valeurs distinctes",
@@ -668,6 +670,8 @@ def _write_report_analysis(ws, start_row, pid, wid, node_id, d):
 def _write_one_analysis(ws, r, a):
     """One analysis: a sub-title, a (Catégorie | Occurrences) table, and — unless the
     chart is 'table' — a native pie or bar chart anchored to the right."""
+    if a.get("kind") == "keys":
+        return _write_keys_analysis(ws, r, a)
     ws.cell(r, 1, a.get("title") or a.get("column") or "Analyse").font = _BODY_STRONG
     ws.cell(r, 3, f"colonne « {a.get('column')} » · {a.get('distinct', 0)} distinctes · "
                   f"{a.get('nulls', 0)} vides ({a.get('null_pct', 0)}%) · "
@@ -705,6 +709,91 @@ def _write_one_analysis(ws, r, a):
         ws.add_chart(chart, f"E{header_row}")
         chart_bottom = header_row + 13    # reserve ~ the chart's vertical span
     return max(r, chart_bottom)
+
+
+def _write_keys_analysis(ws, r, a):
+    """« Clés multiples » analysis: verdict, cardinality stats, group-size
+    distribution, functional-dependency consistency and the biggest groups."""
+    key = ", ".join(a.get("key") or []) or "—"
+    ws.cell(r, 1, a.get("title") or "Clés multiples").font = _BODY_STRONG
+    ws.cell(r, 3, f"clé « {key} » · {a.get('total', 0)} lignes").font = _META
+    r += 1
+    if a.get("error"):
+        ws.cell(r, 2, a["error"]).font = _META
+        return r + 1
+
+    verdict = ("Clé candidate (valeurs uniques)" if a.get("unique")
+               else f"Non unique — {a.get('dup_keys', 0)} clé(s) en doublon")
+    ws.cell(r, 2, "Verdict").font = _HEAD
+    ws.cell(r, 3, verdict).font = _BODY_STRONG
+    r += 1
+
+    def _kv_table(rows, head=("", "")):
+        nonlocal r
+        for col, t in ((2, head[0]), (3, head[1])):
+            cell = ws.cell(r, col, t); cell.font = _HEAD; cell.fill = _HEAD_FILL; cell.border = _HEAD_BORDER
+        r += 1
+        for k, v in rows:
+            ws.cell(r, 2, k).font = _BODY
+            cell = ws.cell(r, 3, v); cell.font = _BODY
+            for col in (2, 3):
+                ws.cell(r, col).border = _ROW_BORDER
+            r += 1
+
+    _kv_table([
+        ("Lignes", int(a.get("total", 0))),
+        ("Clés distinctes", int(a.get("distinct_keys", 0))),
+        ("Clés en doublon", int(a.get("dup_keys", 0))),
+        ("Lignes en doublon", int(a.get("rows_in_dups", 0))),
+        ("Clés uniques (singletons)", int(a.get("singletons", 0))),
+        ("Clés incomplètes (vides)", int(a.get("null_keys", 0))),
+        ("Taux d'unicité", f"{a.get('uniqueness_pct', 0)}%"),
+        ("Taille de groupe (min / moy / méd / max)",
+         f"{a.get('group_min', 0)} / {a.get('group_avg', 0)} / "
+         f"{a.get('group_median', 0)} / {a.get('group_max', 0)}"),
+    ], head=("Cardinalité", ""))
+    r += 1
+
+    dist = a.get("distribution") or []
+    if dist:
+        _kv_table([(f"groupes de {b['key']}", int(b["count"])) for b in dist],
+                  head=("Taille de groupe", "Nb de clés"))
+        r += 1
+
+    cons = a.get("consistency") or []
+    if cons:
+        for col, t in ((2, "Colonne"), (3, "Cohérence par clé")):
+            cell = ws.cell(r, col, t); cell.font = _HEAD; cell.fill = _HEAD_FILL; cell.border = _HEAD_BORDER
+        r += 1
+        for e in cons:
+            ws.cell(r, 2, e["column"]).font = _BODY
+            txt = ("constante (clé → colonne)" if e.get("constant")
+                   else f"varie dans {e.get('varying_groups', 0)} groupe(s)")
+            cell = ws.cell(r, 3, txt); cell.font = _BODY
+            for col in (2, 3):
+                ws.cell(r, col).border = _ROW_BORDER
+            r += 1
+        r += 1
+
+    def _groups_table(title, groups):
+        nonlocal r
+        if not groups:
+            return
+        for col, t in ((2, title), (3, "Lignes")):
+            cell = ws.cell(r, col, t); cell.font = _HEAD; cell.fill = _HEAD_FILL; cell.border = _HEAD_BORDER
+        r += 1
+        for grp in groups:
+            label = " · ".join(f"{k}={v}" for k, v in (grp.get("key") or {}).items())
+            ws.cell(r, 2, label or "—").font = _BODY
+            cell = ws.cell(r, 3, int(grp.get("size", 0))); cell.font = _BODY
+            for col in (2, 3):
+                ws.cell(r, col).border = _ROW_BORDER
+            r += 1
+        r += 1
+
+    _groups_table("Plus gros groupes (clé)", a.get("top_groups") or [])
+    _groups_table("Plus petits groupes (clé)", a.get("small_groups") or [])
+    return r + 1
 
 
 def build_workbook(pid: str, wid: str) -> bytes:
