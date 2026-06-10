@@ -119,6 +119,7 @@ function ConditionBuilder({ cond, cols, defaultCol, caseSensitive, onChange }) {
 // Catalog of group checks: [value, label, scope, extra]
 //   scope 'col'  → needs a column to verify ; 'size' → about the group size only
 //   extra 'number' → a N field ; 'value' → a free value field ; null → nothing
+//   extra 'col2' → a second column ; 'cmpcol' → an operator + a second column
 const GROUP_CHECKS = [
   ['unique', 'toutes différentes (unicité)', 'col', null],
   ['constant', 'toutes identiques (constance)', 'col', null],
@@ -127,12 +128,17 @@ const GROUP_CHECKS = [
   ['distinct_eq', 'exactement N valeurs distinctes', 'col', 'number'],
   ['distinct_min', 'au moins N valeurs distinctes', 'col', 'number'],
   ['distinct_max', 'au plus N valeurs distinctes', 'col', 'number'],
+  ['distinct_cmp', 'nb de valeurs distinctes', 'col', 'cmpcol'],
+  ['determines', 'déterminer la colonne (dépendance fonctionnelle)', 'col', 'col2'],
   ['contains', 'contenir la valeur', 'col', 'value'],
   ['not_contains', 'ne pas contenir la valeur', 'col', 'value'],
   ['size_eq', 'compter exactement N lignes', 'size', 'number'],
   ['size_min', 'compter au moins N lignes', 'size', 'number'],
   ['size_max', 'compter au plus N lignes', 'size', 'number'],
 ]
+
+// Comparison operators for the two-column "nb de valeurs distinctes" check.
+const CMP_OPS = [['eq', '='], ['ne', '≠'], ['lt', '<'], ['le', '≤'], ['gt', '>'], ['ge', '≥']]
 
 // Group check: routes rows by a property of the *group* (rows sharing a key).
 // Layout reads as a sentence — the repeating KEY on top, then, indented below,
@@ -163,6 +169,22 @@ function GroupCheckRow({ ck, cols, onChange, onDelete }) {
         <input className="qb-input" placeholder="valeur" value={ck.value ?? ''}
           onChange={(e) => onChange({ value: e.target.value })} />
       )}
+      {extra === 'cmpcol' && (<>
+        <select className="qb-select narrow" value={ck.op || 'eq'} onChange={(e) => onChange({ op: e.target.value })}>
+          {CMP_OPS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        <span className="qb-lbl">celui de</span>
+        <select className="qb-select" value={ck.column2 || ''} onChange={(e) => onChange({ column2: e.target.value })}>
+          <option value="">(autre colonne)</option>
+          {cols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+        </select>
+      </>)}
+      {extra === 'col2' && (<>
+        <select className="qb-select" value={ck.column2 || ''} onChange={(e) => onChange({ column2: e.target.value })}>
+          <option value="">(autre colonne)</option>
+          {cols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+        </select>
+      </>)}
       {onDelete && <button className="ghost danger small" onClick={onDelete} title="Retirer ce contrôle"><Icon name="x" /></button>}
     </div>
   )

@@ -505,6 +505,30 @@ def _group_one_check_mask(work, df, keys, ck, cs, default_col):
             has = pd.Series(bool((work[col] == target).any()), index=df.index)
         has = has.astype(bool)
         return has if check == "contains" else ~has
+
+    # --- two-column checks: compare the checked column to a second one --------
+    if check in ("distinct_cmp", "determines"):
+        col2 = ck.get("column2")
+        if not col2:
+            return None
+        if col2 not in df.columns:
+            raise ValueError(f"Contrôle par groupe : colonne « {col2} » introuvable dans l'entrée.")
+        nun = (lambda c: work.groupby(keys, dropna=False)[c].transform(lambda s: s.nunique(dropna=False))) if keys \
+            else (lambda c: pd.Series(work[c].nunique(dropna=False), index=df.index))
+        if check == "distinct_cmp":            # nb distinct(col) <op> nb distinct(col2)
+            na, nb = nun(col), nun(col2)
+            op = ck.get("op") or "eq"
+            return {"eq": na == nb, "ne": na != nb, "lt": na < nb,
+                    "le": na <= nb, "gt": na > nb, "ge": na >= nb}.get(op, na == nb)
+        # determines: col → col2 is a function iff #distinct(col) == #distinct (col,col2)
+        a = work[col].astype("string")
+        pair = a.str.cat(work[col2].astype("string"), sep="\x1f", na_rep="\x00")
+        tmp = work.assign(__a=a, __p=pair)
+        if keys:
+            g = tmp.groupby(keys, dropna=False)
+            return (g["__a"].transform(lambda s: s.nunique(dropna=False))
+                    == g["__p"].transform(lambda s: s.nunique(dropna=False)))
+        return pd.Series(tmp["__a"].nunique(dropna=False) == tmp["__p"].nunique(dropna=False), index=df.index)
     return None
 
 
@@ -525,9 +549,9 @@ def _group_condition_mask(df: pd.DataFrame, cond: dict, cs: bool, default_col: s
     # case-fold once over the keys and every checked column (for ci comparisons)
     cols_used = list(keys)
     for ck in checks:
-        c = ck.get("column") or default_col
-        if c and c in df.columns and c not in cols_used:
-            cols_used.append(c)
+        for c in (ck.get("column") or default_col, ck.get("column2")):
+            if c and c in df.columns and c not in cols_used:
+                cols_used.append(c)
     work = df
     if not cs:
         work = df.copy()

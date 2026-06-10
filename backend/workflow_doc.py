@@ -83,6 +83,8 @@ _GROUP_CHECK_FR = {
     "size_eq": "exactement {n} lignes", "size_min": "au moins {n} lignes",
     "size_max": "au plus {n} lignes",
 }
+_CMP_WORD = {"eq": "autant de", "ne": "un nombre différent de", "lt": "moins de",
+             "le": "au plus autant de", "gt": "plus de", "ge": "au moins autant de"}
 
 
 def _q(v) -> str:
@@ -224,9 +226,17 @@ def _describe_condition(cond: dict, default_col) -> list[str]:
                                          "n": cond.get("n"), "value": cond.get("value")}]
         parts = []
         for ck in checks:
-            tmpl = _GROUP_CHECK_FR.get(ck.get("check") or "unique", ck.get("check") or "?")
-            txt = tmpl.format(n=ck.get("n"), v=ck.get("value"))
+            chk = ck.get("check") or "unique"
             col = ck.get("column")
+            if chk == "determines":
+                parts.append(f"{_col(col)} détermine {_col(ck.get('column2'))}")
+                continue
+            if chk == "distinct_cmp":
+                opw = _CMP_WORD.get(ck.get("op") or "eq", "autant de")
+                parts.append(f"{_col(col)} a {opw} valeurs distinctes que {_col(ck.get('column2'))}")
+                continue
+            tmpl = _GROUP_CHECK_FR.get(chk, chk)
+            txt = tmpl.format(n=ck.get("n"), v=ck.get("value"))
             coltxt = f" sur {_col(col)}" if col and "{v}" not in tmpl else ""
             parts.append(f"{txt}{coltxt}")
         return [f"par groupe de {keys} : " + " et ".join(parts)]

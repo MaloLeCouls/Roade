@@ -44,4 +44,31 @@ print("combo not_all_null & unique ->", v)
 vc = verdicts({"group_by": ["nom"], "checks": [{"check": "constant", "column": "cat"}]})
 assert vc == {"A": True, "B": False, "C": True, "D": True}, vc
 
-print("OK — toutes les conditions de groupe sont atomiques")
+# --- two-column checks: compare a column to another (atomic, robust) -------
+df2 = pd.DataFrame({
+    "nom":    ["F1"] * 6 + ["F2"] * 3,
+    "config": ["c1", "c2", "c3", "c1a", "c2a", "c3a", "k1", "k1", "k2"],
+    "truc":   ["t1", "t2", "t3", "t1", "t2", "t3", "t1", "t9", "t2"],
+})
+
+
+def verdicts2(cond):
+    m = engine._group_condition_mask(df2, cond, True, None).astype(bool)
+    g = df2.assign(ok=list(m)).groupby("nom")["ok"]
+    assert (g.nunique() == 1).all(), f"NON ATOMIQUE pour {cond}: {g.nunique().to_dict()}"
+    return g.first().to_dict()
+
+
+# F1: config→truc is a function (each config one truc) ; F2: k1→{t1,t9} breaks it
+assert verdicts2({"group_by": ["nom"], "checks": [
+    {"check": "determines", "column": "config", "column2": "truc"}]}) == {"F1": True, "F2": False}
+# reverse: truc→config holds in both (each truc maps to a single config)
+assert verdicts2({"group_by": ["nom"], "checks": [
+    {"check": "determines", "column": "truc", "column2": "config"}]}) == {"F1": False, "F2": True}
+# distinct counts: F1 has 6 configs vs 3 trucs (>) ; F2 has 2 vs 3 (not >)
+assert verdicts2({"group_by": ["nom"], "checks": [
+    {"check": "distinct_cmp", "column": "config", "op": "gt", "column2": "truc"}]}) == {"F1": True, "F2": False}
+assert verdicts2({"group_by": ["nom"], "checks": [
+    {"check": "distinct_cmp", "column": "config", "op": "ne", "column2": "truc"}]}) == {"F1": True, "F2": True}
+
+print("OK — toutes les conditions de groupe sont atomiques (dont comparaisons à 2 colonnes)")
