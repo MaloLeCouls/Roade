@@ -138,13 +138,47 @@ const GROUP_CHECKS = [
 // Layout reads as a sentence — the repeating KEY on top, then, indented below,
 // the checked column and the property it must satisfy. It SORTS rows (a NON on
 // the output isolates the offenders); it never adds a column.
-function GroupCheckBuilder({ cond, cols, onChange }) {
-  const keys = cond.group_by || []
-  const toggle = (c) => onChange({ group_by: keys.includes(c) ? keys.filter((x) => x !== c) : [...keys, c] })
-  const check = cond.check || 'unique'
+function GroupCheckRow({ ck, cols, onChange, onDelete }) {
+  const check = ck.check || 'unique'
   const spec = GROUP_CHECKS.find((g) => g[0] === check) || GROUP_CHECKS[0]
   const onCol = spec[2] === 'col'
   const extra = spec[3]
+  return (
+    <div className="grp-rule-body">
+      {onCol && (
+        <select className="qb-select" value={ck.column || ''} onChange={(e) => onChange({ column: e.target.value })}>
+          <option value="">(colonne)</option>
+          {cols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+        </select>
+      )}
+      <span className="qb-lbl">doit</span>
+      <select className="qb-select" value={check} onChange={(e) => onChange({ check: e.target.value })}>
+        {GROUP_CHECKS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+      </select>
+      {extra === 'number' && (
+        <input className="qb-input narrow" type="number" min="0" value={ck.n ?? ''}
+          onChange={(e) => onChange({ n: e.target.value })} />
+      )}
+      {extra === 'value' && (
+        <input className="qb-input" placeholder="valeur" value={ck.value ?? ''}
+          onChange={(e) => onChange({ value: e.target.value })} />
+      )}
+      {onDelete && <button className="ghost danger small" onClick={onDelete} title="Retirer ce contrôle"><Icon name="x" /></button>}
+    </div>
+  )
+}
+
+function GroupCheckBuilder({ cond, cols, onChange }) {
+  const keys = cond.group_by || []
+  const toggle = (c) => onChange({ group_by: keys.includes(c) ? keys.filter((x) => x !== c) : [...keys, c] })
+  // one or several checks, AND-combined; migrate the legacy single-check shape.
+  const checks = (cond.checks && cond.checks.length)
+    ? cond.checks
+    : [{ check: cond.check || 'unique', column: cond.column || '', n: cond.n, value: cond.value }]
+  const setChecks = (next) => onChange({ checks: next })
+  const updCheck = (i, patch) => setChecks(checks.map((c, j) => (j === i ? { ...c, ...patch } : c)))
+  const addCheck = () => setChecks([...checks, { check: 'no_null', column: '' }])
+  const delCheck = (i) => setChecks(checks.filter((_, j) => j !== i))
   return (
     <div className="cond-group-check">
       <div className="grp-key">
@@ -165,25 +199,15 @@ function GroupCheckBuilder({ cond, cols, onChange }) {
 
       <div className="grp-rule">
         <span className="grp-rule-lead">dans chaque groupe,</span>
-        <div className="grp-rule-body">
-          {onCol && (
-            <select className="qb-select" value={cond.column || ''} onChange={(e) => onChange({ column: e.target.value })}>
-              <option value="">(colonne)</option>
-              {cols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-            </select>
-          )}
-          <span className="qb-lbl">doit</span>
-          <select className="qb-select" value={check} onChange={(e) => onChange({ check: e.target.value })}>
-            {GROUP_CHECKS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
-          {extra === 'number' && (
-            <input className="qb-input narrow" type="number" min="0" value={cond.n ?? ''}
-              onChange={(e) => onChange({ n: e.target.value })} />
-          )}
-          {extra === 'value' && (
-            <input className="qb-input" placeholder="valeur" value={cond.value ?? ''}
-              onChange={(e) => onChange({ value: e.target.value })} />
-          )}
+        <div className="grp-checks">
+          {checks.map((ck, i) => (
+            <div key={i}>
+              {i > 0 && <span className="cond-and">ET</span>}
+              <GroupCheckRow ck={ck} cols={cols} onChange={(p) => updCheck(i, p)}
+                onDelete={checks.length > 1 ? () => delCheck(i) : null} />
+            </div>
+          ))}
+          <button className="ghost small grp-add-check" onClick={addCheck}>+ contrôle (ET)</button>
         </div>
       </div>
 

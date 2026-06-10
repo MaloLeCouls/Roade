@@ -220,11 +220,16 @@ def _describe_condition(cond: dict, default_col) -> list[str]:
         return [f"{_col(cond.get('column') or default_col)} suit le format : " + " + ".join(parts)]
     if kind == "group":
         keys = ", ".join(_q(c) for c in (cond.get("group_by") or [])) or "(toute la table)"
-        tmpl = _GROUP_CHECK_FR.get(cond.get("check") or "unique", cond.get("check") or "?")
-        check = tmpl.format(n=cond.get("n"), v=cond.get("value"))
-        col = cond.get("column")
-        coltxt = f" sur {_col(col)}" if col and "{v}" not in tmpl else ""
-        return [f"par groupe de {keys} : {check}{coltxt}"]
+        checks = cond.get("checks") or [{"check": cond.get("check"), "column": cond.get("column"),
+                                         "n": cond.get("n"), "value": cond.get("value")}]
+        parts = []
+        for ck in checks:
+            tmpl = _GROUP_CHECK_FR.get(ck.get("check") or "unique", ck.get("check") or "?")
+            txt = tmpl.format(n=ck.get("n"), v=ck.get("value"))
+            col = ck.get("column")
+            coltxt = f" sur {_col(col)}" if col and "{v}" not in tmpl else ""
+            parts.append(f"{txt}{coltxt}")
+        return [f"par groupe de {keys} : " + " et ".join(parts)]
     return _describe_rules(cond, default_col)
 
 

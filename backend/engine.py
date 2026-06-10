@@ -422,10 +422,9 @@ def _eval_condition(df: pd.DataFrame, condition: dict, cs: bool, default_col: st
     return result
 
 
-def _group_condition_mask(df: pd.DataFrame, cond: dict, cs: bool, default_col: str) -> pd.Series:
-    """Per-row mask for a 'group' condition: group the rows by the key columns,
-    then categorise the group / the checked column inside each group. Returns True
-    for rows that SATISFY the check (a 'NON' on the output isolates the offenders).
+def _group_one_check_mask(work, df, keys, ck, cs, default_col):
+    """Per-row mask for ONE group check, or None when the check is incomplete
+    (no column / no N / no value yet) so it can be skipped during editing.
 
     Group-size checks (no column needed):
         size_eq/size_min/size_max : the group has = / ≥ / ≤ N rows.
@@ -436,9 +435,7 @@ def _group_condition_mask(df: pd.DataFrame, cond: dict, cs: bool, default_col: s
         contains/not_contains : the group does / doesn't hold a given value.
         no_null      : the column is never null/empty anywhere in the group.
         not_all_null : the column has at least one non-null value in the group."""
-    check = cond.get("check") or "unique"
-    keys = [c for c in (cond.get("group_by") or []) if c in df.columns]
-    false = pd.Series(False, index=df.index)
+    check = ck.get("check") or "unique"
 
     def _int(x):
         try:
@@ -446,11 +443,10 @@ def _group_condition_mask(df: pd.DataFrame, cond: dict, cs: bool, default_col: s
         except (TypeError, ValueError):
             return None
 
-    # --- group-size checks: column-independent --------------------------------
     if check in ("size_eq", "size_min", "size_max"):
-        k = _int(cond.get("n"))
+        k = _int(ck.get("n"))
         if k is None:
-            return false
+            return None
         sizes = (df.groupby(keys, dropna=False)[keys[0]].transform("size")
                  if keys else pd.Series(len(df), index=df.index))
         if check == "size_eq":
@@ -459,20 +455,11 @@ def _group_condition_mask(df: pd.DataFrame, cond: dict, cs: bool, default_col: s
             return sizes >= k
         return sizes <= k
 
-    col = cond.get("column") or default_col
+    col = ck.get("column") or default_col
     if not col:
-        raise ValueError(f"Contrôle par groupe « {cond.get('name') or '?'} » : "
-                         "choisissez la colonne à vérifier.")
+        return None
     if col not in df.columns:
-        raise ValueError(f"Contrôle par groupe « {cond.get('name') or '?'} » : "
-                         f"colonne « {col} » introuvable dans l'entrée.")
-
-    work = df
-    if not cs:                                    # case-insensitive compare on text
-        work = df.copy()
-        for c in (keys + [col]):
-            if work[c].dtype == object:
-                work[c] = work[c].map(lambda v: v.lower() if isinstance(v, str) else v)
+        raise ValueError(f"Contrôle par groupe : colonne « {col} » introuvable dans l'entrée.")
 
     def _distinct():
         if keys:
@@ -481,24 +468,20 @@ def _group_condition_mask(df: pd.DataFrame, cond: dict, cs: bool, default_col: s
 
     if check == "no_null":                        # group OK iff col never null inside it
         if keys:
-            ok = work.groupby(keys, dropna=False)[col].transform(lambda s: s.notna().all())
-        else:
-            ok = pd.Series(bool(work[col].notna().all()), index=df.index)
-        return ok.astype(bool)
+            return work.groupby(keys, dropna=False)[col].transform(lambda s: s.notna().all()).astype(bool)
+        return pd.Series(bool(work[col].notna().all()), index=df.index)
     if check == "not_all_null":                   # group OK iff col not entirely null
         if keys:
-            ok = work.groupby(keys, dropna=False)[col].transform(lambda s: s.notna().any())
-        else:
-            ok = pd.Series(bool(work[col].notna().any()), index=df.index)
-        return ok.astype(bool)
+            return work.groupby(keys, dropna=False)[col].transform(lambda s: s.notna().any()).astype(bool)
+        return pd.Series(bool(work[col].notna().any()), index=df.index)
     if check == "unique":
         return ~work.duplicated(subset=keys + [col], keep=False)
     if check == "constant":
         return _distinct() <= 1
     if check in ("distinct_eq", "distinct_min", "distinct_max"):
-        k = _int(cond.get("n"))
+        k = _int(ck.get("n"))
         if k is None:
-            return false
+            return None
         nun = _distinct()
         if check == "distinct_eq":
             return nun == k
@@ -506,9 +489,9 @@ def _group_condition_mask(df: pd.DataFrame, cond: dict, cs: bool, default_col: s
             return nun >= k
         return nun <= k
     if check in ("contains", "not_contains"):
-        target = cond.get("value")
-        if target is None:
-            return false
+        target = ck.get("value")
+        if target is None or target == "":
+            return None
         if not cs and isinstance(target, str):
             target = target.lower()
         if keys:
@@ -517,7 +500,47 @@ def _group_condition_mask(df: pd.DataFrame, cond: dict, cs: bool, default_col: s
             has = pd.Series(bool((work[col] == target).any()), index=df.index)
         has = has.astype(bool)
         return has if check == "contains" else ~has
-    return false
+    return None
+
+
+def _group_condition_mask(df: pd.DataFrame, cond: dict, cs: bool, default_col: str) -> pd.Series:
+    """Per-row mask for a 'group' condition: group rows by the key columns, then
+    apply one or several *checks* on the group / a checked column. A row satisfies
+    the condition iff its group passes EVERY check (AND). Returns True for rows
+    that satisfy (a 'NON' on the output isolates the offenders).
+
+    Checks live in cond['checks'] (a list); legacy conditions with a single inline
+    check (cond['check']/['column']/['n']/['value']) are supported transparently."""
+    keys = [c for c in (cond.get("group_by") or []) if c in df.columns]
+    checks = cond.get("checks")
+    if not checks:                                # legacy single-check shape
+        checks = [{"check": cond.get("check"), "column": cond.get("column"),
+                   "n": cond.get("n"), "value": cond.get("value")}]
+
+    # case-fold once over the keys and every checked column (for ci comparisons)
+    cols_used = list(keys)
+    for ck in checks:
+        c = ck.get("column") or default_col
+        if c and c in df.columns and c not in cols_used:
+            cols_used.append(c)
+    work = df
+    if not cs:
+        work = df.copy()
+        for c in cols_used:
+            if work[c].dtype == object:
+                work[c] = work[c].map(lambda v: v.lower() if isinstance(v, str) else v)
+
+    mask = pd.Series(True, index=df.index)
+    applied = 0
+    for ck in checks:
+        m = _group_one_check_mask(work, df, keys, ck, cs, default_col)
+        if m is not None:
+            mask &= m.astype(bool)
+            applied += 1
+    if not applied:
+        raise ValueError(f"Contrôle par groupe « {cond.get('name') or '?'} » : "
+                         "configurez au moins un contrôle (colonne / valeur / N).")
+    return mask
 
 
 def _condition_mask(df: pd.DataFrame, cond: dict, cs: bool, default_col: str) -> pd.Series:

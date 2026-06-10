@@ -296,6 +296,8 @@ code { background: #eef0f3; padding: 1px 5px; border-radius: 3px; font-size: 12p
 .grp-rule-lead { display: block; font-size: 12px; color: var(--ink-soft); margin-bottom: 6px; }
 .grp-rule-body { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .grp-rule-body .qb-select { flex: 0 1 auto; }
+.grp-checks { display: flex; flex-direction: column; gap: 4px; }
+.grp-add-check { align-self: flex-start; margin-top: 2px; }
 .grp-hint { margin-top: 2px; }
 
 /* ---------- calc block ---------- */
