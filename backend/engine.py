@@ -533,6 +533,111 @@ def _eval_condition(df: pd.DataFrame, condition: dict, cs: bool, default_col: st
     return result
 
 
+# --------------------------------------------------------------------------- #
+# Calcul block — "value_when" group function (pandas-side)
+# --------------------------------------------------------------------------- #
+_VALUE_WHEN_REDUCERS = frozenset({"first", "last", "min", "max", "sum", "avg", "concat"})
+
+
+def _vw_reduce(s, reducer):
+    """Reduce a Series to a single value, ignoring NaN.
+    Returns NA when no value matched (so the fallback kicks in) — sum is special-
+    cased because pandas would otherwise turn an all-NaN series into 0."""
+    if not s.notna().any():
+        return pd.NA
+    if reducer == "first":
+        return s.dropna().iloc[0]
+    if reducer == "last":
+        return s.dropna().iloc[-1]
+    if reducer == "concat":
+        return ", ".join(str(x) for x in s.dropna())
+    n = pd.to_numeric(s, errors="coerce")
+    if not n.notna().any():
+        return pd.NA
+    if reducer == "min":
+        return n.min()
+    if reducer == "max":
+        return n.max()
+    if reducer == "sum":
+        return n.sum()
+    if reducer == "avg":
+        return n.mean()
+    return pd.NA
+
+
+def _apply_value_when(con, df: pd.DataFrame, group: dict) -> pd.DataFrame:
+    """Compute pandas-only 'value_when' group columns on top of df.
+    Each function picks a per-row value (a column or a compiled formula), keeps
+    only the rows whose condition matches, reduces per group (first/last follow
+    group.order_by ; min/max/sum/avg/concat are order-independent), then
+    broadcasts the result to every row of the group. A group with no matching
+    row falls back to NULL or to a fixed user value."""
+    g = group or {}
+    funcs = [f for f in (g.get("functions") or [])
+             if f.get("fn") == "value_when" and f.get("enabled") is not False]
+    if not funcs:
+        return df
+    keys = [c for c in (g.get("partition_by") or []) if c in df.columns]
+    order_pairs = []
+    for o in (g.get("order_by") or []):
+        c = o.get("column") if isinstance(o, dict) else o
+        if c and c in df.columns:
+            order_pairs.append((c, bool(isinstance(o, dict) and o.get("desc"))))
+    if order_pairs:
+        sort_cols = [c for c, _ in order_pairs]
+        ascending = [not d for _, d in order_pairs]
+        sorted_idx = df.sort_values(sort_cols, ascending=ascending, kind="stable").index
+    else:
+        sorted_idx = df.index
+
+    out = df.copy()
+    for f in funcs:
+        name = (f.get("name") or "").strip()
+        if not name:
+            continue
+        src = f.get("source") or {}
+        if src.get("kind") == "formula":
+            expr = (src.get("expr") or "").strip()
+            if not expr:
+                continue
+            try:
+                sql_expr = compile_formula(expr)
+            except FormulaError:
+                continue
+            con.register("_vw_in", out)
+            try:
+                values = con.execute(f'SELECT ({sql_expr}) AS _v FROM _vw_in').df()["_v"]
+            finally:
+                con.unregister("_vw_in")
+            values.index = out.index
+        else:
+            col = src.get("column")
+            if not col or col not in out.columns:
+                continue
+            values = out[col]
+
+        mask = _eval_condition(out, f.get("condition") or {}, True, None).astype(bool)
+        picked = values.where(mask)               # non-matching rows -> NaN
+        reducer = f.get("reducer") or "first"
+        if reducer not in _VALUE_WHEN_REDUCERS:
+            reducer = "first"
+        # first/last need the user's sort order ; the others don't.
+        picked_s = picked.loc[sorted_idx] if reducer in ("first", "last") else picked
+        if keys:
+            key_series = [out[k].loc[picked_s.index] for k in keys]
+            grouped = picked_s.groupby(key_series, dropna=False)
+        else:
+            grouped = picked_s.groupby(lambda _: 0, dropna=False)
+        agg = grouped.transform(lambda s: _vw_reduce(s, reducer)).reindex(out.index)
+
+        fb = f.get("fallback") or {}
+        if fb.get("mode") == "value":
+            agg = agg.where(agg.notna(), fb.get("value"))
+
+        out[name] = agg
+    return out
+
+
 def _group_check_core(work, df, keys, ck, cs, default_col):
     """Per-row mask for ONE *property* group check (no WHEN premise), or None when
     the check is incomplete (no column / no N / no value yet) so it can be skipped
@@ -1163,6 +1268,8 @@ def _group_funcs_sql(group, df_cols) -> list[tuple[str, str]]:
             continue
         if fn in _GROUP_NEEDS_COL and (not col or col not in df_cols):
             continue
+        if fn == "value_when":                    # pandas-side (see _apply_value_when)
+            continue
         Y = q_ident(col) if col else None
         if fn == "occurrence":
             expr = f"ROW_NUMBER() {over(P, O)}"
@@ -1220,6 +1327,18 @@ def _run_calc(con, pid, node, ins):
                 sel += ", " + ", ".join(adds)
             sql = sel + " FROM _calc_in"
         else:
+            sql = "SELECT * FROM _calc_in"
+        # 1b) "value_when" group columns — pandas-side because the rule engine
+        # (Validation/Routage) is pandas, not SQL. We materialize what the SQL
+        # step produced, apply the pandas transforms, then re-register so the
+        # formula columns below see the new columns just like the SQL ones.
+        group = d.get("group") or {}
+        if any(f.get("fn") == "value_when" and f.get("enabled") is not False
+               for f in (group.get("functions") or [])):
+            mat = _apply_value_when(con, con.execute(sql).df(), group)
+            con.unregister("_calc_in")
+            con.register("_calc_in", mat)
+            known = {str(c) for c in mat.columns}
             sql = "SELECT * FROM _calc_in"
         # 2) Excel-like formula columns (layered on top of the group columns).
         for item in d.get("columns") or []:

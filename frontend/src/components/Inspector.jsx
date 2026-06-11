@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api'
 import QueryBuilder from './QueryBuilder'
 import Icon from './Icon'
-import { ConditionsEditor, RuleRow, MaskBuilder } from './routing'
+import { ConditionsEditor, RuleRow, MaskBuilder, RulesBuilder } from './routing'
 import { EXTRACTOR_TYPES, defaultExtractor } from './validateHelpers'
 
 export default function Inspector({ pid, node, files, inputs, onChange, onSchema, onDelete, wfName }) {
@@ -190,6 +190,9 @@ const CLEAN_OPS = [
 const PIVOT_AGG = ['SUM', 'AVG', 'MIN', 'MAX', 'COUNT', 'MEDIAN', 'FIRST', 'LAST']
 
 // Group/window functions for the Calcul block: [value, label, needsColumn, needsOrder]
+//   'value_when' has its OWN inline editor (condition + source + reducer + fallback)
+//   so neither needsColumn nor needsOrder applies; the dedicated panel handles
+//   everything below the function picker.
 const GROUP_FUNCS = [
   ['occurrence', "N° d'occurrence dans le groupe", false, true],
   ['group_size', 'Taille du groupe (nb de lignes)', false, false],
@@ -206,9 +209,23 @@ const GROUP_FUNCS = [
   ['prev', 'Valeur précédente de… (selon le tri)', true, true],
   ['next', 'Valeur suivante de… (selon le tri)', true, true],
   ['concat', 'Lister les valeurs de… (séparées par « , »)', true, false],
+  ['value_when', 'Valeur conditionnelle (depuis la ligne qui matche)', false, false],
 ]
 const GROUP_NEEDS_COL = new Set(GROUP_FUNCS.filter((f) => f[2]).map((f) => f[0]))
 const GROUP_NEEDS_ORDER = new Set(GROUP_FUNCS.filter((f) => f[3]).map((f) => f[0]))
+
+// value_when reducers ; 'first' / 'last' are the only ones that need a sort
+// order (the others are commutative and ignore the row order).
+const VW_REDUCERS = [
+  ['first', 'la première (selon le tri)'],
+  ['last', 'la dernière (selon le tri)'],
+  ['min', 'la plus petite (numérique)'],
+  ['max', 'la plus grande (numérique)'],
+  ['sum', 'la somme (numérique)'],
+  ['avg', 'la moyenne (numérique)'],
+  ['concat', 'toutes (concaténées par « , »)'],
+]
+const VW_NEEDS_ORDER = new Set(['first', 'last'])
 
 function defaultGroupName(fn, col) {
   const c = col || 'valeur'
@@ -218,6 +235,7 @@ function defaultGroupName(fn, col) {
     sum: `somme_${c}`, avg: `moyenne_${c}`, min: `min_${c}`, max: `max_${c}`,
     median: `mediane_${c}`, share: `part_${c}`, first: `premier_${c}`,
     last: `dernier_${c}`, prev: `${c}_precedent`, next: `${c}_suivant`, concat: `liste_${c}`,
+    value_when: 'valeur_si',
   }[fn] || 'groupe'
 }
 
@@ -396,18 +414,32 @@ function GroupCalcSection({ d, cols, set }) {
   const delF = (i) => setG({ functions: funcs.filter((_, j) => j !== i) })
   const addF = () => setG({ functions: [...funcs, { fn: 'group_size', name: 'taille_groupe', enabled: true }] })
   // changing the function (or its column) refreshes an auto-generated name only
-  // when the user hasn't typed their own.
+  // when the user hasn't typed their own. value_when also gets a minimal default
+  // skeleton so the user lands on a usable form (one empty rule) instead of an
+  // empty panel inviting them to click "+ Groupe (OU)" first.
   const setFn = (i, fn) => {
     const cur = funcs[i]
     const wasAuto = !cur.name || cur.name === defaultGroupName(cur.fn, cur.column)
-    updF(i, { fn, name: wasAuto ? defaultGroupName(fn, cur.column) : cur.name })
+    const patch = { fn, name: wasAuto ? defaultGroupName(fn, cur.column) : cur.name }
+    if (fn === 'value_when' && !cur.condition) {
+      patch.condition = { groups: [{ rules: [{ test: 'equals', value: '' }] }] }
+      patch.source = cur.source || { kind: 'column' }
+      patch.reducer = cur.reducer || 'first'
+      patch.fallback = cur.fallback || { mode: 'null' }
+    }
+    updF(i, patch)
   }
   const setCol = (i, column) => {
     const cur = funcs[i]
     const wasAuto = !cur.name || cur.name === defaultGroupName(cur.fn, cur.column)
     updF(i, { column, name: wasAuto ? defaultGroupName(cur.fn, column) : cur.name })
   }
-  const needsOrder = funcs.some((f) => f.enabled !== false && GROUP_NEEDS_ORDER.has(f.fn))
+  // 'value_when' also wants the order when its reducer is first/last, so it
+  // unlocks the shared "trier par" row just like the other ordered functions.
+  const needsOrder = funcs.some((f) => f.enabled !== false && (
+    GROUP_NEEDS_ORDER.has(f.fn)
+    || (f.fn === 'value_when' && VW_NEEDS_ORDER.has(f.reducer || 'first'))
+  ))
   const open = part.length > 0 || funcs.length > 0
 
   return (
@@ -474,11 +506,70 @@ function GroupCalcSection({ d, cols, set }) {
               <span className="qb-lbl">→</span>
               <input className="qb-input" placeholder="nom de la colonne" value={o.name || ''} onChange={(e) => updF(i, { name: e.target.value })} />
             </div>
+            {o.fn === 'value_when' && (
+              <ValueWhenEditor item={o} cols={cols} onChange={(patch) => updF(i, patch)} />
+            )}
           </div>
         ))}
         {funcs.length === 0 && <div className="qb-hint">Aucune colonne par groupe. Choisissez une clé puis « + Colonne par groupe ».</div>}
       </div>
     </details>
+  )
+}
+
+// Dedicated editor for the 'value_when' group function: a DNF condition (same
+// builder as Validation/Routage), a source (column or formula), a reducer for
+// when several rows match, and an optional fixed fallback for groups with no
+// match. Everything is stored inside the function dict so the row stays self-
+// describing for the backend.
+function ValueWhenEditor({ item, cols, onChange }) {
+  const src = item.source || { kind: 'column' }
+  const fb = item.fallback || { mode: 'null' }
+  const cond = item.condition || { groups: [] }
+  const setSrc = (patch) => onChange({ source: { ...src, ...patch } })
+  return (
+    <div className="vw-editor">
+      <div className="vw-block">
+        <div className="vw-h"><span className="vw-tag">QUAND</span> la ligne respecte&nbsp;:</div>
+        <RulesBuilder groups={cond.groups || []} cols={cols} defaultCol={null}
+          onChange={(groups) => onChange({ condition: { groups } })} />
+      </div>
+      <div className="vw-block">
+        <div className="vw-h"><span className="vw-tag alors">ALORS</span> prendre&nbsp;:</div>
+        <div className="qb-row">
+          <div className="mode-toggle sm">
+            <button className={src.kind !== 'formula' ? 'on' : ''} onClick={() => setSrc({ kind: 'column' })}>Colonne</button>
+            <button className={src.kind === 'formula' ? 'on' : ''} onClick={() => setSrc({ kind: 'formula' })}>Formule</button>
+          </div>
+          {src.kind === 'formula' ? (
+            <input className="qb-input vw-formula" placeholder='ex : [val] & "=" & [n]'
+              value={src.expr || ''} onChange={(e) => setSrc({ expr: e.target.value })} />
+          ) : (
+            <select className="qb-select" value={src.column || ''} onChange={(e) => setSrc({ column: e.target.value })}>
+              <option value="">— colonne —</option>
+              {cols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+            </select>
+          )}
+        </div>
+        <div className="qb-row">
+          <span className="qb-lbl">si plusieurs lignes matchent, garder</span>
+          <select className="qb-select" value={item.reducer || 'first'} onChange={(e) => onChange({ reducer: e.target.value })}>
+            {VW_REDUCERS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </div>
+        <div className="qb-row">
+          <span className="qb-lbl">si aucune ne matche</span>
+          <select className="qb-select tiny" value={fb.mode || 'null'} onChange={(e) => onChange({ fallback: { ...fb, mode: e.target.value } })}>
+            <option value="null">vide (NULL)</option>
+            <option value="value">valeur fixe</option>
+          </select>
+          {fb.mode === 'value' && (
+            <input className="qb-input" placeholder="valeur de repli"
+              value={fb.value ?? ''} onChange={(e) => onChange({ fallback: { ...fb, value: e.target.value } })} />
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
 

@@ -342,6 +342,17 @@ code { background: #eef0f3; padding: 1px 5px; border-radius: 3px; font-size: 12p
 .group-calc[open] > summary::before { content: '▾'; }
 .group-calc > summary .ports-title { margin: 0; }
 .group-calc .fld, .group-calc .clean-ops { margin-top: 8px; }
+/* value_when editor — sits indented under the function row. QUAND / ALORS pills
+   mirror the validation group editor so the two layouts read alike. */
+.vw-editor { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 2px 14px;
+  padding: 8px 10px; border-left: 3px solid var(--t-calc, #cc7b25); background: #fff8f0;
+  border-radius: 0 var(--radius) var(--radius) 0; }
+.vw-block { display: flex; flex-direction: column; gap: 5px; }
+.vw-h { font-size: 11.5px; color: var(--ink-soft); display: flex; align-items: center; gap: 6px; }
+.vw-tag { font-size: 10px; font-weight: 800; letter-spacing: .06em; color: #fff;
+  padding: 1px 6px; border-radius: 9px; background: var(--accent, #4E79A7); }
+.vw-tag.alors { background: #cc7b25; }
+.vw-formula { font-family: ui-monospace, monospace; min-width: 220px; flex: 1; }
 .calc-help { font-size: 11.5px; color: var(--ink-soft); background: #f6f3f8; border: 1px solid #e7dced;
   border-radius: var(--radius); padding: 8px 10px; margin: 8px 0; line-height: 1.6; }
 .calc-help code { background: #fff; border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; font-size: 11px; }

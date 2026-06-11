@@ -371,7 +371,7 @@ function GroupCheckBuilder({ cond, cols, defaultCol, onChange }) {
 }
 
 // Rules as a DNF: OR of groups, each group an AND of rules (NON per rule).
-function RulesBuilder({ groups, cols, defaultCol, onChange }) {
+export function RulesBuilder({ groups, cols, defaultCol, onChange }) {
   const addGroup = () => onChange([...groups, { rules: [{ test: 'contains', value: '' }] }])
   const updGroup = (gi, rules) => onChange(groups.map((g, j) => (j === gi ? { ...g, rules } : g)))
   const delGroup = (gi) => onChange(groups.filter((_, j) => j !== gi))

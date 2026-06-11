@@ -69,6 +69,12 @@ _GROUP_FN_FR = {
     "median": "médiane de", "share": "part dans le total du groupe de",
     "first": "première valeur de", "last": "dernière valeur de",
     "prev": "valeur précédente de", "next": "valeur suivante de", "concat": "liste des valeurs de",
+    "value_when": "valeur conditionnelle",
+}
+_VW_REDUCER_FR = {
+    "first": "la première (selon le tri)", "last": "la dernière (selon le tri)",
+    "min": "la plus petite", "max": "la plus grande", "sum": "la somme",
+    "avg": "la moyenne", "concat": "toutes (concaténées par « , »)",
 }
 _GROUP_CHECK_FR = {
     "unique": "toutes les valeurs sont différentes (unicité)",
@@ -488,6 +494,19 @@ def _d_calc(d, ins, a2l, wf):
         keys = ", ".join(_q(c) for c in (g.get("partition_by") or [])) or "(toute la table)"
         out.append(f"Par groupe de {keys}, ajoute :")
         for f in gfuncs:
+            if f.get("fn") == "value_when":
+                src = f.get("source") or {}
+                src_txt = f"la formule {_q(src.get('expr'))}" if src.get("kind") == "formula" \
+                    else f"la valeur de {_col(src.get('column'))}"
+                cond_lines = _describe_rules(f.get("condition") or {}, None)
+                cond_txt = " ".join(cond_lines).strip() or "(condition à définir)"
+                red = _VW_REDUCER_FR.get(f.get("reducer") or "first", "la première")
+                fb = f.get("fallback") or {}
+                fb_txt = (f", sinon « {fb.get('value')} »" if fb.get("mode") == "value"
+                          else ", sinon vide")
+                out.append(f"   • {_q(f.get('name'))} = {src_txt} sur les lignes où {cond_txt} "
+                           f"(si plusieurs : {red}){fb_txt}")
+                continue
             fn = _GROUP_FN_FR.get(f.get("fn"), f.get("fn"))
             tgt = f" {_col(f.get('column'))}" if f.get("column") else ""
             out.append(f"   • {_q(f.get('name'))} = {fn}{tgt}")
