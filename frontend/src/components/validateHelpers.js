@@ -14,6 +14,10 @@ export const VAL_TESTS = [
   ['length_eq', 'longueur ='], ['length_min', 'longueur ≥'], ['length_max', 'longueur ≤'],
   ['is_in', 'est dans la liste'], ['is_empty', 'est vide'], ['not_empty', 'est non vide'],
   ['is_numeric', 'est numérique'], ['regex', 'regex (contient)'], ['regex_full', 'regex (complète)'],
+  // numeric comparisons — work against a literal OR another column
+  ['num_eq', '= (numérique)'], ['num_ne', '≠ (numérique)'],
+  ['num_gt', '> (numérique)'], ['num_ge', '≥ (numérique)'],
+  ['num_lt', '< (numérique)'], ['num_le', '≤ (numérique)'],
 ]
 export const CHAR_CLASS = [['letter', 'lettre'], ['upper', 'majuscule'], ['lower', 'minuscule'], ['digit', 'chiffre'], ['alnum', 'alphanumérique']]
 // which extra fields a given test needs
@@ -23,7 +27,14 @@ export const needs = {
   startlen: ['substr_equals', 'substr_class'],
   cls: ['char_class', 'substr_class'],
   number: ['length_eq', 'length_min', 'length_max'],
+  numericValue: ['num_eq', 'num_ne', 'num_gt', 'num_ge', 'num_lt', 'num_le'],
 }
+// Tests where the right-hand side can be ANOTHER column instead of a literal —
+// flips between r.value (literal) and r.column2 (column ref) via r.via.
+export const VS_COLUMN_TESTS = new Set([
+  'equals', 'not_equals', 'contains', 'not_contains', 'starts_with', 'ends_with',
+  'num_eq', 'num_ne', 'num_gt', 'num_ge', 'num_lt', 'num_le',
+])
 
 // palette for user-defined outputs + a short id generator
 export const OUTPUT_COLORS = ['#4E79A7', '#59A14F', '#E15759', '#F28E2B', '#B07AA1', '#76B7B2', '#EDC948', '#9C755F', '#FF9DA7', '#86BCB6']

@@ -3,6 +3,7 @@ import { api } from '../api'
 import Icon from './Icon'
 import Inspector, { typeLabel } from './Inspector'
 import { OutputsPane } from './routing'
+import ErrorBoundary from './ErrorBoundary'
 
 /*
  * The single, full-screen editor used for every block. Left = settings (the
@@ -43,7 +44,9 @@ export default function BlockEditor({ pid, wid, node, inputs, files, status, wfN
               onChange={onChange} onSchema={onSchema} onDelete={onDelete} />
           </div>
           <div className="be-view">
-            <BlockView pid={pid} wid={wid} node={node} status={status} onChange={onChange} onRun={onRun} onPreview={onPreview} />
+            <ErrorBoundary resetKey={node.id}>
+              <BlockView pid={pid} wid={wid} node={node} status={status} onChange={onChange} onRun={onRun} onPreview={onPreview} />
+            </ErrorBoundary>
           </div>
         </div>
       </div>
@@ -81,7 +84,7 @@ function ValidateView({ pid, wid, node, status, onChange, onRun, onPreview }) {
       </div>
       <div className="be-tabcontent">
         {tab === 'settings'
-          ? <OutputsPane pid={pid} wid={wid} node={node} onChange={onChange} onRun={onRun}
+          ? <OutputsPane pid={pid} wid={wid} node={node} status={status} onChange={onChange} onRun={onRun}
               onPreview={(h) => { setHandle(h); setTab('preview') }} />
           : <OutputPreview pid={pid} wid={wid} node={node} status={status} onRun={onRun} onPreview={onPreview} initialHandle={handle} />}
       </div>

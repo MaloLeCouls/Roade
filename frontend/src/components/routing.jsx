@@ -3,7 +3,7 @@ import { api } from '../api'
 import Icon from './Icon'
 import {
   VAL_TESTS, CHAR_CLASS, needs, SEG_TYPES, OUTPUT_COLORS, uid,
-  buildMaskPattern, makeCondition,
+  buildMaskPattern, makeCondition, VS_COLUMN_TESTS,
 } from './validateHelpers'
 
 /*
@@ -17,10 +17,13 @@ import {
  */
 
 // Live distribution (server dry-run, no materialization), debounced on config change.
-export function useRoutePreview(pid, wid, node) {
+export function useRoutePreview(pid, wid, node, status) {
   const d = node.data
   const [dist, setDist] = useState({ total: 0, counts: {}, error: null, loading: false })
   const cfgKey = JSON.stringify({ o: d.outputs, cn: d.conditions, r: d.routing, e: d.else_enabled, cs: d.case_sensitive, tc: d.target_column, sp: d.split })
+  // Re-run after THIS block executes: running it materializes the upstream, so the
+  // dry-run (which reads that input) goes from "Entrée : 0" to the real split.
+  const ranKey = status?.ran ? JSON.stringify(status.outputs || status.rows) : ''
   useEffect(() => {
     setDist((s) => ({ ...s, loading: true }))
     const h = setTimeout(() => {
@@ -29,7 +32,7 @@ export function useRoutePreview(pid, wid, node) {
         .catch((e) => setDist((s) => ({ ...s, counts: {}, error: e.message, loading: false })))
     }, 350)
     return () => clearTimeout(h)
-  }, [cfgKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cfgKey, ranKey]) // eslint-disable-line react-hooks/exhaustive-deps
   return dist
 }
 
@@ -109,7 +112,7 @@ function ConditionBuilder({ cond, cols, defaultCol, caseSensitive, onChange }) {
       {kind === 'mask'
         ? <MaskBuilder segments={cond.segments || []} caseSensitive={caseSensitive} onChange={(segments) => onChange({ segments })} />
         : kind === 'group'
-          ? <GroupCheckBuilder cond={cond} cols={cols} onChange={onChange} />
+          ? <GroupCheckBuilder cond={cond} cols={cols} defaultCol={defaultCol} onChange={onChange} />
           : <RulesBuilder groups={cond.groups || []} cols={cols} defaultCol={cond.column || defaultCol} onChange={(groups) => onChange({ groups })} />}
       {kind !== 'group' && <ConditionTester cond={cond} caseSensitive={caseSensitive} onChange={onChange} />}
     </div>
@@ -118,18 +121,24 @@ function ConditionBuilder({ cond, cols, defaultCol, caseSensitive, onChange }) {
 
 // Catalog of group checks: [value, label, scope, extra]
 //   scope 'col'  → needs a column to verify ; 'size' → about the group size only
+//   scope 'rules'→ a per-row consequent built with the rules builder (rows_satisfy)
 //   extra 'number' → a N field ; 'value' → a free value field ; null → nothing
 //   extra 'col2' → a second column ; 'cmpcol' → an operator + a second column
 const GROUP_CHECKS = [
+  ['rows_satisfy', 'des règles personnalisées', 'rules', null],
   ['unique', 'toutes différentes (unicité)', 'col', null],
   ['constant', 'toutes identiques (constance)', 'col', null],
   ['no_null', 'jamais vide (toujours renseignée)', 'col', null],
+  ['all_null', 'toujours vide (jamais renseignée)', 'col', null],
   ['not_all_null', 'pas entièrement vide (au moins une valeur)', 'col', null],
   ['distinct_eq', 'exactement N valeurs distinctes', 'col', 'number'],
   ['distinct_min', 'au moins N valeurs distinctes', 'col', 'number'],
   ['distinct_max', 'au plus N valeurs distinctes', 'col', 'number'],
   ['distinct_cmp', 'nb de valeurs distinctes', 'col', 'cmpcol'],
   ['determines', 'déterminer la colonne (dépendance fonctionnelle)', 'col', 'col2'],
+  // Per-row two-column comparison, atomic per group: every row of the group
+  // must satisfy "colA <op> colB" — the group fails as soon as ONE row breaks.
+  ['rows_cols_cmp', 'égaler ligne par ligne (col vs col)', 'col', 'cmpcol'],
   ['contains', 'contenir la valeur', 'col', 'value'],
   ['not_contains', 'ne pas contenir la valeur', 'col', 'value'],
   ['size_eq', 'compter exactement N lignes', 'size', 'number'],
@@ -144,55 +153,82 @@ const CMP_OPS = [['eq', '='], ['ne', '≠'], ['lt', '<'], ['le', '≤'], ['gt', 
 // Layout reads as a sentence — the repeating KEY on top, then, indented below,
 // the checked column and the property it must satisfy. It SORTS rows (a NON on
 // the output isolates the offenders); it never adds a column.
-function GroupCheckRow({ ck, cols, onChange, onDelete }) {
+// Renders only the ALORS clause for a single check (sentence + optional rules
+// body). The surrounding WHEN box and "shared WHEN" plumbing live one level up
+// in GroupCheckBuilder, so a single WHEN can host several ALORS lines.
+//   boxed=true  -> sentence wrapped with [ALORS] tag (used inside a WHEN box)
+//   boxed=false -> flat sentence, no chrome (used when there is no WHEN)
+function GroupCheckAlors({ ck, cols, defaultCol, boxed, onChange, onDelete }) {
   const check = ck.check || 'unique'
   const spec = GROUP_CHECKS.find((g) => g[0] === check) || GROUP_CHECKS[0]
   const onCol = spec[2] === 'col'
+  const isRules = spec[2] === 'rules'        // 'rows_satisfy' consequent (a rules builder)
   const extra = spec[3]
-  return (
-    <div className="grp-rule-body">
-      {onCol && (
-        <select className="qb-select" value={ck.column || ''} onChange={(e) => onChange({ column: e.target.value })}>
-          <option value="">(colonne)</option>
-          {cols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-        </select>
-      )}
-      <span className="qb-lbl">doit</span>
-      <select className="qb-select" value={check} onChange={(e) => onChange({ check: e.target.value })}>
-        {GROUP_CHECKS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-      </select>
-      {extra === 'number' && (
-        <input className="qb-input narrow" type="number" min="0" value={ck.n ?? ''}
-          onChange={(e) => onChange({ n: e.target.value })} />
-      )}
-      {extra === 'value' && (
-        <input className="qb-input" placeholder="valeur" value={ck.value ?? ''}
-          onChange={(e) => onChange({ value: e.target.value })} />
-      )}
-      {extra === 'cmpcol' && (<>
-        <select className="qb-select narrow" value={ck.op || 'eq'} onChange={(e) => onChange({ op: e.target.value })}>
-          {CMP_OPS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
-        <span className="qb-lbl">celui de</span>
-        <select className="qb-select" value={ck.column2 || ''} onChange={(e) => onChange({ column2: e.target.value })}>
-          <option value="">(autre colonne)</option>
-          {cols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-        </select>
-      </>)}
-      {extra === 'col2' && (<>
-        <select className="qb-select" value={ck.column2 || ''} onChange={(e) => onChange({ column2: e.target.value })}>
-          <option value="">(autre colonne)</option>
-          {cols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-        </select>
-      </>)}
-      {onDelete && <button className="ghost danger small" onClick={onDelete} title="Retirer ce contrôle"><Icon name="x" /></button>}
-    </div>
+  const colSelect = (val, onPick, placeholder = '(colonne)') => (
+    <select className="qb-select" value={val || ''} onChange={(e) => onPick(e.target.value)}>
+      <option value="">{placeholder}</option>
+      {cols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+    </select>
   )
+  const checkSelect = (
+    <select className="qb-select" value={check} onChange={(e) => onChange({ check: e.target.value })}>
+      {GROUP_CHECKS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+    </select>
+  )
+  const delBtn = onDelete && <button className="ghost danger small" onClick={onDelete} title="Retirer ce contrôle"><Icon name="x" /></button>
+  // The check's inline extras (N / value / op+col / col2). Same fragment in both
+  // flat and boxed modes; appended after the kind selector in the property sentence.
+  const extras = (<>
+    {extra === 'number' && (
+      <input className="qb-input narrow" type="number" min="0" value={ck.n ?? ''}
+        onChange={(e) => onChange({ n: e.target.value })} />
+    )}
+    {extra === 'value' && (<>
+      <button className="rhs-toggle" type="button"
+        onClick={() => onChange({ via: ck.via === 'column' ? 'value' : 'column' })}
+        title={ck.via === 'column' ? "Comparer à une valeur littérale" : "Comparer à une autre colonne"}>
+        {ck.via === 'column' ? 'vs colonne' : 'vs valeur'}
+      </button>
+      {ck.via === 'column'
+        ? colSelect(ck.column2, (v) => onChange({ column2: v }), '(autre colonne)')
+        : <input className="qb-input" placeholder="valeur" value={ck.value ?? ''}
+            onChange={(e) => onChange({ value: e.target.value })} />}
+    </>)}
+    {extra === 'cmpcol' && (<>
+      <select className="qb-select narrow" value={ck.op || 'eq'} onChange={(e) => onChange({ op: e.target.value })}>
+        {CMP_OPS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+      </select>
+      <span className="qb-lbl">celui de</span>
+      {colSelect(ck.column2, (v) => onChange({ column2: v }), '(autre colonne)')}
+    </>)}
+    {extra === 'col2' && colSelect(ck.column2, (v) => onChange({ column2: v }), '(autre colonne)')}
+  </>)
+  return (<>
+    <div className={boxed ? 'grp-clause-h' : 'grp-rule-body'}>
+      {boxed && <span className="grp-clause-tag">ALORS</span>}
+      {isRules ? (<>
+        <span className="qb-lbl">chaque ligne respecte :</span>
+        {checkSelect}
+      </>) : (<>
+        {onCol && colSelect(ck.column, (v) => onChange({ column: v }))}
+        <span className="qb-lbl">doit</span>
+        {checkSelect}
+        {extras}
+      </>)}
+      {delBtn}
+    </div>
+    {isRules && (
+      <RulesBuilder groups={ck.then?.groups || []} cols={cols} defaultCol={defaultCol}
+        onChange={(groups) => onChange({ then: { groups } })} />
+    )}
+  </>)
 }
 
-function GroupCheckBuilder({ cond, cols, onChange }) {
+function GroupCheckBuilder({ cond, cols, defaultCol, onChange }) {
   const keys = cond.group_by || []
   const toggle = (c) => onChange({ group_by: keys.includes(c) ? keys.filter((x) => x !== c) : [...keys, c] })
+  // collapse the picker once a key is set — the long list rarely needs to stay open
+  const [keysOpen, setKeysOpen] = useState(keys.length === 0)
   // one or several checks, AND-combined; migrate the legacy single-check shape.
   const checks = (cond.checks && cond.checks.length)
     ? cond.checks
@@ -200,36 +236,123 @@ function GroupCheckBuilder({ cond, cols, onChange }) {
   const setChecks = (next) => onChange({ checks: next })
   const updCheck = (i, patch) => setChecks(checks.map((c, j) => (j === i ? { ...c, ...patch } : c)))
   const addCheck = () => setChecks([...checks, { check: 'no_null', column: '' }])
+  // a ready-to-fill "quand X … alors chaque ligne respecte …" skeleton (the headline case)
+  const addConditional = () => setChecks([...checks, {
+    check: 'rows_satisfy',
+    when: { groups: [{ rules: [{ test: 'equals', value: '' }] }] },
+    then: { groups: [{ rules: [{ test: 'not_empty' }] }] },
+  }])
   const delCheck = (i) => setChecks(checks.filter((_, j) => j !== i))
+
+  // Group consecutive checks that share an identical non-empty WHEN — a UI
+  // sugar over the per-check `when` data model so the user can read & write
+  // "one premise, several verdicts ANDed" naturally. Each group below renders
+  // a single WHEN box + N ALORS sentences + a "+ alors" button. Editing the
+  // WHEN propagates the new value to every check in the group.
+  const clauseGroups = []
+  for (let i = 0; i < checks.length; i++) {
+    const wj = JSON.stringify(checks[i].when?.groups || [])
+    const hasWhen = wj !== '[]'
+    const last = clauseGroups[clauseGroups.length - 1]
+    if (hasWhen && last && last.whenJson === wj) {
+      last.indices.push(i)
+    } else {
+      clauseGroups.push({ whenJson: wj, hasWhen, indices: [i] })
+    }
+  }
+  const updGroupWhen = (g, newGroups) => {
+    setChecks(checks.map((c, j) => g.indices.includes(j) ? { ...c, when: { groups: newGroups } } : c))
+  }
+  const clearGroupWhen = (g) => {
+    setChecks(checks.map((c, j) => g.indices.includes(j) ? { ...c, when: { groups: [] } } : c))
+  }
+  const addAlorsToGroup = (g) => {
+    const ref = checks[g.indices[0]]
+    const newCk = { check: 'no_null', column: '', when: ref.when }
+    const at = g.indices[g.indices.length - 1] + 1
+    setChecks([...checks.slice(0, at), newCk, ...checks.slice(at)])
+  }
+  const enableWhenOn = (idx) => {
+    updCheck(idx, { when: { groups: [{ rules: [{ test: 'equals', value: '' }] }] } })
+  }
   return (
     <div className="cond-group-check">
       <div className="grp-key">
-        <div className="grp-key-head">
+        <button type="button" className="grp-key-head" onClick={() => setKeysOpen((v) => !v)}
+          title={keysOpen ? 'Replier' : 'Déplier'}>
+          <Icon name={keysOpen ? 'down' : 'chev-right'} size={11} />
           <Icon name="list" size={13} />
           <span>Clé de regroupement <span className="qb-lbl">— ce qui se répète</span></span>
-        </div>
-        <div className="checklist">
-          {cols.length === 0 && <div className="qb-hint">— colonnes non chargées —</div>}
-          {cols.map((c) => (
-            <label key={c.name} className="qb-check">
-              <input type="checkbox" checked={keys.includes(c.name)} onChange={() => toggle(c.name)} />
-              {c.name} <span className="coltype-inline">{c.type}</span>
-            </label>
-          ))}
-        </div>
+          {!keysOpen && (
+            <span className="grp-key-summary">
+              {keys.length === 0 ? <em>aucune</em> : keys.join(', ')}
+            </span>
+          )}
+        </button>
+        {keysOpen && (
+          <div className="checklist">
+            {cols.length === 0 && <div className="qb-hint">— colonnes non chargées —</div>}
+            {cols.map((c) => (
+              <label key={c.name} className="qb-check">
+                <input type="checkbox" checked={keys.includes(c.name)} onChange={() => toggle(c.name)} />
+                {c.name} <span className="coltype-inline">{c.type}</span>
+              </label>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="grp-rule">
         <span className="grp-rule-lead">dans chaque groupe,</span>
         <div className="grp-checks">
-          {checks.map((ck, i) => (
-            <div key={i}>
-              {i > 0 && <span className="cond-and">ET</span>}
-              <GroupCheckRow ck={ck} cols={cols} onChange={(p) => updCheck(i, p)}
-                onDelete={checks.length > 1 ? () => delCheck(i) : null} />
-            </div>
-          ))}
-          <button className="ghost small grp-add-check" onClick={addCheck}>+ contrôle (ET)</button>
+          {clauseGroups.map((g, gi) => {
+            const canDelete = checks.length > 1
+            return (
+              <div key={gi}>
+                {gi > 0 && <span className="cond-and">ET</span>}
+                {g.hasWhen ? (
+                  <div className="grp-rule-item">
+                    <div className="grp-clause-box grp-clause-when">
+                      <div className="grp-clause-h">
+                        <span className="grp-clause-tag">QUAND</span>
+                        <span className="qb-lbl">les lignes du groupe qui vérifient :</span>
+                        <button className="ghost danger small" title="Retirer le filtre QUAND (s'applique aux ALORS de ce bloc)"
+                          onClick={() => clearGroupWhen(g)}><Icon name="x" /></button>
+                      </div>
+                      <RulesBuilder groups={checks[g.indices[0]].when?.groups || []}
+                        cols={cols} defaultCol={defaultCol}
+                        onChange={(newGroups) => updGroupWhen(g, newGroups)} />
+                    </div>
+                    {/* one or more ALORS sharing the WHEN above */}
+                    {g.indices.map((idx) => (
+                      <div key={idx} className="grp-clause-box grp-clause-then">
+                        <GroupCheckAlors ck={checks[idx]} cols={cols} defaultCol={defaultCol} boxed
+                          onChange={(p) => updCheck(idx, p)}
+                          onDelete={canDelete ? () => delCheck(idx) : null} />
+                      </div>
+                    ))}
+                    <button className="grp-when-add" onClick={() => addAlorsToGroup(g)}>
+                      <Icon name="plus" size={11} /> ajouter un ALORS (ET) sous ce QUAND
+                    </button>
+                  </div>
+                ) : (
+                  /* single check without a WHEN — flat sentence, optional "+ quand…" */
+                  <div className="grp-rule-item">
+                    <button className="grp-when-add" onClick={() => enableWhenOn(g.indices[0])}>
+                      <Icon name="plus" size={11} /> ajouter un filtre QUAND…
+                    </button>
+                    <GroupCheckAlors ck={checks[g.indices[0]]} cols={cols} defaultCol={defaultCol} boxed={false}
+                      onChange={(p) => updCheck(g.indices[0], p)}
+                      onDelete={canDelete ? () => delCheck(g.indices[0]) : null} />
+                  </div>
+                )}
+              </div>
+            )
+          })}
+          <div className="grp-add-row">
+            <button className="ghost small grp-add-check" onClick={addCheck}>+ contrôle (ET)</button>
+            <button className="ghost small grp-add-check" onClick={addConditional}>+ règle conditionnelle (QUAND…)</button>
+          </div>
         </div>
       </div>
 
@@ -318,9 +441,30 @@ export function RuleRow({ r, cols, defaultCol, onChange, onDelete }) {
       {needs.number.includes(r.test) && (
         <input className="qb-input narrow" type="number" min="0" value={r.value ?? ''} onChange={(e) => onChange({ value: e.target.value })} />
       )}
-      {needs.value.includes(r.test) && (
-        <input className="qb-input" placeholder={r.test === 'is_in' ? 'F0, F1, FE…' : 'valeur'} value={r.value ?? ''} onChange={(e) => onChange({ value: e.target.value })} />
-      )}
+      {/* Right-hand side of a value/numeric test: by default a literal input; on
+          tests that support it, a toggle flips to a column reference (r.column2). */}
+      {(needs.value.includes(r.test) || needs.numericValue.includes(r.test)) && (<>
+        {VS_COLUMN_TESTS.has(r.test) && (
+          <button className="rhs-toggle" type="button"
+            onClick={() => onChange({ via: r.via === 'column' ? 'value' : 'column' })}
+            title={r.via === 'column' ? "Comparer à une valeur littérale" : "Comparer à une autre colonne"}>
+            {r.via === 'column' ? 'vs colonne' : 'vs valeur'}
+          </button>
+        )}
+        {r.via === 'column' && VS_COLUMN_TESTS.has(r.test) ? (
+          <select className="qb-select" value={r.column2 || ''}
+            onChange={(e) => onChange({ column2: e.target.value })}>
+            <option value="">(autre colonne)</option>
+            {cols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+          </select>
+        ) : (
+          <input className={`qb-input ${needs.numericValue.includes(r.test) ? 'narrow' : ''}`}
+            type={needs.numericValue.includes(r.test) ? 'number' : 'text'}
+            placeholder={r.test === 'is_in' ? 'F0, F1, FE…' : 'valeur'}
+            value={r.value ?? ''}
+            onChange={(e) => onChange({ value: e.target.value })} />
+        )}
+      </>)}
       {onDelete && <button className="ghost danger small rrow-del" onClick={onDelete}><Icon name="x" /></button>}
     </div>
   )
@@ -439,8 +583,8 @@ function ConditionTester({ cond, caseSensitive, onChange }) {
  *  RIGHT — flow map + outputs settings (the "where it goes") + preview
  * ======================================================================== */
 
-export function OutputsPane({ pid, wid, node, onChange, onRun, onPreview }) {
-  const dist = useRoutePreview(pid, wid, node)
+export function OutputsPane({ pid, wid, node, status, onChange, onRun, onPreview }) {
+  const dist = useRoutePreview(pid, wid, node, status)
   const d = node.data
   const conditions = d.conditions || []
   const outputs = d.outputs || []
@@ -492,6 +636,19 @@ export function OutputsPane({ pid, wid, node, onChange, onRun, onPreview }) {
     const j = i + dir
     if (j < 0 || j >= outputs.length) return
     const a = [...outputs];[a[i], a[j]] = [a[j], a[i]]; onChange({ outputs: a })
+  }
+  // Reshuffles the palette across outputs — a Fisher-Yates over OUTPUT_COLORS,
+  // then assigned in order (cycles past the palette length, but never gives the
+  // same colour to two adjacent outputs as long as N <= palette size).
+  const shuffleColors = () => {
+    const palette = [...OUTPUT_COLORS]
+    for (let i = palette.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[palette[i], palette[j]] = [palette[j], palette[i]]
+    }
+    onChange({
+      outputs: outputs.map((o, i) => ({ ...o, color: palette[i % palette.length] })),
+    })
   }
 
   return (
@@ -546,6 +703,12 @@ export function OutputsPane({ pid, wid, node, onChange, onRun, onPreview }) {
             </button>
           ) : (
             <span className="qb-hint" style={{ marginLeft: 'auto' }}>chaque sortie reçoit une condition</span>
+          )}
+          {outputs.length > 0 && (
+            <button className="ghost small" onClick={shuffleColors}
+              title="Réattribuer une couleur aléatoire à chaque sortie">
+              <Icon name="shuffle" size={13} />
+            </button>
           )}
         </div>
         {isSplit && (scan.error || scan.info) && (

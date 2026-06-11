@@ -23,24 +23,24 @@ export default function ProjectView({ pid, onOpenWorkflow }) {
     setFiles(await api.listFiles(pid))
   }
 
-  const delFile = async (name) => {
+  const delFile = async (name, subdir) => {
     if (!confirm(`Supprimer ${name} ?`)) return
-    await api.deleteFile(pid, name)
+    await api.deleteFile(pid, name, subdir)
     setFiles(await api.listFiles(pid))
   }
 
-  const openFile = async (name) => {
-    try { await api.openFile(pid, name) }
+  const openFile = async (name, subdir) => {
+    try { await api.openFile(pid, name, subdir) }
     catch (e) { alert(`Impossible d'ouvrir le fichier : ${e.message}`) }
   }
 
   const fileRow = (f) => (
-    <li key={f.name}>
+    <li key={`${f.subdir || ''}/${f.name}`}>
       <span className="fname"><Icon name="file" size={13} /> {f.name}</span>
       <span className="fsize">{fmtSize(f.size)}</span>
-      <button className="ghost small" onClick={() => openFile(f.name)} title="Ouvrir dans l'application par défaut"><Icon name="external" /></button>
-      <a className="ghost small" href={api.downloadUrl(pid, f.name)} title="Télécharger"><Icon name="download" /></a>
-      <button className="ghost danger small" onClick={() => delFile(f.name)} title="Supprimer"><Icon name="trash" /></button>
+      <button className="ghost small" onClick={() => openFile(f.name, f.subdir)} title="Ouvrir dans l'application par défaut"><Icon name="external" /></button>
+      <a className="ghost small" href={api.downloadUrl(pid, f.name, f.subdir)} title="Télécharger"><Icon name="download" /></a>
+      <button className="ghost danger small" onClick={() => delFile(f.name, f.subdir)} title="Supprimer"><Icon name="trash" /></button>
     </li>
   )
 
@@ -62,6 +62,13 @@ export default function ProjectView({ pid, onOpenWorkflow }) {
 
   const sources = files.filter((f) => f.origin !== 'export')
   const exportFiles = files.filter((f) => f.origin === 'export')
+  // Group exports by their workflow folder so the panel mirrors the on-disk
+  // layout (exports/<wf>/...). Workflows without a subdir share one bucket.
+  const exportsByWf = exportFiles.reduce((acc, f) => {
+    const key = f.subdir || ''
+    ;(acc[key] = acc[key] || []).push(f)
+    return acc
+  }, {})
 
   return (
     <div className="page">
@@ -103,7 +110,14 @@ export default function ProjectView({ pid, onOpenWorkflow }) {
               {exportFiles.length > 0 && (
                 <div className="file-group">
                   <div className="file-group-head">Exports générés <span className="fg-count">{exportFiles.length}</span></div>
-                  <ul className="list">{exportFiles.map(fileRow)}</ul>
+                  {Object.keys(exportsByWf).sort().map((wf) => (
+                    <div key={wf} className="file-subgroup">
+                      <div className="file-subgroup-head">
+                        <Icon name="folder" size={12} /> {wf || '(racine)'}
+                      </div>
+                      <ul className="list">{exportsByWf[wf].map(fileRow)}</ul>
+                    </div>
+                  ))}
                 </div>
               )}
             </>

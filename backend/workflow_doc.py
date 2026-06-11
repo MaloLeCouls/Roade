@@ -74,6 +74,7 @@ _GROUP_CHECK_FR = {
     "unique": "toutes les valeurs sont différentes (unicité)",
     "constant": "toutes les valeurs sont identiques (constance)",
     "no_null": "n'est jamais vide (toujours renseignée)",
+    "all_null": "est toujours vide (jamais renseignée)",
     "not_all_null": "n'est pas entièrement vide (au moins une valeur)",
     "distinct_eq": "exactement {n} valeurs distinctes",
     "distinct_min": "au moins {n} valeurs distinctes",
@@ -224,21 +225,29 @@ def _describe_condition(cond: dict, default_col) -> list[str]:
         keys = ", ".join(_q(c) for c in (cond.get("group_by") or [])) or "(toute la table)"
         checks = cond.get("checks") or [{"check": cond.get("check"), "column": cond.get("column"),
                                          "n": cond.get("n"), "value": cond.get("value")}]
+
+        def _rules_inline(dnf):                       # premise / consequent rules -> one phrase
+            groups = [g for g in ((dnf or {}).get("groups") or []) if (g.get("rules") or [])]
+            return " ".join(_describe_rules({"groups": groups}, default_col)) if groups else ""
+
         parts = []
         for ck in checks:
             chk = ck.get("check") or "unique"
             col = ck.get("column")
-            if chk == "determines":
-                parts.append(f"{_col(col)} détermine {_col(ck.get('column2'))}")
-                continue
-            if chk == "distinct_cmp":
+            if chk == "rows_satisfy":
+                base = f"chaque ligne respecte : {_rules_inline(ck.get('then')) or '(règle à définir)'}"
+            elif chk == "determines":
+                base = f"{_col(col)} détermine {_col(ck.get('column2'))}"
+            elif chk == "distinct_cmp":
                 opw = _CMP_WORD.get(ck.get("op") or "eq", "autant de")
-                parts.append(f"{_col(col)} a {opw} valeurs distinctes que {_col(ck.get('column2'))}")
-                continue
-            tmpl = _GROUP_CHECK_FR.get(chk, chk)
-            txt = tmpl.format(n=ck.get("n"), v=ck.get("value"))
-            coltxt = f" sur {_col(col)}" if col and "{v}" not in tmpl else ""
-            parts.append(f"{txt}{coltxt}")
+                base = f"{_col(col)} a {opw} valeurs distinctes que {_col(ck.get('column2'))}"
+            else:
+                tmpl = _GROUP_CHECK_FR.get(chk, chk)
+                txt = tmpl.format(n=ck.get("n"), v=ck.get("value"))
+                coltxt = f" sur {_col(col)}" if col and "{v}" not in tmpl else ""
+                base = f"{txt}{coltxt}"
+            premise = _rules_inline(ck.get("when"))
+            parts.append(f"quand {premise}, {base}" if premise else base)
         return [f"par groupe de {keys} : " + " et ".join(parts)]
     return _describe_rules(cond, default_col)
 

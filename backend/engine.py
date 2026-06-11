@@ -394,12 +394,123 @@ def _run_validate(con, pid, node, ins):
 # --------------------------------------------------------------------------- #
 # Routing (neutral multi-output classification, set-algebra conditions)
 # --------------------------------------------------------------------------- #
+_VECTORIZABLE_TESTS = frozenset({
+    "equals", "not_equals", "is_empty", "not_empty",
+    "starts_with", "ends_with", "contains", "not_contains",
+    "length_eq", "length_min", "length_max",
+    "is_in", "regex", "regex_full",
+})
+# String tests whose right-hand side can be either a literal or another column.
+_VS_COLUMN_STR_TESTS = frozenset({
+    "equals", "not_equals", "contains", "not_contains", "starts_with", "ends_with",
+})
+_NUMERIC_TESTS = frozenset({"num_eq", "num_ne", "num_gt", "num_ge", "num_lt", "num_le"})
+
+
 def _rule_mask(df: pd.DataFrame, rule: dict, cs: bool, default_col: str) -> pd.Series:
-    """Boolean Series: does each row satisfy this single rule (optionally negated)?"""
+    """Boolean Series: does each row satisfy this single rule (optionally negated)?
+    Vectorized via pandas .str.* / numeric ops for the common tests; per-row
+    _rule_ok fallback for positional/numeric-string tests. A rule may compare
+    against either a literal (rule['value']) or another column (rule['via']
+    == 'column' + rule['column2'])."""
     col = rule.get("column") or default_col
     if not col or col not in df.columns:
         return pd.Series(False, index=df.index)
-    m = df[col].map(lambda v: _rule_ok("" if _is_null(v) else str(v), rule, cs))
+    test = rule.get("test")
+    # vs-column mode is sticky: when explicitly chosen, an unset/invalid column2
+    # makes the rule match nothing (rather than silently degrading to the
+    # literal r.value, which would surprise the user).
+    if rule.get("via") == "column":
+        if rule.get("column2") not in df.columns:
+            return pd.Series(False, index=df.index)
+        via_col = True
+    else:
+        via_col = False
+
+    # Numeric comparisons (==, !=, >, >=, <, <=) — coerce both sides; rows where
+    # either side fails to parse are non-matching (and never raise).
+    if test in _NUMERIC_TESTS:
+        a = pd.to_numeric(df[col], errors="coerce")
+        if via_col:
+            b = pd.to_numeric(df[rule["column2"]], errors="coerce")
+        else:
+            try:
+                b = float(rule.get("value"))
+            except (TypeError, ValueError):
+                m = pd.Series(False, index=df.index)
+                m = m.astype(bool)
+                return ~m if rule.get("negate") else m
+        op = {"num_eq": a.eq, "num_ne": a.ne, "num_gt": a.gt,
+              "num_ge": a.ge, "num_lt": a.lt, "num_le": a.le}[test]
+        m = op(b).fillna(False).astype(bool)
+        return ~m if rule.get("negate") else m
+
+    if test in _VECTORIZABLE_TESTS:
+        s = df[col].astype("string").fillna("")
+        ss = s if cs else s.str.lower()
+        # Right-hand side: column (per-row) or literal.
+        if via_col and test in _VS_COLUMN_STR_TESTS:
+            s2 = df[rule["column2"]].astype("string").fillna("")
+            ss2 = s2 if cs else s2.str.lower()
+            if test == "equals":
+                m = ss == ss2
+            elif test == "not_equals":
+                m = ss != ss2
+            elif test == "starts_with":
+                # No vectorized pandas op for "row.A starts with row.B"; the
+                # zip+gen-expr is still ~20× faster than a .apply with isinstance.
+                m = pd.Series([a.startswith(b) for a, b in zip(ss, ss2)], index=df.index)
+            elif test == "ends_with":
+                m = pd.Series([a.endswith(b) for a, b in zip(ss, ss2)], index=df.index)
+            elif test == "contains":
+                m = pd.Series([b in a for a, b in zip(ss, ss2)], index=df.index)
+            else:                                          # not_contains
+                m = pd.Series([b not in a for a, b in zip(ss, ss2)], index=df.index)
+            m = m.astype(bool)
+            return ~m if rule.get("negate") else m
+        raw = rule.get("value")
+        vv = "" if raw is None else (str(raw) if cs else str(raw).lower())
+        if test == "equals":
+            m = ss == vv
+        elif test == "not_equals":
+            m = ss != vv
+        elif test == "is_empty":
+            m = s == ""
+        elif test == "not_empty":
+            m = s != ""
+        elif test == "starts_with":
+            m = ss.str.startswith(vv, na=False)
+        elif test == "ends_with":
+            m = ss.str.endswith(vv, na=False)
+        elif test == "contains":
+            m = ss.str.contains(vv, regex=False, na=False)
+        elif test == "not_contains":
+            m = ~ss.str.contains(vv, regex=False, na=False)
+        elif test == "is_in":
+            items = [x.strip() for x in str(raw or "").split(",") if x.strip() != ""]
+            if not cs:
+                items = [x.lower() for x in items]
+            m = ss.isin(items)
+        elif test in ("length_eq", "length_min", "length_max"):
+            try:
+                n = int(raw)
+            except (TypeError, ValueError):
+                m = pd.Series(False, index=df.index)
+            else:
+                lengths = s.str.len()
+                m = (lengths == n if test == "length_eq"
+                     else lengths >= n if test == "length_min"
+                     else lengths <= n)
+        else:                                              # regex / regex_full
+            try:
+                if test == "regex":
+                    m = s.str.contains(str(raw or ""), regex=True, na=False, case=cs)
+                else:
+                    m = s.str.fullmatch(str(raw or ""), case=cs).fillna(False)
+            except re.error:
+                m = pd.Series(False, index=df.index)
+    else:
+        m = df[col].map(lambda v: _rule_ok("" if _is_null(v) else str(v), rule, cs))
     m = m.astype(bool)
     return ~m if rule.get("negate") else m
 
@@ -422,9 +533,11 @@ def _eval_condition(df: pd.DataFrame, condition: dict, cs: bool, default_col: st
     return result
 
 
-def _group_one_check_mask(work, df, keys, ck, cs, default_col):
-    """Per-row mask for ONE group check, or None when the check is incomplete
-    (no column / no N / no value yet) so it can be skipped during editing.
+def _group_check_core(work, df, keys, ck, cs, default_col):
+    """Per-row mask for ONE *property* group check (no WHEN premise), or None when
+    the check is incomplete (no column / no N / no value yet) so it can be skipped
+    during editing. The premise + the 'rows_satisfy' consequent live one level up,
+    in _group_one_check_mask, which calls this on the matching subset of rows.
 
     Group-size checks (no column needed):
         size_eq/size_min/size_max : the group has = / ≥ / ≤ N rows.
@@ -434,7 +547,8 @@ def _group_one_check_mask(work, df, keys, ck, cs, default_col):
         distinct_eq/min/max : the group has = / ≥ / ≤ N distinct values.
         contains/not_contains : the group does / doesn't hold a given value.
         no_null      : the column is never null/empty anywhere in the group.
-        not_all_null : the column has at least one non-null value in the group."""
+        not_all_null : the column has at least one non-null value in the group.
+        all_null     : the column is empty in every row of the group (inverse of no_null)."""
     check = ck.get("check") or "unique"
 
     def _int(x):
@@ -474,6 +588,10 @@ def _group_one_check_mask(work, df, keys, ck, cs, default_col):
         if keys:
             return work.groupby(keys, dropna=False)[col].transform(lambda s: s.notna().any()).astype(bool)
         return pd.Series(bool(work[col].notna().any()), index=df.index)
+    if check == "all_null":                       # group OK iff col empty everywhere (inverse of no_null)
+        if keys:
+            return work.groupby(keys, dropna=False)[col].transform(lambda s: s.isna().all()).astype(bool)
+        return pd.Series(bool(work[col].isna().all()), index=df.index)
     if check == "unique":
         # group-atomic: the WHOLE group is OK iff every value is distinct
         # (nunique == size), broadcast to all its rows — so a group is never split.
@@ -494,6 +612,22 @@ def _group_one_check_mask(work, df, keys, ck, cs, default_col):
             return nun >= k
         return nun <= k
     if check in ("contains", "not_contains"):
+        # vs-column mode: per-row "col contains col2" check, then "any" per group.
+        if ck.get("via") == "column":
+            col2 = ck.get("column2")
+            if not col2 or col2 not in df.columns:
+                return None
+            a = work[col].astype("string").fillna("")
+            b = work[col2].astype("string").fillna("")
+            if not cs:
+                a, b = a.str.lower(), b.str.lower()
+            per_row = pd.Series([bb in aa for aa, bb in zip(a, b)], index=df.index)
+            if keys:
+                has = per_row.groupby([df[k] for k in keys], dropna=False).transform("any")
+            else:
+                has = pd.Series(bool(per_row.any()), index=df.index)
+            has = has.astype(bool)
+            return has if check == "contains" else ~has
         target = ck.get("value")
         if target is None or target == "":
             return None
@@ -507,6 +641,26 @@ def _group_one_check_mask(work, df, keys, ck, cs, default_col):
         return has if check == "contains" else ~has
 
     # --- two-column checks: compare the checked column to a second one --------
+    if check == "rows_cols_cmp":
+        # Per-row "colA <op> colB" verdict, then "all" over the group — group OK
+        # iff every row passes. eq/ne are string compares (casefold for ci);
+        # gt/ge/lt/le coerce to numeric (non-coercible rows fail).
+        col2 = ck.get("column2")
+        if not col2 or col2 not in df.columns:
+            return None
+        op = ck.get("op") or "eq"
+        if op in ("eq", "ne"):
+            a = work[col].astype("string").fillna("")
+            b = work[col2].astype("string").fillna("")
+            per_row = (a == b) if op == "eq" else (a != b)
+        else:
+            a = pd.to_numeric(df[col], errors="coerce")
+            b = pd.to_numeric(df[col2], errors="coerce")
+            per_row = {"lt": a < b, "le": a <= b, "gt": a > b, "ge": a >= b}[op]
+            per_row = per_row.fillna(False)
+        if keys:
+            return per_row.groupby([df[k] for k in keys], dropna=False).transform("all").astype(bool)
+        return pd.Series(bool(per_row.all()), index=df.index)
     if check in ("distinct_cmp", "determines"):
         col2 = ck.get("column2")
         if not col2:
@@ -530,6 +684,68 @@ def _group_one_check_mask(work, df, keys, ck, cs, default_col):
                     == g["__p"].transform(lambda s: s.nunique(dropna=False)))
         return pd.Series(tmp["__a"].nunique(dropna=False) == tmp["__p"].nunique(dropna=False), index=df.index)
     return None
+
+
+def _nonempty_groups(dnf):
+    """The groups of a rules-DNF that actually carry rules (ignore blanks left by
+    the editor). Empty -> the condition is inert."""
+    return [g for g in ((dnf or {}).get("groups") or []) if (g.get("rules") or [])]
+
+
+def _eval_premise(df, when, cs, default_col):
+    """Row mask for a check's optional WHEN premise, or None when there is no
+    effective premise — so callers keep the fast, unfiltered path untouched."""
+    groups = _nonempty_groups(when)
+    if not groups:
+        return None
+    return _eval_condition(df, {"groups": groups}, cs, default_col).astype(bool)
+
+
+def _broadcast_group_verdict(df, keys, sub_verdict):
+    """Map an atomic per-group verdict (computed over a premise-matching SUBSET,
+    constant within each group) back onto every row of df by key. Groups with no
+    matching row are absent from the subset -> conforme by vacuity (True)."""
+    sub = sub_verdict.astype(bool)
+    if not keys:
+        return pd.Series(bool(sub.all()) if len(sub) else True, index=df.index)
+    gv = df.loc[sub.index, keys].assign(__ok=sub.to_numpy()).drop_duplicates(keys)
+    ok = df[keys].merge(gv, on=keys, how="left")["__ok"]              # unique right keys -> left order kept;
+    return pd.Series(ok.astype("boolean").fillna(True).to_numpy(dtype=bool), index=df.index)  # NaN (no match) -> True
+
+
+def _group_one_check_mask(work, df, keys, ck, cs, default_col):
+    """Per-row mask for ONE group check, atomic per group. Adds two things on top
+    of _group_check_core:
+
+      WHEN premise (ck['when'], a rules-DNF): the check applies only to the group's
+        rows that satisfy it. The matching subset is verdicted by _group_check_core,
+        then broadcast to the whole group (empty subset -> conforme by vacuity).
+      rows_satisfy (ck['then'], a rules-DNF): every matching row must satisfy it; the
+        group fails iff any matching row violates.
+
+    Returns None when the check is incomplete (skipped during editing)."""
+    check = ck.get("check") or "unique"
+    pm = _eval_premise(df, ck.get("when"), cs, default_col)
+
+    if check == "rows_satisfy":
+        groups = _nonempty_groups(ck.get("then"))
+        if not groups:
+            return None
+        cm = _eval_condition(df, {"groups": groups}, cs, default_col).astype(bool)
+        viol = ~cm if pm is None else (pm & ~cm)
+        if not keys:
+            return pd.Series(not bool(viol.any()), index=df.index)
+        bad = viol.groupby([df[k] for k in keys], dropna=False).transform("any").astype(bool)
+        return ~bad
+
+    if pm is None:                                # no premise -> existing fast path
+        return _group_check_core(work, df, keys, ck, cs, default_col)
+    if not pm.any():                              # premise never triggers -> all conforme
+        return pd.Series(True, index=df.index)
+    core = _group_check_core(work[pm], df[pm], keys, ck, cs, default_col)
+    if core is None:
+        return None
+    return _broadcast_group_verdict(df, keys, core)
 
 
 def _group_condition_mask(df: pd.DataFrame, cond: dict, cs: bool, default_col: str) -> pd.Series:
@@ -594,12 +810,21 @@ def _condition_mask(df: pd.DataFrame, cond: dict, cs: bool, default_col: str) ->
     return _eval_condition(df, {"groups": cond.get("groups") or []}, cs, col)
 
 
-def _output_mask(df: pd.DataFrame, o: dict, conds: dict, cs: bool, default_col: str) -> pd.Series:
+def _output_mask(df: pd.DataFrame, o: dict, conds: dict, cs: bool, default_col: str,
+                 cache: dict | None = None) -> pd.Series:
     """Row mask for one output. New shape: o['match'] = {conditionId, negate} points
-    at a named condition. Legacy shape (kept working): an inline o['condition'] DNF."""
+    at a named condition. Legacy shape (kept working): an inline o['condition'] DNF.
+    `cache` memoizes the (positive) per-condition mask across outputs — a group
+    condition is reused by every output that references it (conforme + its NEG)."""
     match = o.get("match")
     if match and match.get("conditionId") in conds:
-        m = _condition_mask(df, conds[match["conditionId"]], cs, default_col)
+        cid = match["conditionId"]
+        if cache is not None and cid in cache:
+            m = cache[cid]
+        else:
+            m = _condition_mask(df, conds[cid], cs, default_col)
+            if cache is not None:
+                cache[cid] = m
         return ~m if match.get("negate") else m
     if o.get("condition") is not None:        # legacy inline DNF (pre-named-conditions)
         return _eval_condition(df, o.get("condition"), cs, default_col)
@@ -710,11 +935,12 @@ def _run_route(d: dict, df: pd.DataFrame, diagnostics: bool = True):
     conds = {c.get("id"): c for c in (d.get("conditions") or []) if c.get("id")}
     result = {}
     assigned = pd.Series(False, index=df.index)
+    cmask_cache: dict = {}                    # share each named condition across outputs
     for o in d.get("outputs") or []:
         oid = o.get("id")
         if not oid:
             continue
-        m = _output_mask(df, o, conds, cs, default_col)
+        m = _output_mask(df, o, conds, cs, default_col, cache=cmask_cache)
         if routing == "first":          # partition: each row to the first matching output
             m = m & ~assigned
         assigned |= m
@@ -1300,7 +1526,8 @@ def _sanitize_sheet_name(name: str) -> str:
     return s[:31] or "Feuille"
 
 
-def _run_export(con, pid, node, ins, export_sink=None, workflow_name=None, force_enabled=False):
+def _run_export(con, pid, node, ins, export_sink=None, workflow_name=None,
+                force_enabled=False, produced=None):
     d = node["data"]
     if d.get("enabled") is False and not force_enabled:   # disabled export: don't touch the file
         return {}, {"skipped": True, "row_count": 0}
@@ -1309,24 +1536,30 @@ def _run_export(con, pid, node, ins, export_sink=None, workflow_name=None, force
     if n == 0:                                    # empty result: write nothing at all
         return {}, {"skipped_empty": True, "row_count": 0}
     fn = _sanitize_filename(d.get("filename"), "resultat")
+    out_dir = storage.workflow_export_dir(pid, workflow_name or "Workflow")
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     # multi-sheet mode: contribute one sheet to a single workbook named after the
     # workflow. The actual write is deferred to the end of the run so every sheet
     # lands in the same file (see _write_workbook in iter_run_workflow).
     if d.get("to_workbook") and export_sink is not None:
         wb = _sanitize_filename(workflow_name, "Workflow")
-        wb_path = storage.files_dir(pid) / f"{wb}.xlsx"
+        wb_path = out_dir / f"{wb}.xlsx"
         sheet = _sanitize_sheet_name(fn)
         export_sink.setdefault(str(wb_path), []).append((sheet, df))
+        if produced is not None:
+            produced.add(wb_path.name)
         return {}, {"exported": f"{wb}.xlsx", "sheet": sheet, "row_count": n, "deferred": True}
 
     fmt = (d.get("format") or "xlsx").lower()
     if fmt == "csv":
-        out_path = storage.files_dir(pid) / f"{fn}.csv"
+        out_path = out_dir / f"{fn}.csv"
         df.to_csv(out_path, index=False)
     else:
-        out_path = storage.files_dir(pid) / f"{fn}.xlsx"
+        out_path = out_dir / f"{fn}.xlsx"
         df.to_excel(out_path, index=False)
+    if produced is not None:
+        produced.add(out_path.name)
     return {}, {"exported": out_path.name, "row_count": n}
 
 
@@ -1359,27 +1592,9 @@ def _write_workbook(path, sheets, fresh=True):
             df.to_excel(writer, sheet_name=nm, index=False)
 
 
-def export_filenames(pid) -> set:
-    """Names of the files produced by Export blocks across every workflow of a
-    project — used to tell generated exports apart from imported sources.
-    Mirrors the naming in _run_export (normal file vs single-workbook sheet)."""
-    names = set()
-    for meta in storage.list_workflows(pid):
-        wf = storage.get_workflow(pid, meta["id"])
-        if not wf:
-            continue
-        wf_name = wf.get("name") or "Workflow"
-        for node in wf.get("nodes", []):
-            if node.get("type") != "export":
-                continue
-            d = node.get("data") or {}
-            if d.get("to_workbook"):
-                names.add(_sanitize_filename(wf_name, "Workflow") + ".xlsx")
-            else:
-                fn = _sanitize_filename(d.get("filename"), "resultat")
-                ext = "csv" if (d.get("format") or "xlsx").lower() == "csv" else "xlsx"
-                names.add(f"{fn}.{ext}")
-    return names
+# export_filenames was used to tell exports apart from sources back when both
+# lived in projects/<pid>/files/. Exports now live in projects/<pid>/exports/<wf>/,
+# tagged explicitly at listing time — no inference from filenames required.
 
 
 _RUNNERS = {
@@ -1574,6 +1789,16 @@ def _rule_ok(s: str, r: dict, cs: bool) -> bool:
         if test == "is_numeric":
             float(str(s).replace(",", "."))
             return True
+        if test in ("num_eq", "num_ne", "num_gt", "num_ge", "num_lt", "num_le"):
+            # The per-row tester has no other column in scope; "vs column" mode
+            # is a no-op here (treated as a passing rule so it doesn't poison
+            # the live tester). Vectorized routing handles the real comparison.
+            if r.get("via") == "column":
+                return True
+            a = float(str(s).replace(",", "."))
+            b = float(str(v).replace(",", "."))
+            return {"num_eq": a == b, "num_ne": a != b, "num_gt": a > b,
+                    "num_ge": a >= b, "num_lt": a < b, "num_le": a <= b}[test]
     except (ValueError, TypeError):
         return False
     return True
@@ -1662,7 +1887,25 @@ def validate_test(config: dict, samples: list) -> dict:
 # --------------------------------------------------------------------------- #
 # Materialization
 # --------------------------------------------------------------------------- #
+def _empty_parquet_rows(path):
+    """A parquet written from a frame with NO columns — an 'empty' routed output
+    (e.g. an else/route branch fed by a 0-column input). DuckDB refuses these
+    ('Need at least one non-root column'); pandas reads them. Returns the row count
+    for such a file, else None (a normal parquet -> keep the DuckDB path)."""
+    try:
+        import pyarrow.parquet as pq
+        md = pq.read_metadata(path)
+        if md.num_columns == 0:
+            return int(md.num_rows)
+    except Exception:
+        pass
+    return None
+
+
 def _meta_from_parquet(path) -> dict:
+    n = _empty_parquet_rows(path)
+    if n is not None:                       # 0-column 'empty' output: skip DuckDB
+        return {"columns": [], "row_count": n, "sample": [], "stats": []}
     con = duckdb.connect()
     try:
         rel = f"read_parquet({_lit(path)})"
@@ -1707,7 +1950,8 @@ def _reuse_result(pid, wid, node, handles, ntype, locked, signature) -> dict:
 
 
 def _execute_node(con, pid, wid, node, edges, bypass_cache=False, bypass_lock=False,
-                  export_sink=None, wf_name=None, signature=None, all_exports=False) -> dict:
+                  export_sink=None, wf_name=None, signature=None, all_exports=False,
+                  produced=None) -> dict:
     ntype = node["type"]
     handles = _output_handles(node)
     have_outputs = bool(handles) and all(
@@ -1731,7 +1975,8 @@ def _execute_node(con, pid, wid, node, edges, bypass_cache=False, bypass_lock=Fa
     ins = _node_inputs(pid, wid, node, edges)
     if ntype == "export":
         out_dfs, extra = _run_export(con, pid, node, ins, export_sink=export_sink,
-                                     workflow_name=wf_name, force_enabled=all_exports)
+                                     workflow_name=wf_name, force_enabled=all_exports,
+                                     produced=produced)
     else:
         runner = _RUNNERS.get(ntype)
         if runner is None:
@@ -1774,7 +2019,6 @@ def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False):
     edges = wf.get("edges", [])
     wf_name = wf.get("name") or "Workflow"
     order = _topo_order(nodes, edges)
-    sig_by_node = _signatures_for(pid, wid, nodes, edges, order)
     if only_node and only_node in nodes:
         run_set = _ancestors(only_node, edges) | {only_node}
     else:
@@ -1783,9 +2027,26 @@ def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False):
     # caps (mark an output as closed on purpose; they consume but produce nothing)
     run_ids = [nid for nid in order if nid in run_set and nodes[nid]["type"] not in ("frame", "group", "stop")]
 
+    # Announce the run before the (cheap) signature pass so the UI clears its
+    # "préparation…" label immediately and starts naming blocks as they run.
     yield {"event": "start", "total": len(run_ids)}
+    sig_by_node = _signatures_for(pid, wid, nodes, edges, order)
+
+    # If the workflow was renamed since last run, move its export folder so the
+    # on-disk layout follows the rename instead of leaving orphans behind.
+    # Only acts on a FULL run (only_node=None) — a single-node run is too narrow
+    # a scope to reorganize the whole project on the user's behalf.
+    last = wf.get("last_exports") or {}
+    target_dir = storage.workflow_export_dir(pid, wf_name)
+    if only_node is None and last.get("dir") and last["dir"] != target_dir.name:
+        old_dir = storage.exports_dir(pid) / last["dir"]
+        if old_dir.exists() and not target_dir.exists():
+            target_dir.parent.mkdir(parents=True, exist_ok=True)
+            old_dir.rename(target_dir)
+
     con = duckdb.connect()
     export_sink = {}                              # workbook_path -> [(sheet, df), …]
+    produced = set()                              # filenames written by this run
     try:
         for nid in run_ids:
             node = nodes[nid]
@@ -1797,7 +2058,7 @@ def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False):
                                        bypass_cache=(single_force or (force and only_node is None)),
                                        bypass_lock=single_force, all_exports=all_exports,
                                        export_sink=export_sink, wf_name=wf_name,
-                                       signature=sig_by_node.get(nid))
+                                       signature=sig_by_node.get(nid), produced=produced)
             except Exception as e:  # noqa: BLE001 - reported to the client
                 yield {"event": "error", "node_id": nid,
                        "message": f"{node['data'].get('label', nid)} : {e}"}
@@ -1806,6 +2067,19 @@ def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False):
         # write the multi-sheet workbooks once every sheet has been gathered
         for wb_path, sheets in export_sink.items():
             _write_workbook(wb_path, sheets, fresh=(only_node is None))
+        # Cleanup: only on a full run, only files WE previously wrote, only if
+        # they're in our export dir, and only if they're not in this run's set.
+        # Anything the user dropped in the folder by hand is never touched.
+        if only_node is None:
+            stale = set(last.get("files") or []) - produced
+            for name in stale:
+                p = target_dir / name
+                if p.exists() and p.is_file() and p.parent == target_dir:
+                    p.unlink()
+        # Persist the post-run state so the next run knows what to clean up.
+        if only_node is None:
+            wf["last_exports"] = {"dir": target_dir.name, "files": sorted(produced)}
+            storage.save_workflow(pid, wf)
         yield {"event": "done"}
     finally:
         con.close()
@@ -1883,6 +2157,12 @@ def preview_node(pid, wid, node_id, handle="out", limit=200, offset=0,
     path = storage.node_parquet(pid, wid, node_id, handle)
     if not path.exists():
         return {"available": False}
+    n = _empty_parquet_rows(path)
+    if n is not None:                       # 0-column 'empty' output: nothing to show
+        meta = storage.read_node_meta(pid, wid, node_id, handle) or {}
+        return {"available": True, "columns": [], "rows": [], "row_count": n, "total_count": n,
+                "compiled_sql": meta.get("compiled_sql"), "clean_report": meta.get("clean_report"),
+                "report": meta.get("report"), "stats": meta.get("stats")}
     con = duckdb.connect()
     try:
         rel = f"read_parquet({_lit(path)})"
@@ -1918,6 +2198,8 @@ def column_profile(pid, wid, node_id, column, handle="out") -> dict:
     node_id, handle = _passthrough_source(pid, wid, node_id, handle)
     path = storage.node_parquet(pid, wid, node_id, handle)
     if not path.exists():
+        return {"available": False}
+    if _empty_parquet_rows(path) is not None:        # 0-column output: no column to profile
         return {"available": False}
     con = duckdb.connect()
     try:
@@ -1978,6 +2260,8 @@ def keys_group(pid, wid, node_id, key_cols, q, handle="out", limit=200) -> dict:
     node_id, handle = _passthrough_source(pid, wid, node_id, handle)
     path = storage.node_parquet(pid, wid, node_id, handle)
     if not path.exists():
+        return {"available": False}
+    if _empty_parquet_rows(path) is not None:        # 0-column output: no keys to explore
         return {"available": False}
     key_cols = [c for c in (key_cols or []) if c]
     con = duckdb.connect()

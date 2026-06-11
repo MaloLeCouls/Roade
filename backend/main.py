@@ -12,6 +12,8 @@ import sys
 from io import BytesIO
 from urllib.parse import quote
 
+from pathlib import Path
+
 from fastapi import FastAPI, Body, UploadFile, File, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
@@ -70,12 +72,37 @@ def delete_project(pid: str):
 # --------------------------------------------------------------------------- #
 # Files
 # --------------------------------------------------------------------------- #
+def _resolve_file(pid: str, name: str, subdir: str | None) -> Path:
+    """Locate a file by name + optional subdir. Sources live flat in files/;
+    exports live nested in exports/<workflow folder>/. Path traversal is
+    rejected by comparing resolved parents to the legitimate roots."""
+    if subdir:
+        root = storage.exports_dir(pid).resolve()
+        path = (root / subdir / name).resolve()
+        if root not in path.parents:
+            raise HTTPException(400, "Chemin de fichier invalide")
+    else:
+        root = storage.files_dir(pid).resolve()
+        path = (root / name).resolve()
+        if path.parent != root:
+            raise HTTPException(400, "Chemin de fichier invalide")
+    return path
+
+
 @app.get("/api/projects/{pid}/files")
 def list_files(pid: str):
+    # Sources sit flat in files/. Exports are nested in exports/<workflow>/,
+    # one folder per workflow — surface both lists in one response so the UI
+    # can group exports by workflow without a second request.
     files = storage.list_files(pid)
-    exports = engine.export_filenames(pid)
     for f in files:
-        f["origin"] = "export" if f["name"] in exports else "source"
+        f["origin"] = "source"
+    exports_root = storage.exports_dir(pid)
+    if exports_root.exists():
+        for wf_dir in sorted(p for p in exports_root.iterdir() if p.is_dir()):
+            for f in sorted(p for p in wf_dir.iterdir() if p.is_file()):
+                files.append({"name": f.name, "size": f.stat().st_size,
+                              "origin": "export", "subdir": wf_dir.name})
     return files
 
 
@@ -92,16 +119,16 @@ async def upload_file(pid: str, file: UploadFile = File(...)):
 
 
 @app.get("/api/projects/{pid}/files/{name}")
-def download_file(pid: str, name: str):
-    path = storage.files_dir(pid) / name
+def download_file(pid: str, name: str, subdir: str | None = Query(None)):
+    path = _resolve_file(pid, name, subdir)
     if not path.exists():
         raise HTTPException(404, "Fichier introuvable")
     return FileResponse(path, filename=name)
 
 
 @app.delete("/api/projects/{pid}/files/{name}")
-def delete_file(pid: str, name: str):
-    path = storage.files_dir(pid) / name
+def delete_file(pid: str, name: str, subdir: str | None = Query(None)):
+    path = _resolve_file(pid, name, subdir)
     if path.exists():
         path.unlink()
     return {"ok": True}
@@ -119,11 +146,8 @@ def _open_in_os(path) -> None:
 
 
 @app.post("/api/projects/{pid}/files/{name}/open")
-def open_file(pid: str, name: str):
-    fd = storage.files_dir(pid).resolve()
-    path = (fd / name).resolve()
-    if fd != path.parent:                         # reject path traversal / subdirs
-        raise HTTPException(400, "Chemin de fichier invalide")
+def open_file(pid: str, name: str, subdir: str | None = Query(None)):
+    path = _resolve_file(pid, name, subdir)
     if not path.exists():
         raise HTTPException(404, "Fichier introuvable")
     try:
@@ -134,10 +158,17 @@ def open_file(pid: str, name: str):
 
 
 @app.post("/api/projects/{pid}/files/open-folder")
-def open_files_folder(pid: str):
-    """Reveal the project's files folder (where exports are written) in the OS
-    file explorer. Local use only — the backend runs on the user's machine."""
-    fd = storage.files_dir(pid)
+def open_files_folder(pid: str, subdir: str | None = Query(None)):
+    """Reveal a project folder in the OS file explorer. No subdir = the sources
+    folder; subdir='<workflow folder>' = that workflow's exports folder.
+    Local use only — the backend runs on the user's machine."""
+    if subdir:
+        fd = (storage.exports_dir(pid) / subdir).resolve()
+        root = storage.exports_dir(pid).resolve()
+        if root not in fd.parents and fd != root:
+            raise HTTPException(400, "Chemin invalide")
+    else:
+        fd = storage.files_dir(pid)
     if not fd.exists():
         raise HTTPException(404, "Dossier introuvable")
     try:

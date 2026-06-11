@@ -103,6 +103,9 @@ button.ghost.icon-only { padding: 6px; }
 .file-group-head { display: flex; align-items: center; gap: 7px; padding: 8px 15px 2px;
   font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
 .fg-count { font-weight: 600; color: var(--muted); background: var(--line-soft); border-radius: 10px; padding: 0 7px; font-size: 11px; letter-spacing: 0; }
+.file-subgroup-head { display: flex; align-items: center; gap: 6px; padding: 4px 15px 2px 22px;
+  font-size: 11.5px; font-weight: 600; color: var(--ink-soft); }
+.file-subgroup + .file-subgroup { margin-top: 4px; }
 
 /* ---------- editor ---------- */
 .editor { flex: 1; display: flex; flex-direction: column; min-height: 0; }
@@ -124,13 +127,20 @@ button.ghost.icon-only { padding: 6px; }
 .add-item-txt { display: flex; flex-direction: column; line-height: 1.25; }
 .add-item-lbl { font-size: 13px; font-weight: 600; color: var(--ink); }
 .add-item-desc { font-size: 11.5px; color: var(--muted); }
+/* "Sélection" — toggles box-selection mode for bulk-deleting blocks */
+.sel-toggle { border: 1px solid var(--line); background: #fff; border-radius: 7px; padding: 6px 11px;
+  font-size: 13px; font-weight: 600; color: var(--ink-soft); display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.sel-toggle:hover { background: #f1f3f7; border-color: #c7cdd8; color: var(--ink); }
+.sel-toggle.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .tb-right { margin-left: auto; display: flex; align-items: center; gap: 14px; }
 .save { font-size: 12px; color: var(--muted); }
 .save.saving { color: var(--warn); } .save.error { color: var(--danger); }
 
 .editor-main { flex: 1; display: flex; min-height: 0; position: relative; }
 .canvas { flex: 1; position: relative; }
+.canvas.selecting .react-flow__pane { cursor: crosshair; }
 .canvas-hint { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); background: #fff; border: 1px solid var(--line); padding: 9px 14px; border-radius: var(--radius); font-size: 13px; color: var(--muted); box-shadow: var(--shadow); z-index: 4; }
+.canvas-hint.sel-hint { border-color: var(--accent); color: var(--ink-soft); }
 
 /* overlays: do NOT shift layout */
 .overlays { position: absolute; top: 0; left: 0; right: 0; z-index: 6; pointer-events: none; }
@@ -289,16 +299,40 @@ code { background: #eef0f3; padding: 1px 5px; border-radius: 3px; font-size: 12p
 .clean-op-actions { display: flex; gap: 4px; justify-content: flex-end; margin-top: 6px; }
 
 /* ---------- group check (validation) ---------- */
-.cond-group-check { display: flex; flex-direction: column; gap: 8px; }
-.grp-key-head { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12.5px; margin-bottom: 5px; }
-.grp-rule { margin-left: 14px; padding: 8px 10px; border-left: 3px solid var(--t-validate, #5b6bb0);
+.cond-group-check { display: flex; flex-direction: column; gap: 6px; }
+.grp-key-head { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12.5px;
+  margin: 0 0 4px; padding: 2px 0; width: 100%; background: none; border: 0; color: inherit;
+  text-align: left; cursor: pointer; }
+.grp-key-head:hover { color: var(--accent); }
+.grp-key-summary { margin-left: auto; font-weight: 400; font-size: 12px; color: var(--ink-soft);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60%; padding-left: 8px; }
+.grp-rule { margin-left: 10px; padding: 6px 8px; border-left: 3px solid var(--t-validate, #5b6bb0);
   background: #f3f5f9; border-radius: 0 var(--radius) var(--radius) 0; }
-.grp-rule-lead { display: block; font-size: 12px; color: var(--ink-soft); margin-bottom: 6px; }
+.grp-rule-lead { display: block; font-size: 11.5px; color: var(--ink-soft); margin-bottom: 4px; }
 .grp-rule-body { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .grp-rule-body .qb-select { flex: 0 1 auto; }
-.grp-checks { display: flex; flex-direction: column; gap: 4px; }
+.grp-checks { display: flex; flex-direction: column; gap: 3px; }
+.grp-checks .cond-group { padding: 5px 7px; gap: 4px; }
 .grp-add-check { align-self: flex-start; margin-top: 2px; }
+.grp-add-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 1px; }
 .grp-hint { margin-top: 2px; }
+/* conditional group check: optional WHEN premise + ALORS check.
+   Both clauses share the same box chrome — only the pill color differs — so they
+   read as a symmetric pair (premise vs verdict) rather than two unrelated rows. */
+.grp-rule-item { display: flex; flex-direction: column; gap: 4px; }
+.grp-when-add { align-self: flex-start; background: none; border: none; color: var(--muted); font-size: 11px;
+  cursor: pointer; padding: 1px 2px; display: inline-flex; align-items: center; gap: 3px; }
+.grp-when-add:hover { color: var(--accent); text-decoration: underline; }
+.grp-clause-box { display: flex; flex-direction: column; gap: 4px; padding: 5px 7px;
+  border-radius: var(--radius); border: 1px solid; }
+.grp-clause-when { background: #eef1fb; border-color: #d7ddf4; }
+.grp-clause-then { background: #fff7ec; border-color: #f1dcb8; }
+.grp-clause-h { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.grp-clause-h .ghost.danger.small { margin-left: auto; }
+.grp-clause-tag { font-size: 10px; font-weight: 800; letter-spacing: .06em; color: #fff;
+  padding: 1px 6px; border-radius: 9px; flex: 0 0 auto; }
+.grp-clause-when .grp-clause-tag { background: var(--accent, #4E79A7); }
+.grp-clause-then .grp-clause-tag { background: #cc7b25; }
 
 /* ---------- calc block ---------- */
 .group-calc { border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px; margin-bottom: 12px; background: #faf7fb; }
@@ -497,6 +531,10 @@ table.dt td.idx, table.dt th.idx { background: #fafbfc; color: var(--muted); tex
 .rrow .neg { flex: 0 0 auto; font-size: 10px; font-weight: 800; color: var(--muted); background: #eef1f6; border: 1px solid var(--line); border-radius: var(--radius); padding: 3px 6px; cursor: pointer; }
 .rrow .neg.on { background: var(--danger); color: #fff; border-color: var(--danger); }
 .rrow .qb-select { max-width: 150px; }
+.rhs-toggle { flex: 0 0 auto; font-size: 10px; font-weight: 700; color: var(--muted);
+  background: #eef1f6; border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 3px 6px; cursor: pointer; letter-spacing: .02em; }
+.rhs-toggle:hover { color: var(--accent); border-color: var(--accent); }
 .rrow-del { margin-left: auto; }
 
 .route-add { align-self: flex-start; }
@@ -562,6 +600,12 @@ table.dt td.idx, table.dt th.idx { background: #fafbfc; color: var(--muted); tex
 .be-view-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--muted); padding: 48px 16px; text-align: center; height: 100%; }
 .be-view-empty .primary { margin-top: 4px; }
 .be-view-actions { margin-left: auto; display: flex; gap: 6px; }
+.be-crash { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin: 8px 0;
+  background: #fbe9e7; border: 1px solid #e6c3c0; color: var(--danger); padding: 12px 14px; border-radius: var(--radius); }
+.be-crash-h { margin: 0; font-weight: 700; }
+.be-crash pre { margin: 0; width: 100%; white-space: pre-wrap; word-break: break-word; font-size: 11.5px;
+  background: #fff; border: 1px solid #e6c3c0; border-radius: 6px; padding: 8px; max-height: 160px; overflow: auto; }
+.be-crash .muted { font-size: 11.5px; margin: 0; }
 .be-rowcount { font-size: 12px; color: var(--muted); margin: 8px 0 6px; }
 .be-table { max-height: calc(92vh - 170px); overflow: auto; }
 
@@ -771,6 +815,9 @@ table.dt td.idx, table.dt th.idx { background: #fafbfc; color: var(--muted); tex
 .progress-text .pmeta { color: var(--muted); }
 .progress-text .pulse-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 1s ease-in-out infinite; }
 .progress-text .done-text { color: var(--ok); font-weight: 600; }
+.progress-text .run-goto { font: inherit; font-weight: 700; color: var(--accent); background: none; border: none;
+  cursor: pointer; padding: 1px 5px; border-radius: 5px; display: inline-flex; align-items: center; gap: 4px; }
+.progress-text .run-goto:hover { background: var(--accent); color: #fff; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .2; } }
 
 /* currently-executing node: sober glow */

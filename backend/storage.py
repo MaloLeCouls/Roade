@@ -88,6 +88,20 @@ def files_dir(project_id: str) -> Path:
     return project_dir(project_id) / "files"
 
 
+def exports_dir(project_id: str) -> Path:
+    return project_dir(project_id) / "exports"
+
+
+def _safe_folder(name: str) -> str:
+    """OS-illegal chars stripped, casing/spaces kept — so the on-disk folder
+    name still reads as the workflow does in the UI ('Workflow A', not 'workflow-a')."""
+    return re.sub(r"[\\/:*?\"<>|]", "_", str(name or "").strip()) or "Workflow"
+
+
+def workflow_export_dir(project_id: str, wf_name: str) -> Path:
+    return exports_dir(project_id) / _safe_folder(wf_name)
+
+
 def list_files(project_id: str) -> list[dict]:
     fd = files_dir(project_id)
     out = []

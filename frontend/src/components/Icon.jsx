@@ -22,6 +22,8 @@ export default function Icon({ name, size = 14 }) {
       return <svg style={s} viewBox="0 0 16 16"><path {...P} d="M3.5 8.5l3 3 6-7" /></svg>
     case 'refresh':
       return <svg style={s} viewBox="0 0 16 16"><path {...P} d="M13 8a5 5 0 1 1-1.5-3.5M13 2.5V5h-2.5" /></svg>
+    case 'shuffle':
+      return <svg style={s} viewBox="0 0 16 16"><path {...P} d="M2 4h2.5l6 8H13M2 12h2.5l6-8H13M11 2l2 2-2 2M11 10l2 2-2 2" /></svg>
     case 'plus':
       return <svg style={s} viewBox="0 0 16 16"><path {...P} d="M8 3v10M3 8h10" /></svg>
     case 'download':
@@ -52,6 +54,8 @@ export default function Icon({ name, size = 14 }) {
       return <svg style={s} viewBox="0 0 16 16"><path {...P} d="M6 2.5H2.5V6M10 2.5h3.5V6M6 13.5H2.5V10M10 13.5h3.5V10" /></svg>
     case 'stop':
       return <svg style={s} viewBox="0 0 16 16"><circle {...P} cx="8" cy="8" r="5.5" /><path {...P} d="M4.1 4.1l7.8 7.8" /></svg>
+    case 'select':
+      return <svg style={s} viewBox="0 0 16 16"><rect {...P} x="2.5" y="2.5" width="11" height="11" rx="1.5" strokeDasharray="2.4 2" /></svg>
     default:
       return null
   }

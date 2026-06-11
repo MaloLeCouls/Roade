@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ReactFlow, ReactFlowProvider, Background, Controls, MiniMap,
-  useNodesState, useEdgesState, addEdge, useReactFlow,
+  useNodesState, useEdgesState, addEdge, useReactFlow, useUpdateNodeInternals, SelectionMode,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
@@ -24,7 +24,7 @@ import StopNode from './nodes/StopNode'
 import DataPreview from './DataPreview'
 import BlockEditor from './BlockEditor'
 import WorkflowFlow from './WorkflowFlow'
-import { normalizeValidateData } from './validateHelpers'
+import { normalizeValidateData, uid } from './validateHelpers'
 import ButtonEdge from './ButtonEdge'
 import Icon from './Icon'
 
@@ -215,12 +215,14 @@ function Editor({ pid, wid, onBack }) {
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState({ active: false, total: 0, done: 0, currentId: null, currentLabel: '' })
   const [nodeFrac, setNodeFrac] = useState(0)            // animated sub-progress of the running node
+  const [, setElapsedTick] = useState(0)                 // 1 Hz re-render so the run timer stays live
   const [previewNode, setPreviewNode] = useState(null)
   const [editorNode, setEditorNode] = useState(null)     // nodeId of the full-screen block editor
   const [flowOpen, setFlowOpen] = useState(false)        // global workflow flow map
   const [menu, setMenu] = useState(null)                 // right-click context menu {id, x, y}
   const [runMenu, setRunMenu] = useState(false)          // run-button dropdown (force recompute)
   const [addMenu, setAddMenu] = useState(false)          // "add a block" palette dropdown
+  const [selectMode, setSelectMode] = useState(false)    // box-selection mode (select many blocks → bulk delete)
   const [previewPrefs, setPreviewPrefs] = useState({ tab: 'rows', column: null })
   const [banner, setBanner] = useState(null)
   const [saveState, setSaveState] = useState('saved')
@@ -231,6 +233,7 @@ function Editor({ pid, wid, onBack }) {
   const canvasRef = useRef(null)
   const groupDrag = useRef(null)                           // snapshot while dragging a frame
   const rf = useReactFlow()
+  const updateNodeInternals = useUpdateNodeInternals()
 
   // ---- load ----
   useEffect(() => {
@@ -367,17 +370,44 @@ function Editor({ pid, wid, onBack }) {
 
   const updateNodeData = useCallback((id, patch) => {
     setNodes((nds) => nds.map((nd) => nd.id === id ? { ...nd, data: { ...nd.data, ...patch } } : nd))
-  }, [setNodes])
+    // Tell xyflow to remeasure this node's handles whenever the shape could have
+    // changed (outputs reordered/added/removed, else toggled, split toggled,
+    // mode flipped). Otherwise edges stay anchored to STALE handle positions
+    // and visually attach to the wrong sortie after a reorder.
+    if (patch && ('outputs' in patch || 'else_enabled' in patch || 'mode' in patch || 'split' in patch)) {
+      updateNodeInternals(id)
+    }
+  }, [setNodes, updateNodeInternals])
 
   const onDeleteEdge = useCallback((edgeId) => {
     setEdges((eds) => eds.filter((e) => e.id !== edgeId))
   }, [setEdges])
 
-  const deleteNode = (id) => {
-    setNodes((nds) => nds.filter((n) => n.id !== id))
-    setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id))
-    if (selectedId === id) setSelectedId(null)
+  // Drop every trace of a set of removed nodes: their links, and the per-node
+  // caches keyed by id (status / schema / change-tracking). Shared by both
+  // deletion paths — the context menu (below) and the Suppr/Backspace key (which
+  // React Flow handles itself, then calls onNodesDelete).
+  const forgetNodes = useCallback((ids) => {
+    const gone = ids instanceof Set ? ids : new Set(ids)
+    if (!gone.size) return
+    setEdges((eds) => eds.filter((e) => !gone.has(e.source) && !gone.has(e.target)))
+    setSelectedId((c) => (c && gone.has(c) ? null : c))
+    setEditorNode((c) => (c && gone.has(c) ? null : c))
+    const prune = (o) => { const r = { ...o }; gone.forEach((id) => delete r[id]); return r }
+    setStatus(prune); setSchemas(prune); setRunStamps(prune)
+  }, [setEdges])
+
+  // Remove a batch of blocks ourselves (used by the context menu). The Suppr key
+  // is handled by React Flow directly — see onNodesDelete on <ReactFlow>.
+  const removeByIds = (ids) => {
+    const gone = new Set(ids)
+    if (!gone.size) return
+    setNodes((nds) => nds.filter((n) => !gone.has(n.id)))
+    forgetNodes(gone)
   }
+  const deleteNode = (id) => removeByIds([id])
+  const deleteSelection = () => removeByIds(nodes.filter((n) => n.selected).map((n) => n.id))
+  const onNodesDelete = useCallback((deleted) => forgetNodes(deleted.map((n) => n.id)), [forgetNodes])
 
   // ---- ComfyUI-style frames: dragging a group carries the blocks inside it ----
   const nodeBox = (n) => {
@@ -406,7 +436,10 @@ function Editor({ pid, wid, onBack }) {
   }, [setNodes])
   const onNodeDragStop = useCallback(() => { groupDrag.current = null }, [])
 
-  // Duplicate a block (its settings, not its links) next to the original.
+  // Duplicate a block (its settings, not its links) next to the original. We
+  // regenerate the internal IDs (conditions, outputs) so the copy never reuses
+  // its parent's handle ids — otherwise React Flow gets two handles with the
+  // same id in the workflow, and a drag can latch onto the wrong one mid-stroke.
   const duplicateNode = (id) => {
     const src = nodes.find((n) => n.id === id)
     if (!src) return
@@ -414,6 +447,23 @@ function Editor({ pid, wid, onBack }) {
     const data = JSON.parse(JSON.stringify(src.data))
     data.label = `${data.label || src.type} (copie)`
     if (src.type === 'export' && data.auto_name !== false) data.filename = `${(wfName || 'Workflow').trim()} - ${data.label}`
+    // Fresh ids for the validate/routing dynamic handles + the conditions they
+    // reference. Static handles ('valid', 'invalid', 'else', 'out'…) are kept
+    // unchanged — only ids that look user-generated are remapped.
+    if (Array.isArray(data.conditions) || Array.isArray(data.outputs)) {
+      const condRemap = {}
+      data.conditions = (data.conditions || []).map((c) => {
+        const nid = 'c' + uid()
+        condRemap[c.id] = nid
+        return { ...c, id: nid }
+      })
+      data.outputs = (data.outputs || []).map((o) => {
+        const isCustomId = typeof o.id === 'string' && o.id.startsWith('o')
+        const nid = isCustomId ? uid() : o.id
+        const match = o.match ? { ...o.match, conditionId: condRemap[o.match.conditionId] || o.match.conditionId } : o.match
+        return { ...o, id: nid, ...(match ? { match } : {}) }
+      })
+    }
     setNodes((nds) => [...nds, {
       ...src, id: newId, selected: false,
       position: { x: (src.position?.x || 0) + 40, y: (src.position?.y || 0) + 40 },
@@ -533,13 +583,13 @@ function Editor({ pid, wid, onBack }) {
     if (busy) return
     setBanner(null)
     setBusy(true)
-    setProgress({ active: true, total: 0, done: 0, currentId: null, currentLabel: 'préparation…' })
+    setProgress({ active: true, total: 0, done: 0, currentId: null, currentLabel: 'préparation…', startedAt: Date.now() })
     await flushSave()
     let recomputed = 0, reused = 0
     const clearStartTimer = () => { if (startTimer.current) { clearTimeout(startTimer.current); startTimer.current = null } }
     api.runStream(pid, wid, onlyNode, (ev) => {
       if (ev.event === 'start') {
-        setProgress({ active: true, total: ev.total, done: 0, currentId: null, currentLabel: '' })
+        setProgress((p) => ({ ...p, active: true, total: ev.total, done: 0, currentId: null, currentLabel: '' }))
       } else if (ev.event === 'node_start') {
         // Defer the "exécution…" glow: a cached/instant block finishes before this
         // fires, so reused blocks no longer flash as if they were recomputed.
@@ -578,6 +628,20 @@ function Editor({ pid, wid, onBack }) {
       }
     }, force, allExports)
   }
+
+  // Click the running-block name in the progress bar to find it on the canvas.
+  const goToNode = (id) => {
+    if (!id) return
+    setSelectedId(id)
+    rf.fitView({ nodes: [{ id }], duration: 500, maxZoom: 1.4, padding: 0.6 })
+  }
+
+  // Tick once a second during a run so the elapsed-time readout stays live.
+  useEffect(() => {
+    if (!progress.active) return
+    const h = setInterval(() => setElapsedTick((t) => t + 1), 1000)
+    return () => clearInterval(h)
+  }, [progress.active])
 
   // ---- inputs for the selected SQL node ----
   const selectedNode = nodes.find((n) => n.id === selectedId) || null
@@ -685,6 +749,13 @@ function Editor({ pid, wid, onBack }) {
               </div>
             )}
           </div>
+          <button
+            className={`sel-toggle ${selectMode ? 'on' : ''}`}
+            onClick={() => setSelectMode((v) => !v)}
+            title="Mode sélection : dessinez un cadre pour sélectionner plusieurs blocs (Maj+clic pour en ajouter), puis Suppr ou clic droit → Supprimer"
+          >
+            <Icon name="select" size={14} /> Sélection
+          </button>
           <div className="tb-right">
             <span className={`save ${saveState}`}>
               {saveState === 'saving' ? 'enregistrement…' : saveState === 'error' ? 'erreur de sauvegarde' : 'enregistré'}
@@ -730,10 +801,10 @@ function Editor({ pid, wid, onBack }) {
         <div className="editor-main">
           {/* overlays float above the canvas so nothing shifts when they appear */}
           <div className="overlays">
-            <ProgressBar progress={progress} frac={nodeFrac} />
+            <ProgressBar progress={progress} frac={nodeFrac} onGo={goToNode} />
             {banner && <div className={`banner ${banner.type}`}>{banner.text}<button className="ghost small" onClick={() => setBanner(null)}><Icon name="x" /></button></div>}
           </div>
-          <div className="canvas" ref={canvasRef}>
+          <div className={`canvas ${selectMode ? 'selecting' : ''}`} ref={canvasRef}>
             <ReactFlow
               nodes={decoratedNodes}
               edges={decoratedEdges}
@@ -743,14 +814,34 @@ function Editor({ pid, wid, onBack }) {
               onNodeDragStart={onNodeDragStart}
               onNodeDrag={onNodeDrag}
               onNodeDragStop={onNodeDragStop}
-              onNodesDelete={(dl) => setEdges((eds) => eds.filter((e) => !dl.some((n) => n.id === e.source || n.id === e.target)))}
-              onNodeClick={(_, n) => { setSelectedId(n.id); if (n.type !== 'frame' && n.type !== 'stop') setEditorNode(n.id) }}
-              onNodeContextMenu={(e, n) => { e.preventDefault(); setSelectedId(n.id); setMenu({ id: n.id, x: e.clientX, y: e.clientY }) }}
+              onNodesDelete={onNodesDelete}
+              onNodeClick={(e, n) => {
+                setSelectedId(n.id)
+                // multi-selecting (selection mode, or Maj/Ctrl/Cmd held): keep adding
+                // to the selection, don't pop the full-screen editor open.
+                if (selectMode || e.shiftKey || e.ctrlKey || e.metaKey) return
+                if (n.type !== 'frame' && n.type !== 'stop') setEditorNode(n.id)
+              }}
+              onNodeContextMenu={(e, n) => {
+                e.preventDefault()
+                setSelectedId(n.id)
+                // right-clicking a block that's *outside* the current selection narrows
+                // to just it; right-clicking one inside the selection keeps the whole batch.
+                if (!nodes.find((x) => x.id === n.id)?.selected) {
+                  setNodes((nds) => nds.map((x) => ({ ...x, selected: x.id === n.id })))
+                }
+                setMenu({ id: n.id, x: e.clientX, y: e.clientY })
+              }}
+              onSelectionContextMenu={(e, ns) => { e.preventDefault(); setMenu({ id: ns[0]?.id, x: e.clientX, y: e.clientY }) }}
               onPaneClick={() => { setSelectedId(null); setMenu(null) }}
               nodeTypes={nodeTypes}
               edgeTypes={edgeTypes}
               defaultEdgeOptions={{ type: 'deletable' }}
               deleteKeyCode={['Backspace', 'Delete']}
+              multiSelectionKeyCode={['Shift', 'Control', 'Meta']}
+              selectionMode={SelectionMode.Partial}
+              selectionOnDrag={selectMode}
+              panOnDrag={selectMode ? [1, 2] : true}
               fitView
               proOptions={{ hideAttribution: true }}
             >
@@ -761,6 +852,12 @@ function Editor({ pid, wid, onBack }) {
             {nodes.length === 0 && (
               <div className="canvas-hint">
                 Ajoutez un bloc <b>📥 Source</b> pour commencer, puis reliez-le à un bloc <b>🧮 SQL</b>.
+              </div>
+            )}
+            {selectMode && nodes.length > 0 && (
+              <div className="canvas-hint sel-hint">
+                Mode sélection : dessinez un cadre pour sélectionner, <b>Maj+clic</b> pour ajouter/retirer un bloc.
+                Puis <b>Suppr</b> ou clic droit → <b>Supprimer</b>.
               </div>
             )}
           </div>
@@ -806,9 +903,11 @@ function Editor({ pid, wid, onBack }) {
 
         {menu && (() => {
           const mn = nodes.find((n) => n.id === menu.id)
+          const selCount = nodes.filter((n) => n.selected).length
+          const bulk = selCount >= 2 && mn?.selected
           return (
             <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
-              {mn?.type === 'frame' && (
+              {!bulk && mn?.type === 'frame' && (
                 <div className="ctx-color">
                   <span className="ctx-color-lbl">Couleur du cadre</span>
                   <div className="ctx-swatches">
@@ -823,8 +922,16 @@ function Editor({ pid, wid, onBack }) {
                   </div>
                 </div>
               )}
-              <button onClick={() => { duplicateNode(menu.id); setMenu(null) }}><Icon name="plus" size={13} /> Dupliquer</button>
-              <button className="danger" onClick={() => { deleteNode(menu.id); setMenu(null) }}><Icon name="trash" size={13} /> Supprimer</button>
+              {bulk ? (
+                <button className="danger" onClick={() => { deleteSelection(); setMenu(null) }}>
+                  <Icon name="trash" size={13} /> Supprimer la sélection ({selCount})
+                </button>
+              ) : (
+                <>
+                  <button onClick={() => { duplicateNode(menu.id); setMenu(null) }}><Icon name="plus" size={13} /> Dupliquer</button>
+                  <button className="danger" onClick={() => { deleteNode(menu.id); setMenu(null) }}><Icon name="trash" size={13} /> Supprimer</button>
+                </>
+              )}
             </div>
           )
         })()}
@@ -844,10 +951,16 @@ function MenuInfo({ children }) {
   )
 }
 
-function ProgressBar({ progress, frac = 0 }) {
+function fmtElapsed(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000))
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s`
+}
+
+function ProgressBar({ progress, frac = 0, onGo }) {
   if (!progress.active && progress.done === 0) return null
   const within = progress.active ? Math.min(0.999, frac) : 0
   const pct = progress.total ? Math.min(100, Math.round(((progress.done + within) / progress.total) * 100)) : 0
+  const elapsed = progress.startedAt ? Date.now() - progress.startedAt : 0
   return (
     <div className={`progress-wrap ${progress.active ? 'on' : 'off'}`}>
       <div className={`progress-track ${progress.active ? 'busy' : ''}`}>
@@ -857,8 +970,14 @@ function ProgressBar({ progress, frac = 0 }) {
         {progress.active ? (
           <>
             <span className="pulse-dot" />
-            {progress.currentLabel ? <>Exécution : <b>{progress.currentLabel}</b></> : 'Exécution…'}
+            {progress.currentLabel
+              ? (progress.currentId
+                  ? <>Exécution : <button className="run-goto" onClick={() => onGo?.(progress.currentId)}
+                      title="Aller à ce bloc sur le plan">{progress.currentLabel} <Icon name="maximize" size={11} /></button></>
+                  : <>Exécution : <b>{progress.currentLabel}</b></>)
+              : 'préparation…'}
             {progress.total > 0 && <span className="pmeta"> · {progress.done}/{progress.total} · {pct}%</span>}
+            {elapsed > 1500 && <span className="pmeta"> · {fmtElapsed(elapsed)}</span>}
           </>
         ) : (
           <span className="done-text">Terminé · {progress.total} bloc(s)</span>

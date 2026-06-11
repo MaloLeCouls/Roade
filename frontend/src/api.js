@@ -51,13 +51,14 @@ export const api = {
     fd.append('file', file)
     return req(`/projects/${enc(pid)}/files`, { method: 'POST', body: fd })
   },
-  deleteFile: (pid, name) =>
-    req(`/projects/${enc(pid)}/files/${enc(name)}`, { method: 'DELETE' }),
-  openFile: (pid, name) =>
-    sendJSON(`/projects/${enc(pid)}/files/${enc(name)}/open`, 'POST'),
-  openFilesFolder: (pid) =>
-    sendJSON(`/projects/${enc(pid)}/files/open-folder`, 'POST'),
-  downloadUrl: (pid, name) => `${BASE}/projects/${enc(pid)}/files/${enc(name)}`,
+  deleteFile: (pid, name, subdir) =>
+    req(`/projects/${enc(pid)}/files/${enc(name)}${qs({ subdir })}`, { method: 'DELETE' }),
+  openFile: (pid, name, subdir) =>
+    sendJSON(`/projects/${enc(pid)}/files/${enc(name)}/open${qs({ subdir })}`, 'POST'),
+  openFilesFolder: (pid, subdir) =>
+    sendJSON(`/projects/${enc(pid)}/files/open-folder${qs({ subdir })}`, 'POST'),
+  downloadUrl: (pid, name, subdir) =>
+    `${BASE}/projects/${enc(pid)}/files/${enc(name)}${qs({ subdir })}`,
   peek: (pid, file, sheet, headerRow) =>
     getJSON(`/projects/${enc(pid)}/peek${qs({ file, sheet, header_row: headerRow })}`),
 
