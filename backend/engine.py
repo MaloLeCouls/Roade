@@ -49,6 +49,27 @@ def _output_handles(node) -> list[str]:
         return ids or ["else"]
     return OUTPUTS.get(node["type"], ["out"])
 
+
+def prune_orphan_edges(wf: dict) -> list[dict]:
+    """Drop any edge whose `sourceHandle` is no longer exposed by the source
+    node (typical after a Validation route had an output removed/renamed). The
+    UI's "Sortie X" pastille is gone but the edge survived in the JSON, where
+    it would silently re-ingest a stale parquet at the next run. Returns the
+    list of removed edges (for logging/diagnostics)."""
+    nodes = {n["id"]: n for n in wf.get("nodes", []) or []}
+    kept, removed = [], []
+    for e in wf.get("edges", []) or []:
+        src = nodes.get(e.get("source"))
+        sh = e.get("sourceHandle") or "out"
+        # Unknown source node: leave the edge alone — node-deletion paths handle
+        # that elsewhere and a missing node is a different kind of breakage.
+        if src is None or sh in set(_output_handles(src)):
+            kept.append(e)
+        else:
+            removed.append(e)
+    wf["edges"] = kept
+    return removed
+
 _NUMERIC_TYPES = ("TINYINT", "SMALLINT", "INTEGER", "BIGINT", "HUGEINT",
                   "UTINYINT", "USMALLINT", "UINTEGER", "UBIGINT", "UHUGEINT",
                   "FLOAT", "REAL", "DOUBLE", "DECIMAL")
@@ -275,7 +296,13 @@ def _node_inputs(pid, wid, node, edges) -> list[tuple[str, pd.DataFrame]]:
         alias = e.get("targetHandle") or "in"
         path = storage.node_parquet(pid, wid, src, sh)
         if not path.exists():
-            raise ValueError("une entrée n'a pas encore été exécutée")
+            # Either upstream wasn't executed yet, or the edge points to a
+            # handle that no longer exists on the source block (an output was
+            # removed but the edge stayed). The second case is silent fuel for
+            # ghost data — name the handle so it's findable.
+            raise ValueError(
+                f"une entrée n'a pas encore été exécutée (source : {src} / sortie : {sh})"
+            )
         ins.append((alias, pd.read_parquet(path)))
     return ins
 
@@ -2118,6 +2145,12 @@ def _execute_node(con, pid, wid, node, edges, bypass_cache=False, bypass_lock=Fa
         outputs[h] = meta["row_count"]
         if i == 0:
             columns = meta["columns"]
+    # Now that the new outputs are written, sweep any parquet/meta from a
+    # previous configuration whose handle is no longer exposed (output removed,
+    # renamed-to-new-id, `else` toggled off). Otherwise an edge in the workflow
+    # that still references the old handle would silently keep ingesting the
+    # ghost file at the next downstream run.
+    storage.prune_node_outputs(pid, wid, node["id"], handles)
     result = {"type": ntype, "locked": False, "cached": False, "signature": signature,
               "outputs": outputs, "row_count": outputs.get(handles[0], 0), "columns": columns}
     for k in ("compiled_sql", "clean_report", "report"):

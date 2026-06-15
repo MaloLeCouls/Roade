@@ -52,6 +52,29 @@ function nodeDataSig(data) {
   return stableStringify(cleanForSig(d))
 }
 
+// Source handles a Validation route block currently exposes (output ids + the
+// optional `else` bucket). Anything else is a ghost handle from a previous
+// config — used to detect and prune orphan edges below.
+function routeHandles(data) {
+  if (!data) return null
+  const ids = (data.outputs || []).map((o) => o?.id).filter(Boolean)
+  if (data.else_enabled !== false) ids.push('else')
+  return new Set(ids)
+}
+function removedRouteHandles(node, patch) {
+  if (node?.type !== 'validate') return new Set()
+  const before = node.data?.mode === 'route' ? routeHandles(node.data) : null
+  const after = node.data?.mode === 'route' || patch.mode === 'route'
+    ? routeHandles({ ...node.data, ...patch })
+    : null
+  // Switching out of 'route' mode removes every custom handle the route used to
+  // expose; without a `before` snapshot there is nothing to compare.
+  if (!before) return new Set()
+  const gone = new Set()
+  for (const h of before) if (!after || !after.has(h)) gone.add(h)
+  return gone
+}
+
 // Render the block's free-text comment (data.description) as a sticky note above
 // the node — lets the user document the workflow at a glance. One wrapper instead
 // of editing all nine node components. Also shows a discreet "modified since last
@@ -369,7 +392,23 @@ function Editor({ pid, wid, onBack }) {
   }
 
   const updateNodeData = useCallback((id, patch) => {
-    setNodes((nds) => nds.map((nd) => nd.id === id ? { ...nd, data: { ...nd.data, ...patch } } : nd))
+    setNodes((nds) => {
+      const cur = nds.find((n) => n.id === id)
+      // When the user removes/replaces a Validation route's outputs (or flips
+      // else_enabled / mode off the route), any edge still sourced from one of
+      // the disappearing handles becomes a ghost — invisible in the UI but kept
+      // in the JSON, and it would silently re-ingest a stale parquet at run
+      // time. Drop those edges here so the workflow and disk stay coherent.
+      if (cur && patch) {
+        const gone = removedRouteHandles(cur, patch)
+        if (gone.size > 0) {
+          setEdges((eds) => eds.filter(
+            (e) => !(e.source === id && gone.has(e.sourceHandle || 'out'))
+          ))
+        }
+      }
+      return nds.map((nd) => nd.id === id ? { ...nd, data: { ...nd.data, ...patch } } : nd)
+    })
     // Tell xyflow to remeasure this node's handles whenever the shape could have
     // changed (outputs reordered/added/removed, else toggled, split toggled,
     // mode flipped). Otherwise edges stay anchored to STALE handle positions
@@ -377,7 +416,7 @@ function Editor({ pid, wid, onBack }) {
     if (patch && ('outputs' in patch || 'else_enabled' in patch || 'mode' in patch || 'split' in patch)) {
       updateNodeInternals(id)
     }
-  }, [setNodes, updateNodeInternals])
+  }, [setNodes, setEdges, updateNodeInternals])
 
   const onDeleteEdge = useCallback((edgeId) => {
     setEdges((eds) => eds.filter((e) => e.id !== edgeId))

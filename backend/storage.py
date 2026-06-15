@@ -195,3 +195,37 @@ def write_node_meta(project_id: str, workflow_id: str, node_id: str, meta: dict,
     node_meta_path(project_id, workflow_id, node_id, handle).write_text(
         json.dumps(meta, indent=2), encoding="utf-8"
     )
+
+
+def prune_node_outputs(project_id: str, workflow_id: str, node_id: str,
+                       keep_handles) -> list[str]:
+    # Delete any .parquet/.meta.json on disk for this node whose handle isn't
+    # in `keep_handles`. Called right after a node re-materializes so a config
+    # that drops an output (or toggles `else` off) doesn't leave a ghost file
+    # that a downstream block could still ingest via an orphan edge.
+    dd = data_dir(project_id, workflow_id)
+    if not dd.exists():
+        return []
+    keep = {(h or "out") for h in keep_handles}
+    removed: list[str] = []
+    prefix = f"{node_id}__"
+    for p in dd.iterdir():
+        nm = p.name
+        for ext in (".parquet", ".meta.json"):
+            if not nm.endswith(ext):
+                continue
+            stem = nm[:-len(ext)]
+            if stem == node_id:
+                handle = "out"
+            elif stem.startswith(prefix):
+                handle = stem[len(prefix):]
+            else:
+                continue
+            if handle not in keep:
+                try:
+                    p.unlink()
+                    removed.append(nm)
+                except OSError:
+                    pass
+            break
+    return removed

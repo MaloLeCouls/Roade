@@ -211,6 +211,10 @@ def get_workflow(pid: str, wid: str):
 @app.put("/api/projects/{pid}/workflows/{wid}")
 def save_workflow(pid: str, wid: str, payload: dict = Body(...)):
     payload["id"] = wid
+    # Drop ghost edges (sourceHandle points to an output that no longer exists)
+    # before persisting — otherwise a downstream block would still ingest the
+    # stale parquet next run. Idempotent: a clean workflow saves unchanged.
+    engine.prune_orphan_edges(payload)
     return storage.save_workflow(pid, payload)
 
 
