@@ -603,6 +603,7 @@ table.dt td.idx, table.dt th.idx { background: #fafbfc; color: var(--muted); tex
   border-radius: var(--radius); padding: 2px 8px; word-break: break-all; }
 .split-preview { margin: 6px 0 4px; padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
 .split-prev-title { font-size: 11px; font-weight: 700; color: var(--muted); margin-bottom: 5px; }
+.prune-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 0 2px; font-size: 12px; }
 .split-prev-row { display: flex; align-items: center; gap: 7px; font-size: 11px; margin-top: 3px; }
 .split-prev-raw { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-family: ui-monospace, monospace; }
 .split-prev-arrow { color: var(--muted); flex: 0 0 auto; }

@@ -593,6 +593,7 @@ export function OutputsPane({ pid, wid, node, status, onChange, onRun, onPreview
   const isSplit = !!split.enabled
 
   const [zoom, setZoom] = useState(false)        // enlarge the flow map (many outputs)
+  const [topN, setTopN] = useState(10)           // "keep the N principal outputs" — pruning
 
   // "Split by value": scan the input for distinct extracted values and turn each
   // into an output. Re-scanning reuses an existing output's id for a value already
@@ -637,6 +638,24 @@ export function OutputsPane({ pid, wid, node, status, onChange, onRun, onPreview
     })
     if (sorted.every((o, i) => o.id === outputs[i].id)) return  // already sorted
     onChange({ outputs: sorted })
+  }
+
+  // Keep only the top-N outputs by effective count; everything else falls through
+  // to the "reste" bucket (which we enable, with a friendly default label if the
+  // user never named it). Useful in split mode where a scan creates dozens of
+  // outputs and only a handful are worth keeping as distinct sorties.
+  const pruneToTopN = () => {
+    const n = Math.max(1, parseInt(topN, 10) || 1)
+    const elsePatch = {
+      else_enabled: true,
+      else_label: (d.else_label && d.else_label.trim()) ? d.else_label : 'Autres',
+    }
+    if (outputs.length <= n) { onChange(elsePatch); return }
+    const ranked = outputs
+      .map((o, i) => ({ o, c: dist.counts[o.id] ?? 0, i }))
+      .sort((a, b) => (b.c - a.c) || (a.i - b.i))   // stable: equal counts keep prior order
+    const keepIds = new Set(ranked.slice(0, n).map((x) => x.o.id))
+    onChange({ outputs: outputs.filter((o) => keepIds.has(o.id)), ...elsePatch })
   }
 
   const setOutput = (i, patch) => onChange({ outputs: outputs.map((o, j) => (j === i ? { ...o, ...patch } : o)) })
@@ -753,6 +772,18 @@ export function OutputsPane({ pid, wid, node, status, onChange, onRun, onPreview
         )}
         {isSplit && outputs.length === 0 && !scan.loading && (
           <div className="qb-hint">Définissez l'extraction à gauche, puis cliquez sur <b>Scanner les valeurs</b>.</div>
+        )}
+        {isSplit && outputs.length > 1 && (
+          <div className="prune-row">
+            <span className="qb-lbl">Garder les</span>
+            <input className="qb-input" type="number" min="1" max={outputs.length} style={{ width: 60 }}
+              value={topN} onChange={(e) => setTopN(e.target.value)} />
+            <span className="qb-lbl">principales par effectif —</span>
+            <button className="ghost small" onClick={pruneToTopN}
+              title="Supprime toutes les autres sorties. Les lignes qu'elles recevaient retombent dans la sortie « reste » (activée et nommée « Autres » par défaut).">
+              <Icon name="filter" size={12} /> Élaguer le reste
+            </button>
+          </div>
         )}
         <div className="opane-outs-list">
           {outputs.map((o, i) => (
