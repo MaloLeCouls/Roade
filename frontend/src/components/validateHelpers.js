@@ -41,20 +41,23 @@ export const OUTPUT_COLORS = ['#4E79A7', '#59A14F', '#E15759', '#F28E2B', '#B07A
 export const uid = () => 'o' + Math.random().toString(36).slice(2, 8)
 
 // "Split by value" extractor: which part of a column value becomes the grouping key.
-// Mirrors backend engine._extract_key.
+// 'whole' uses the cell value as-is (no extraction) — useful for short codes /
+// categories. Mirrors backend engine._extract_key.
 export const EXTRACTOR_TYPES = [
+  ['whole', 'La valeur entière de la colonne'],
   ['after_last', 'Après le dernier séparateur'],
   ['before_first', 'Avant le premier séparateur'],
   ['segment', 'Nᵉ segment entre séparateurs'],
   ['substring', 'Sous-chaîne (position)'],
   ['regex', 'Regex (groupe capturé)'],
 ]
-export const defaultExtractor = () => ({ type: 'after_last', sep: '.', index: 2, start: 1, length: 1, pattern: '' })
+export const defaultExtractor = () => ({ type: 'whole', sep: '.', index: 2, start: 1, length: 1, pattern: '' })
 
 // Human-readable summary of an extractor, for hints.
 export function extractorSummary(ex) {
   const e = ex || {}
   switch (e.type) {
+    case 'whole': return 'la valeur entière'
     case 'before_first': return `avant le premier « ${e.sep || '_'} »`
     case 'segment': return `${e.index || 1}ᵉ segment selon « ${e.sep || '\\'} »`
     case 'substring': return `caractères ${e.start || 1}${e.length ? `…${Number(e.start || 1) + Number(e.length) - 1}` : '→'}`

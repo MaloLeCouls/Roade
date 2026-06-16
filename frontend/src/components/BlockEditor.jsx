@@ -13,7 +13,10 @@ import ErrorBoundary from './ErrorBoundary'
  */
 function outputsOf(node) {
   if (node.type === 'validate' && node.data.mode === 'route') {
-    const outs = (node.data.outputs || []).map((o) => ({ handle: o.id, label: o.label || o.id, color: o.color }))
+    const outs = (node.data.outputs || []).map((o) => ({
+      handle: o.id, label: o.label || o.id, color: o.color,
+      empty: 'value' in o && o.value === '',
+    }))
     if (node.data.else_enabled !== false) outs.push({ handle: 'else', label: node.data.else_label || 'Non classé', color: node.data.else_color || '#9aa3b2' })
     return outs.length ? outs : [{ handle: 'else', label: 'Non classé' }]
   }
@@ -121,7 +124,7 @@ function OutputPreview({ pid, wid, node, status, onRun, onPreview, initialHandle
       {outs.length > 1 && (
         <div className="out-switch">
           {outs.map((o) => (
-            <button key={o.handle} className={handle === o.handle ? 'oseg on' : 'oseg'} onClick={() => setHandle(o.handle)}>{o.label}</button>
+            <button key={o.handle} className={`oseg ${handle === o.handle ? 'on' : ''} ${o.empty ? 'oseg-empty' : ''}`} onClick={() => setHandle(o.handle)}>{o.label}</button>
           ))}
         </div>
       )}

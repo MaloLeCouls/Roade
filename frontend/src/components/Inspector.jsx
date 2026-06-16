@@ -930,6 +930,23 @@ function FilterConfig({ node, inputs, set }) {
   const mainCols = main?.columns || []
   const refCols = ref?.columns || []
   const keep = d.mode !== 'exclude'
+
+  // Effective list of column pairs — the new source of truth. Backward compat:
+  // a legacy block with only `column`/`ref_column` is read as a single pair.
+  const pairs = (d.pairs && d.pairs.length)
+    ? d.pairs
+    : (d.column || d.ref_column ? [{ column: d.column || '', ref_column: d.ref_column || '' }] : [{ column: '', ref_column: '' }])
+  // Mirror the first pair onto the legacy fields so nothing breaks if a piece of
+  // code still reads d.column / d.ref_column.
+  const setPairs = (next) => set({
+    pairs: next,
+    column: next[0]?.column || '',
+    ref_column: next[0]?.ref_column || '',
+  })
+  const updatePair = (i, patch) => setPairs(pairs.map((p, j) => (j === i ? { ...p, ...patch } : p)))
+  const addPair = () => setPairs([...pairs, { column: '', ref_column: '' }])
+  const removePair = (i) => setPairs(pairs.length <= 1 ? [{ column: '', ref_column: '' }] : pairs.filter((_, j) => j !== i))
+
   return (
     <div className="insp-body">
       <div className="ports">
@@ -939,8 +956,8 @@ function FilterConfig({ node, inputs, set }) {
             <b>Données</b> (ancre <b>D</b>) — le tableau à filtrer.<br />
             <b>Référence</b> (ancre <b>R</b>) — le tableau dont on lit les valeurs. Il n'est jamais fusionné,
             seulement consulté.<br />
-            On garde (ou on exclut) les lignes des <b>données</b> dont la colonne choisie figure dans la colonne
-            de <b>référence</b>.
+            On garde (ou on exclut) les lignes des <b>données</b> dont les colonnes choisies figurent <b>toutes ensemble</b>,
+            sur une même ligne de la <b>référence</b> (clé composite).
           </InfoBubble>
         </div>
         <div className="ports-row">
@@ -955,29 +972,49 @@ function FilterConfig({ node, inputs, set }) {
       </div>
       <p className="qb-hint">
         {keep
-          ? 'Ne conserve que les lignes des données dont la valeur existe dans la référence (semi-jointure).'
-          : 'Retire les lignes des données dont la valeur existe dans la référence (anti-jointure).'}
+          ? `Ne conserve que les lignes des données dont ${pairs.length > 1 ? 'la combinaison de colonnes existe' : 'la valeur existe'} dans la référence (semi-jointure${pairs.length > 1 ? ' composite' : ''}).`
+          : `Retire les lignes des données dont ${pairs.length > 1 ? 'la combinaison de colonnes existe' : 'la valeur existe'} dans la référence (anti-jointure${pairs.length > 1 ? ' composite' : ''}).`}
       </p>
 
-      <label className="fld">
-        <span>Colonne à comparer (côté données)</span>
-        <select value={d.column || ''} onChange={(e) => set({ column: e.target.value })}>
-          <option value="">— colonne —</option>
-          {mainCols.length === 0 && <option value="" disabled>(exécutez l'amont « données »)</option>}
-          {mainCols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-        </select>
-      </label>
+      <div className="ports-head" style={{ marginTop: 6 }}>
+        <span className="ports-title">Colonnes à comparer</span>
+        <InfoBubble>
+          Comparez plusieurs colonnes en parallèle pour former une <b>clé composite</b> :
+          une ligne ne « matche » que si la référence contient une ligne avec exactement les mêmes
+          valeurs sur toutes les paires choisies.
+        </InfoBubble>
+      </div>
+      {pairs.map((p, i) => (
+        <div className="qb-row" key={i} style={{ alignItems: 'flex-end', gap: 6 }}>
+          <label className="fld" style={{ flex: 1 }}>
+            <span>{i === 0 ? 'Données' : ''}</span>
+            <select value={p.column || ''} onChange={(e) => updatePair(i, { column: e.target.value })}>
+              <option value="">— colonne —</option>
+              {mainCols.length === 0 && <option value="" disabled>(exécutez l'amont « données »)</option>}
+              {mainCols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+            </select>
+          </label>
+          <span className="qb-hint" style={{ paddingBottom: 6 }}>=</span>
+          <label className="fld" style={{ flex: 1 }}>
+            <span>{i === 0 ? 'Référence' : ''}</span>
+            <select value={p.ref_column || ''} onChange={(e) => updatePair(i, { ref_column: e.target.value })}>
+              <option value="">— colonne —</option>
+              {refCols.length === 0 && <option value="" disabled>(exécutez l'amont « référence »)</option>}
+              {refCols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+            </select>
+          </label>
+          <button className="ghost small danger" onClick={() => removePair(i)}
+            disabled={pairs.length <= 1 && !p.column && !p.ref_column}
+            title={pairs.length > 1 ? 'Retirer cette paire' : 'Vider cette paire'}>
+            <Icon name="x" size={12} />
+          </button>
+        </div>
+      ))}
+      <button className="ghost small" onClick={addPair} style={{ marginTop: 4 }}>
+        <Icon name="plus" size={12} /> Ajouter une paire de colonnes
+      </button>
 
-      <label className="fld">
-        <span>Colonne de référence (côté réf)</span>
-        <select value={d.ref_column || ''} onChange={(e) => set({ ref_column: e.target.value })}>
-          <option value="">— colonne —</option>
-          {refCols.length === 0 && <option value="" disabled>(exécutez l'amont « référence »)</option>}
-          {refCols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-        </select>
-      </label>
-
-      <label className="qb-check">
+      <label className="qb-check" style={{ marginTop: 8 }}>
         <input type="checkbox" checked={!!d.case_insensitive} onChange={(e) => set({ case_insensitive: e.target.checked })} />
         Ignorer la casse (comparer le texte sans tenir compte des majuscules)
       </label>

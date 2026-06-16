@@ -592,9 +592,6 @@ export function OutputsPane({ pid, wid, node, status, onChange, onRun, onPreview
   const split = d.split || {}
   const isSplit = !!split.enabled
 
-  // display-only sort of the flow map (does NOT touch the outputs' real order —
-  // in 'first' mode that order drives the partition routing).
-  const [sortDesc, setSortDesc] = useState(false)
   const [zoom, setZoom] = useState(false)        // enlarge the flow map (many outputs)
 
   // "Split by value": scan the input for distinct extracted values and turn each
@@ -618,10 +615,29 @@ export function OutputsPane({ pid, wid, node, status, onChange, onRun, onPreview
   }
 
   const items = [
-    ...outputs.map((o) => ({ id: o.id, label: o.label || o.id, color: o.color, count: dist.counts[o.id] ?? 0 })),
+    ...outputs.map((o) => ({
+      id: o.id, label: o.label || o.id, color: o.color, count: dist.counts[o.id] ?? 0,
+      // 'empty' marks the split bucket whose value is "" — rendered in italic muted
+      // text everywhere so the (vide) row isn't mistaken for a literal label.
+      empty: 'value' in o && o.value === '',
+    })),
     ...(d.else_enabled !== false ? [{ id: 'else', label: d.else_label || 'Non classé', color: d.else_color || '#9aa3b2', count: dist.counts.else ?? 0 }] : []),
   ]
-  const flowItems = sortDesc ? [...items].sort((a, b) => (b.count || 0) - (a.count || 0)) : items
+
+  // Physically reorder outputs by descending count (one-shot). The else bucket
+  // is not in `outputs` and stays last by design. In 'first' (Partition) mode
+  // this rewrites the routing, which is on purpose — the user asked for it.
+  const sortOutputsByCount = () => {
+    if (!outputs.length) return
+    const sorted = [...outputs].sort((a, b) => {
+      const ca = dist.counts[a.id] ?? 0
+      const cb = dist.counts[b.id] ?? 0
+      if (cb !== ca) return cb - ca
+      return outputs.indexOf(a) - outputs.indexOf(b)   // stable tiebreaker
+    })
+    if (sorted.every((o, i) => o.id === outputs[i].id)) return  // already sorted
+    onChange({ outputs: sorted })
+  }
 
   const setOutput = (i, patch) => onChange({ outputs: outputs.map((o, j) => (j === i ? { ...o, ...patch } : o)) })
   const addOutput = () => onChange({
@@ -667,11 +683,13 @@ export function OutputsPane({ pid, wid, node, status, onChange, onRun, onPreview
               </div>
             </div>
           )}
-          <button className={`flow-sort ${sortDesc ? 'on' : ''}`} onClick={() => setSortDesc((v) => !v)}
-            title={sortDesc ? 'Ordre des sorties' : 'Trier par effectif décroissant'}>
-            <Icon name="sort" size={13} /> {sortDesc ? 'décroissant' : 'trier'}
+          <button className="flow-sort" onClick={sortOutputsByCount} disabled={!outputs.length || dist.loading}
+            title={routing === 'first' && !isSplit
+              ? 'Réordonne les sorties par effectif décroissant. Attention : en mode Partition, l\'ordre détermine le routage — le tri va modifier les ensembles.'
+              : 'Réordonne les sorties par effectif décroissant.'}>
+            <Icon name="sort" size={13} /> Trier par effectif
           </button>
-          <button className="flow-sort" onClick={() => setZoom(true)} disabled={!flowItems.length}
+          <button className="flow-sort" onClick={() => setZoom(true)} disabled={!items.length}
             title="Agrandir la carte des flux (utile quand il y a beaucoup de sorties)">
             <Icon name="maximize" size={13} /> Agrandir
           </button>
@@ -685,13 +703,13 @@ export function OutputsPane({ pid, wid, node, status, onChange, onRun, onPreview
         <div className="opane-flow-body">
           {dist.error && !dist.loading
             ? <div className="qb-warn">{dist.error}</div>
-            : <FlowMap items={flowItems} total={dist.total} height={230} />}
+            : <FlowMap items={items} total={dist.total} height={230} />}
           {dist.loading && (
             <div className="flow-loading"><span className="vtest-spin">…</span> Calcul de la répartition…</div>
           )}
         </div>
       </div>
-      {zoom && <FlowMapModal items={flowItems} total={dist.total} onClose={() => setZoom(false)} />}
+      {zoom && <FlowMapModal items={items} total={dist.total} onClose={() => setZoom(false)} />}
 
       <div className="opane-outs">
         <div className="ports-head">
@@ -782,7 +800,9 @@ function OutputRow({ o, index, last, conditions, count, splitMode, onChange, onD
       {splitMode ? (
         <div className="ocard-attr">
           <span className="qb-lbl">valeur</span>
-          <code className="split-val">{o.value === '' ? '(vide)' : o.value}</code>
+          <code className={`split-val ${o.value === '' ? 'split-val-empty' : ''}`}>
+            {o.value === '' ? '(vide)' : o.value}
+          </code>
         </div>
       ) : (
       <>
@@ -844,7 +864,8 @@ export function FlowMap({ items, total, height = 380 }) {
           <g key={it.id}>
             <path d={ribbon(leftX, ly0, ly1, rightX, ry0, ry1)} fill={it.color} opacity="0.5" />
             <rect x={rightX} y={ry0} width={barW} height={Math.max(1, ry1 - ry0)} rx={2} fill={it.color} />
-            <text x={rightX + barW + 7} y={(ry0 + ry1) / 2 - 1} className="flow-lbl">
+            <text x={rightX + barW + 7} y={(ry0 + ry1) / 2 - 1}
+              className={`flow-lbl ${it.empty ? 'flow-lbl-empty' : ''}`}>
               {it.label}<tspan className="flow-pct"> · {pct(it.count)}</tspan>
             </text>
             <text x={rightX + barW + 7} y={(ry0 + ry1) / 2 + 12} className="flow-cnt">{(it.count || 0).toLocaleString('fr-FR')}</text>

@@ -9,7 +9,10 @@ export default function ValidateNode({ id, data, selected }) {
   const outs = st.outputs || {}
 
   const outputs = [
-    ...(data.outputs || []).map((o) => ({ handle: o.id, label: o.label || o.id, color: o.color })),
+    ...(data.outputs || []).map((o) => ({
+      handle: o.id, label: o.label || o.id, color: o.color,
+      empty: 'value' in o && o.value === '',
+    })),
     ...(data.else_enabled !== false
       ? [{ handle: 'else', label: data.else_label || 'Non classé', color: data.else_color || '#9aa3b2' }]
       : []),
@@ -36,7 +39,7 @@ export default function ValidateNode({ id, data, selected }) {
           {list.map((o) => (
             <div className="dedup-out" key={o.handle}>
               <span className="odot" style={o.color ? { background: o.color } : undefined} />
-              <span className="oname">{o.label}</span>
+              <span className={`oname ${o.empty ? 'oname-empty' : ''}`}>{o.label}</span>
               {st.ran && <span className="ocount">{(outs[o.handle] ?? 0).toLocaleString('fr-FR')}</span>}
               <Handle type="source" position={Position.Right} id={o.handle}
                 className="anchor anchor-out"

@@ -270,9 +270,38 @@ function Editor({ pid, wid, onBack }) {
         if (nd.type === 'group') return { ...nd, type: 'frame' }
         return nd.type === 'validate' ? { ...nd, data: normalizeValidateData(nd.data) } : nd
       })
+      // Legacy stops were linked by a regular edge — migrate each such edge into
+      // a parentId attachment so the cap glues directly to the source block. The
+      // edge is then dropped, and existing data.attachedTo (saved post-migration)
+      // wins if both are present.
+      const edges0 = wf.edges || []
+      const stopAttach = new Map()
+      for (const e of edges0) {
+        const tgt = nodes0.find((n) => n.id === e.target)
+        if (tgt?.type === 'stop' && !stopAttach.has(tgt.id)) {
+          stopAttach.set(tgt.id, { sourceId: e.source, sourceHandle: e.sourceHandle || 'out' })
+        }
+      }
+      const migrated = nodes0.map((n) => {
+        if (n.type !== 'stop') return n
+        const at = n.data?.attachedTo || stopAttach.get(n.id)
+        if (!at) return n
+        return {
+          ...n,
+          parentId: at.sourceId,
+          // a default offset; the user can detach + reattach for a precise spot.
+          position: n.parentId === at.sourceId && n.position ? n.position : { x: 210, y: 6 },
+          data: { ...n.data, attachedTo: at },
+        }
+      })
+      const ordered = orderParentsFirst(migrated)
+      const cleanEdges = edges0.filter((e) => {
+        const tgt = nodes0.find((n) => n.id === e.target)
+        return tgt?.type !== 'stop'
+      })
       setWfName(wf.name)
-      setNodes(nodes0)
-      setEdges(wf.edges || [])
+      setNodes(ordered)
+      setEdges(cleanEdges)
       setFiles(fl)
       // hydrate status/schemas from any previously materialized outputs
       for (const n of nodes0) {
@@ -330,18 +359,70 @@ function Editor({ pid, wid, onBack }) {
   // stop the progress animation if the editor unmounts mid-run
   useEffect(() => () => { if (anim.current.timer) clearInterval(anim.current.timer) }, [])
 
+  // ---- stop attach/detach ----
+  // A "stop" cap glues to the source block instead of being wired by an edge:
+  // we set parentId on the stop and position it next to the source's output
+  // handle. React Flow then moves the cap along with the parent automatically.
+  const STOP_CAP_HALF = 11   // half height of the round cap (matches CSS)
+  const attachStop = useCallback((stopId, sourceId, sourceHandle) => {
+    const handle = sourceHandle || 'out'
+    const src = rf.getInternalNode(sourceId)
+    const bounds = src?.internals?.handleBounds?.source || []
+    const h = bounds.find((x) => x.id === handle) || bounds[0]
+    const srcW = src?.measured?.width ?? 200
+    const pos = h
+      ? { x: h.x + h.width + 2, y: h.y + h.height / 2 - STOP_CAP_HALF }
+      : { x: srcW + 4, y: 18 }
+    setNodes((nds) => {
+      const parentIdx = nds.findIndex((n) => n.id === sourceId)
+      const stop = nds.find((n) => n.id === stopId)
+      if (!stop || parentIdx < 0) return nds
+      const updated = {
+        ...stop,
+        parentId: sourceId,
+        position: pos,
+        data: { ...stop.data, attachedTo: { sourceId, sourceHandle: handle } },
+        selected: false,
+      }
+      const without = nds.filter((n) => n.id !== stopId)
+      // child must come after parent in the array (React Flow ordering rule)
+      const newParentIdx = without.findIndex((n) => n.id === sourceId)
+      return [...without.slice(0, newParentIdx + 1), updated, ...without.slice(newParentIdx + 1)]
+    })
+    // any pre-existing edge into this stop is now a duplicate
+    setEdges((eds) => eds.filter((e) => e.target !== stopId))
+  }, [rf, setNodes, setEdges])
+
+  const detachStop = useCallback((stopId) => {
+    setNodes((nds) => nds.map((n) => {
+      if (n.id !== stopId || !n.parentId) return n
+      const parent = nds.find((x) => x.id === n.parentId)
+      const abs = parent
+        ? { x: (parent.position?.x || 0) + (n.position?.x || 0) + 30,
+            y: (parent.position?.y || 0) + (n.position?.y || 0) }
+        : n.position
+      const { attachedTo, ...dataRest } = n.data || {}
+      const { parentId, ...nodeRest } = n
+      return { ...nodeRest, position: abs, data: dataRest }
+    }))
+  }, [setNodes])
+
   // ---- connections ----
-  // Union accepts many edges on its single input; every other target handle
-  // keeps a single incoming edge.
+  // Stops attach instead of taking an edge. Union accepts many edges on its
+  // single input; every other target handle keeps a single incoming edge.
   const onConnect = useCallback((conn) => {
-    const targetType = nodes.find((n) => n.id === conn.target)?.type
+    const target = nodes.find((n) => n.id === conn.target)
+    if (target?.type === 'stop') {
+      attachStop(conn.target, conn.source, conn.sourceHandle || 'out')
+      return
+    }
     setEdges((eds) => {
-      const filtered = targetType === 'union'
+      const filtered = target?.type === 'union'
         ? eds
         : eds.filter((e) => !(e.target === conn.target && e.targetHandle === conn.targetHandle))
       return addEdge({ ...conn, animated: true }, filtered)
     })
-  }, [setEdges, nodes])
+  }, [setEdges, nodes, attachStop])
 
   // ---- node helpers ----
   const addNode = (type) => {
@@ -406,6 +487,13 @@ function Editor({ pid, wid, onBack }) {
             (e) => !(e.source === id && gone.has(e.sourceHandle || 'out'))
           ))
         }
+        // also drop stops glued to a now-deleted route output
+        if (gone.size > 0) {
+          return nds
+            .filter((n) => !(n.type === 'stop' && n.data?.attachedTo?.sourceId === id
+              && gone.has(n.data.attachedTo.sourceHandle)))
+            .map((nd) => nd.id === id ? { ...nd, data: { ...nd.data, ...patch } } : nd)
+        }
       }
       return nds.map((nd) => nd.id === id ? { ...nd, data: { ...nd.data, ...patch } } : nd)
     })
@@ -427,23 +515,25 @@ function Editor({ pid, wid, onBack }) {
   // deletion paths — the context menu (below) and the Suppr/Backspace key (which
   // React Flow handles itself, then calls onNodesDelete).
   const forgetNodes = useCallback((ids) => {
-    const gone = ids instanceof Set ? ids : new Set(ids)
-    if (!gone.size) return
+    const initial = ids instanceof Set ? ids : new Set(ids)
+    if (!initial.size) return
+    const gone = new Set(initial)
+    // a stop glued to a removed block goes with it
+    for (const n of nodes) {
+      if (n.type === 'stop' && n.parentId && gone.has(n.parentId)) gone.add(n.id)
+    }
+    setNodes((nds) => nds.filter((n) => !gone.has(n.id)))
     setEdges((eds) => eds.filter((e) => !gone.has(e.source) && !gone.has(e.target)))
     setSelectedId((c) => (c && gone.has(c) ? null : c))
     setEditorNode((c) => (c && gone.has(c) ? null : c))
     const prune = (o) => { const r = { ...o }; gone.forEach((id) => delete r[id]); return r }
     setStatus(prune); setSchemas(prune); setRunStamps(prune)
-  }, [setEdges])
+  }, [nodes, setEdges, setNodes])
 
   // Remove a batch of blocks ourselves (used by the context menu). The Suppr key
   // is handled by React Flow directly — see onNodesDelete on <ReactFlow>.
-  const removeByIds = (ids) => {
-    const gone = new Set(ids)
-    if (!gone.size) return
-    setNodes((nds) => nds.filter((n) => !gone.has(n.id)))
-    forgetNodes(gone)
-  }
+  // forgetNodes removes the nodes themselves and every adjacent piece of state.
+  const removeByIds = (ids) => forgetNodes(new Set(ids))
   const deleteNode = (id) => removeByIds([id])
   const deleteSelection = () => removeByIds(nodes.filter((n) => n.selected).map((n) => n.id))
   const onNodesDelete = useCallback((deleted) => forgetNodes(deleted.map((n) => n.id)), [forgetNodes])
@@ -459,7 +549,9 @@ function Editor({ pid, wid, onBack }) {
     const gx = node.position.x, gy = node.position.y
     const gw = node.data.w || 460, gh = node.data.h || 300
     const items = nodes
-      .filter((n) => n.id !== node.id && n.type !== 'frame')
+      // skip frames; skip glued stops — their position is relative to a parent
+      // that's already in the scan, and they'll follow it automatically.
+      .filter((n) => n.id !== node.id && n.type !== 'frame' && !n.parentId)
       .filter((n) => { const { cx, cy } = nodeBox(n); return cx >= gx && cx <= gx + gw && cy >= gy && cy <= gy + gh })
       .map((n) => ({ id: n.id, x: n.position.x, y: n.position.y }))
     groupDrag.current = { id: node.id, x: gx, y: gy, items }
@@ -740,6 +832,8 @@ function Editor({ pid, wid, onBack }) {
   const decoratedNodes = useMemo(
     () => nodes.map((n) => {
       if (n.type === 'frame') return { ...n, dragHandle: '.group-titlebar', zIndex: -1 }
+      // glued stops follow their parent — pin them in place and float above
+      if (n.type === 'stop' && n.parentId) return { ...n, draggable: false, zIndex: 5 }
       const active = progress.currentId === n.id
       const dirty = dirtyMap[n.id]
       if (!active && !dirty) return n
@@ -967,7 +1061,14 @@ function Editor({ pid, wid, onBack }) {
                 </button>
               ) : (
                 <>
-                  <button onClick={() => { duplicateNode(menu.id); setMenu(null) }}><Icon name="plus" size={13} /> Dupliquer</button>
+                  {mn?.type === 'stop' && mn.data?.attachedTo && (
+                    <button onClick={() => { detachStop(menu.id); setMenu(null) }}>
+                      <Icon name="select" size={13} /> Détacher
+                    </button>
+                  )}
+                  {mn?.type !== 'stop' && (
+                    <button onClick={() => { duplicateNode(menu.id); setMenu(null) }}><Icon name="plus" size={13} /> Dupliquer</button>
+                  )}
                   <button className="danger" onClick={() => { deleteNode(menu.id); setMenu(null) }}><Icon name="trash" size={13} /> Supprimer</button>
                 </>
               )}
@@ -1032,7 +1133,24 @@ function miniColor(n) {
 
 // React Flow adds transient UI fields; persist only what we need.
 function stripNodes(nodes) {
-  return nodes.map((n) => ({
-    id: n.id, type: n.type, position: n.position, data: n.data,
-  }))
+  return nodes.map((n) => {
+    const o = { id: n.id, type: n.type, position: n.position, data: n.data }
+    if (n.parentId) o.parentId = n.parentId   // stops glued to a block
+    return o
+  })
+}
+
+// React Flow expects each child node to appear *after* its parent in the array;
+// otherwise the child can't resolve its parent's position at render time.
+function orderParentsFirst(nds) {
+  const byId = new Map(nds.map((n) => [n.id, n]))
+  const placed = new Set()
+  const out = []
+  const place = (n) => {
+    if (placed.has(n.id)) return
+    if (n.parentId && byId.has(n.parentId) && !placed.has(n.parentId)) place(byId.get(n.parentId))
+    placed.add(n.id); out.push(n)
+  }
+  for (const n of nds) place(n)
+  return out
 }

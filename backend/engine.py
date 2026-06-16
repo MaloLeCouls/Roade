@@ -993,7 +993,10 @@ def _extract_key(series: pd.Series, extractor: dict, cs: bool) -> pd.Series:
     s = series.astype("string").fillna("")
     ex = extractor or {}
     kind = ex.get("type", "after_last")
-    if kind == "after_last":
+    if kind == "whole":
+        # no extraction — the raw cell value is the grouping key
+        key = s
+    elif kind == "after_last":
         sep = ex.get("sep", ".")
         if sep:
             has = s.str.contains(re.escape(sep), regex=True)
@@ -1115,7 +1118,9 @@ def split_scan(pid, wid, node_id, config: dict) -> dict:
         raise ValueError("choisissez la colonne à éclater")
     cs = bool((config or {}).get("case_sensitive"))
     key = _extract_key(df[col], sp.get("extractor") or {}, cs)
-    counts = key[key != ""].value_counts()
+    # Include the empty-key bucket: blank cells (or values that don't match the
+    # extractor) become their own output, displayed as "(vide)" on the right.
+    counts = key.value_counts()
     cap = 200
     values = [{"value": str(v), "count": int(c)} for v, c in counts.head(cap).items()]
     # a few raw → key examples so the user can immediately verify the extraction
@@ -1390,8 +1395,9 @@ def _run_calc(con, pid, node, ins):
 
 def _run_filter(con, pid, node, ins):
     """Membership filter (semi-join / anti-join). Keeps — or excludes — the rows
-    of the main input whose value in a chosen column appears in a chosen column of
-    the reference input. The reference table is only consulted, never merged."""
+    of the main input whose values in N chosen columns ALL appear together in the
+    corresponding columns of the reference input (composite-key membership). The
+    reference table is only consulted, never merged."""
     d = node["data"]
     main = next((df for a, df in ins if a == "in"), None)
     ref = next((df for a, df in ins if a == "ref"), None)
@@ -1399,20 +1405,47 @@ def _run_filter(con, pid, node, ins):
         raise ValueError("entrée principale « données » non connectée")
     if ref is None:
         raise ValueError("entrée de référence « réf » non connectée — branchez le tableau dont on lit les valeurs")
-    col = d.get("column")
-    ref_col = d.get("ref_column")
-    if not col or col not in main.columns:
-        raise ValueError("choisissez la colonne à comparer (côté données)")
-    if not ref_col or ref_col not in ref.columns:
-        raise ValueError("choisissez la colonne de référence (côté réf)")
+    # New multi-pair model (`pairs: [{column, ref_column}, ...]`) with a fallback
+    # to the legacy single-pair fields so old workflows keep running.
+    pairs = [p for p in (d.get("pairs") or []) if p.get("column") and p.get("ref_column")]
+    if not pairs and d.get("column") and d.get("ref_column"):
+        pairs = [{"column": d["column"], "ref_column": d["ref_column"]}]
+    if not pairs:
+        raise ValueError("choisissez au moins une paire de colonnes à comparer")
+    main_cols = [p["column"] for p in pairs]
+    ref_cols = [p["ref_column"] for p in pairs]
+    for c in main_cols:
+        if c not in main.columns:
+            raise ValueError(f"colonne « {c} » absente des données")
+    for c in ref_cols:
+        if c not in ref.columns:
+            raise ValueError(f"colonne « {c} » absente de la référence")
 
-    mv = main[col]
-    rv = ref[ref_col].dropna()
-    if d.get("case_insensitive"):                  # compare on lowered text
-        rset = set(rv.astype(str).str.lower())
-        present = mv.notna() & mv.astype(str).str.lower().isin(rset)
-    else:
-        present = mv.isin(set(rv.tolist()))
+    ci = bool(d.get("case_insensitive"))
+
+    def _row_keys(df: pd.DataFrame, cols: list[str]) -> "pd.Series":
+        # one tuple per row, NaN → ''. With CI on, lowercase each component so
+        # the comparison ignores case across the whole composite key.
+        parts = [df[c].astype("string").fillna("") for c in cols]
+        if ci:
+            parts = [p.str.lower() for p in parts]
+        return pd.Series(list(zip(*parts)), index=df.index)
+
+    # A ref row with a NaN on any compared column has an undefined identity for
+    # this composite key — drop it from the lookup set (mirrors the legacy
+    # single-column dropna()).
+    ref_keep_mask = pd.Series(True, index=ref.index)
+    for c in ref_cols:
+        ref_keep_mask &= ref[c].notna()
+    rset = set(_row_keys(ref[ref_keep_mask], ref_cols).tolist())
+
+    # Same on the main side: a row with NaN in any compared column can't match.
+    main_keep_mask = pd.Series(True, index=main.index)
+    for c in main_cols:
+        main_keep_mask &= main[c].notna()
+    main_keys = _row_keys(main, main_cols)
+    present = main_keep_mask & main_keys.isin(rset)
+
     keep = d.get("mode", "keep") != "exclude"      # keep = semi-join, exclude = anti-join
     out = main[present if keep else ~present].reset_index(drop=True)
     return {"out": out}, {}
