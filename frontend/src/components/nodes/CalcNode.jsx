@@ -11,22 +11,38 @@ export default function CalcNode({ id, data, selected }) {
   const groupFns = (g.functions || []).filter((f) => f.enabled !== false && f.fn)
   return (
     <div className={`node node-calc ${selected ? 'sel' : ''}`}>
-      <Handle type="target" position={Position.Left} id="in" style={{ top: 34 }} className="anchor anchor-in" />
+      <Handle
+        type="target"
+        position={Position.Left}
+        id="in"
+        style={{ top: 34 }}
+        className="anchor anchor-in"
+      />
       <div className="node-head">
         <span className="node-title">{data.label || 'Calcul'}</span>
         <LockBadge locked={data.locked} />
       </div>
       <div className="node-body">
         {groupFns.length > 0 && (
-          <div className="node-sub">par groupe : <b>{groupKey.length ? groupKey.join(' + ') : '—'}</b> · {groupFns.length} col.</div>
+          <div className="node-sub">
+            par groupe : <b>{groupKey.length ? groupKey.join(' + ') : '—'}</b> · {groupFns.length}{' '}
+            col.
+          </div>
         )}
         <div className="node-sub">{cols.length} colonne(s) calculée(s)</div>
         {cols.slice(0, 3).map((c, i) => (
-          <div className="node-sub mini-op" key={i}>• {c.name}</div>
+          <div className="node-sub mini-op" key={i}>
+            • {c.name}
+          </div>
         ))}
         {cols.length > 3 && <div className="node-sub">… +{cols.length - 3}</div>}
       </div>
-      <NodeFooter st={st} running={running === id} onPreview={() => onPreview(id)} onRun={() => onRunNode(id)} />
+      <NodeFooter
+        st={st}
+        running={running === id}
+        onPreview={() => onPreview(id)}
+        onRun={() => onRunNode(id)}
+      />
       <Handle type="source" position={Position.Right} id="out" className="anchor anchor-out" />
     </div>
   )

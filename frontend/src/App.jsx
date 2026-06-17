@@ -41,11 +41,17 @@ export default function App() {
 function Breadcrumb({ view, setView }) {
   const [pname, setPname] = useState(null)
   useEffect(() => {
-    if (view.pid) api.getProject(view.pid).then((p) => setPname(p.name)).catch(() => {})
+    if (view.pid)
+      api
+        .getProject(view.pid)
+        .then((p) => setPname(p.name))
+        .catch(() => {})
   }, [view.pid])
   return (
     <div className="breadcrumb">
-      <span className="crumb" onClick={() => setView({ name: 'projects' })}>Projets</span>
+      <span className="crumb" onClick={() => setView({ name: 'projects' })}>
+        Projets
+      </span>
       {view.pid && (
         <>
           <span className="sep">/</span>

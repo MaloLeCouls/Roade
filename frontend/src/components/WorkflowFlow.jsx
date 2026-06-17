@@ -11,24 +11,47 @@ import { typeLabel } from './Inspector'
  */
 
 const TYPE_COLOR = {
-  source: '#4E79A7', sql: '#59734F', dedup: '#8d6ea0', validate: '#5b6bb0',
-  pivot: '#b1605f', clean: '#4f9a93', calc: '#b05a86', filter: '#3f8c8c', cols: '#7a6cb0',
-  report: '#6b8e3d', union: '#8a7560', export: '#c08436',
+  source: '#4E79A7',
+  sql: '#59734F',
+  dedup: '#8d6ea0',
+  validate: '#5b6bb0',
+  pivot: '#b1605f',
+  clean: '#4f9a93',
+  calc: '#b05a86',
+  filter: '#3f8c8c',
+  cols: '#7a6cb0',
+  report: '#6b8e3d',
+  union: '#8a7560',
+  export: '#c08436',
 }
 const HANDLE_COLOR = {
-  kept: '#3f7a4f', dups: '#c0392f', uniques: '#3556a8', valid: '#3f7a4f', invalid: '#c0392f',
+  kept: '#3f7a4f',
+  dups: '#c0392f',
+  uniques: '#3556a8',
+  valid: '#3f7a4f',
+  invalid: '#c0392f',
 }
 
-const NODEW = 158, NODEH = 50, COLW = 232, ROWH = 88, MX = 40, MY = 36
+const NODEW = 158,
+  NODEH = 50,
+  COLW = 232,
+  ROWH = 88,
+  MX = 40,
+  MY = 36
 
 function computeLevels(nodes, edges) {
   const level = {}
-  nodes.forEach((n) => { level[n.id] = 0 })
+  nodes.forEach((n) => {
+    level[n.id] = 0
+  })
   for (let it = 0; it <= nodes.length; it++) {
     let changed = false
     for (const e of edges) {
       if (!(e.source in level) || !(e.target in level)) continue
-      if (level[e.target] < level[e.source] + 1) { level[e.target] = level[e.source] + 1; changed = true }
+      if (level[e.target] < level[e.source] + 1) {
+        level[e.target] = level[e.source] + 1
+        changed = true
+      }
     }
     if (!changed) break
   }
@@ -61,12 +84,16 @@ function outColor(node, handle) {
   return HANDLE_COLOR[handle] || TYPE_COLOR[node.type] || '#9aa3b2'
 }
 
-function clip(s, n) { return s && s.length > n ? s.slice(0, n - 1) + '…' : (s || '') }
+function clip(s, n) {
+  return s && s.length > n ? s.slice(0, n - 1) + '…' : s || ''
+}
 const fmt = (v) => (v == null ? '—' : Number(v).toLocaleString('fr-FR'))
 
 export default function WorkflowFlow({ nodes, edges, status, onOpenNode, onClose }) {
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose()
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
@@ -75,7 +102,10 @@ export default function WorkflowFlow({ nodes, edges, status, onOpenNode, onClose
     const nodeById = Object.fromEntries(nodes.map((n) => [n.id, n]))
     const level = computeLevels(nodes, edges)
     const byLevel = {}
-    nodes.forEach((n) => { const L = level[n.id] || 0; (byLevel[L] = byLevel[L] || []).push(n) })
+    nodes.forEach((n) => {
+      const L = level[n.id] || 0
+      ;(byLevel[L] = byLevel[L] || []).push(n)
+    })
     const levels = Object.keys(byLevel).map(Number)
     const maxLevel = levels.length ? Math.max(...levels) : 0
     const maxRows = Math.max(1, ...Object.values(byLevel).map((c) => c.length))
@@ -84,33 +114,57 @@ export default function WorkflowFlow({ nodes, edges, status, onOpenNode, onClose
     for (let L = 0; L <= maxLevel; L++) {
       const col = byLevel[L] || []
       const startY = MY + (maxRows * ROWH - col.length * ROWH) / 2
-      col.forEach((n, i) => { pos[n.id] = { x: MX + L * COLW, y: startY + i * ROWH } })
+      col.forEach((n, i) => {
+        pos[n.id] = { x: MX + L * COLW, y: startY + i * ROWH }
+      })
     }
 
     // attach points spread vertically by edge index on each side
-    const outE = {}, inE = {}
-    nodes.forEach((n) => { outE[n.id] = []; inE[n.id] = [] })
-    edges.forEach((e) => { if (outE[e.source]) outE[e.source].push(e); if (inE[e.target]) inE[e.target].push(e) })
+    const outE = {},
+      inE = {}
+    nodes.forEach((n) => {
+      outE[n.id] = []
+      inE[n.id] = []
+    })
+    edges.forEach((e) => {
+      if (outE[e.source]) outE[e.source].push(e)
+      if (inE[e.target]) inE[e.target].push(e)
+    })
 
     let maxCount = 0
-    edges.forEach((e) => { const c = handleCount(status, e.source, e.sourceHandle); if (c != null) maxCount = Math.max(maxCount, c) })
+    edges.forEach((e) => {
+      const c = handleCount(status, e.source, e.sourceHandle)
+      if (c != null) maxCount = Math.max(maxCount, c)
+    })
 
-    const links = edges.map((e) => {
-      const ps = pos[e.source], pt = pos[e.target]
-      if (!ps || !pt) return null
-      const oi = outE[e.source].indexOf(e), oc = outE[e.source].length
-      const ii = inE[e.target].indexOf(e), ic = inE[e.target].length
-      const sy = ps.y + NODEH * ((oi + 1) / (oc + 1))
-      const ty = pt.y + NODEH * ((ii + 1) / (ic + 1))
-      const sx = ps.x + NODEW, tx = pt.x
-      const count = handleCount(status, e.source, e.sourceHandle)
-      const w = maxCount > 0 && count != null ? 2 + 16 * (count / maxCount) : 2.5
-      return {
-        id: e.id, sx, sy, tx, ty, w, count,
-        color: outColor(nodeById[e.source], e.sourceHandle),
-        dashed: count == null,
-      }
-    }).filter(Boolean)
+    const links = edges
+      .map((e) => {
+        const ps = pos[e.source],
+          pt = pos[e.target]
+        if (!ps || !pt) return null
+        const oi = outE[e.source].indexOf(e),
+          oc = outE[e.source].length
+        const ii = inE[e.target].indexOf(e),
+          ic = inE[e.target].length
+        const sy = ps.y + NODEH * ((oi + 1) / (oc + 1))
+        const ty = pt.y + NODEH * ((ii + 1) / (ic + 1))
+        const sx = ps.x + NODEW,
+          tx = pt.x
+        const count = handleCount(status, e.source, e.sourceHandle)
+        const w = maxCount > 0 && count != null ? 2 + 16 * (count / maxCount) : 2.5
+        return {
+          id: e.id,
+          sx,
+          sy,
+          tx,
+          ty,
+          w,
+          count,
+          color: outColor(nodeById[e.source], e.sourceHandle),
+          dashed: count == null,
+        }
+      })
+      .filter(Boolean)
 
     const width = MX * 2 + maxLevel * COLW + NODEW
     const height = MY * 2 + maxRows * ROWH
@@ -128,17 +182,35 @@ export default function WorkflowFlow({ nodes, edges, status, onOpenNode, onClose
         <div className="be-top">
           <span className="be-eyebrow">Carte des flux</span>
           <span className="be-typetag">{nodes.length} bloc(s) · des sources aux exports</span>
-          <span className="qb-hint" style={{ marginLeft: 16 }}>épaisseur ∝ nombre de lignes · clic sur un bloc pour l'ouvrir</span>
-          <button className="ghost small" style={{ marginLeft: 'auto' }} onClick={onClose}><Icon name="x" /> Fermer</button>
+          <span className="qb-hint" style={{ marginLeft: 16 }}>
+            épaisseur ∝ nombre de lignes · clic sur un bloc pour l'ouvrir
+          </span>
+          <button className="ghost small" style={{ marginLeft: 'auto' }} onClick={onClose}>
+            <Icon name="x" /> Fermer
+          </button>
         </div>
         <div className="flowmodal-body">
           {nodes.length === 0 ? (
-            <div className="be-view-empty"><p>Aucun bloc dans ce workflow.</p></div>
+            <div className="be-view-empty">
+              <p>Aucun bloc dans ce workflow.</p>
+            </div>
           ) : (
-            <svg viewBox={`0 0 ${layout.width} ${layout.height}`} className="wflow-svg" preserveAspectRatio="xMidYMid meet">
+            <svg
+              viewBox={`0 0 ${layout.width} ${layout.height}`}
+              className="wflow-svg"
+              preserveAspectRatio="xMidYMid meet"
+            >
               {layout.links.map((l) => (
-                <path key={l.id} d={curve(l)} fill="none" stroke={l.color} strokeWidth={l.w}
-                  strokeOpacity={l.dashed ? 0.35 : 0.5} strokeDasharray={l.dashed ? '4 4' : undefined} strokeLinecap="round">
+                <path
+                  key={l.id}
+                  d={curve(l)}
+                  fill="none"
+                  stroke={l.color}
+                  strokeWidth={l.w}
+                  strokeOpacity={l.dashed ? 0.35 : 0.5}
+                  strokeDasharray={l.dashed ? '4 4' : undefined}
+                  strokeLinecap="round"
+                >
                   <title>{fmt(l.count)} ligne(s)</title>
                 </path>
               ))}
@@ -147,12 +219,21 @@ export default function WorkflowFlow({ nodes, edges, status, onOpenNode, onClose
                 if (!p) return null
                 const color = TYPE_COLOR[n.type] || '#9aa3b2'
                 return (
-                  <g key={n.id} className="wflow-node" transform={`translate(${p.x} ${p.y})`}
-                    onClick={() => onOpenNode(n.id)} style={{ cursor: 'pointer' }}>
+                  <g
+                    key={n.id}
+                    className="wflow-node"
+                    transform={`translate(${p.x} ${p.y})`}
+                    onClick={() => onOpenNode(n.id)}
+                    style={{ cursor: 'pointer' }}
+                  >
                     <rect width={NODEW} height={NODEH} rx={5} className="wflow-box" />
                     <rect width={5} height={NODEH} rx={2} fill={color} />
-                    <text x={14} y={20} className="wflow-name">{clip(n.data?.label || typeLabel(n.type), 20)}</text>
-                    <text x={14} y={37} className="wflow-meta">{typeLabel(n.type).replace('Bloc ', '')} · {fmt(rowsOf(status, n.id))} lignes</text>
+                    <text x={14} y={20} className="wflow-name">
+                      {clip(n.data?.label || typeLabel(n.type), 20)}
+                    </text>
+                    <text x={14} y={37} className="wflow-meta">
+                      {typeLabel(n.type).replace('Bloc ', '')} · {fmt(rowsOf(status, n.id))} lignes
+                    </text>
                   </g>
                 )
               })}

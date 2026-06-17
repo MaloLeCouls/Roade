@@ -19,7 +19,10 @@ export default function StopNode({ id, data, selected }) {
     : 'Sortie fermée volontairement (double-clic pour ajouter une note)'
 
   return (
-    <div className={`node-stop ${attached ? 'attached' : ''} ${selected ? 'sel' : ''}`} title={title}>
+    <div
+      className={`node-stop ${attached ? 'attached' : ''} ${selected ? 'sel' : ''}`}
+      title={title}
+    >
       {!attached && (
         <Handle type="target" position={Position.Left} id="in" className="anchor anchor-in" />
       )}
@@ -27,12 +30,21 @@ export default function StopNode({ id, data, selected }) {
         <Icon name="stop" size={12} />
       </span>
       {editing ? (
-        <input autoFocus className="stop-note-input nodrag" value={note} placeholder="pourquoi fermée ?"
+        <input
+          autoFocus
+          className="stop-note-input nodrag"
+          value={note}
+          placeholder="pourquoi fermée ?"
           onChange={(e) => set({ note: e.target.value })}
           onBlur={() => setEditing(false)}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') setEditing(false) }} />
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === 'Escape') setEditing(false)
+          }}
+        />
       ) : note ? (
-        <span className="stop-note-pop" role="tooltip">{note}</span>
+        <span className="stop-note-pop" role="tooltip">
+          {note}
+        </span>
       ) : null}
     </div>
   )

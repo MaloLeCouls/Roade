@@ -8,6 +8,7 @@ file tracing its lineage from the source files down to the export.
 Public API:
     build_workbook(pid, wid) -> bytes   # the .xlsx, ready to stream
 """
+
 from __future__ import annotations
 
 import math
@@ -15,22 +16,30 @@ from datetime import datetime
 from io import BytesIO
 
 from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.chart import BarChart, PieChart, Reference
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
-from openpyxl.chart import PieChart, BarChart, Reference
 
-import storage
 import engine
+import storage
 from engine import _sanitize_filename, _sanitize_sheet_name
-
 
 # --------------------------------------------------------------------------- #
 # Vocabulary
 # --------------------------------------------------------------------------- #
 TYPE_LABEL = {
-    "source": "Source", "sql": "SQL", "dedup": "Doublons", "validate": "Validation",
-    "pivot": "Pivot", "clean": "Nettoyage", "calc": "Calcul", "filter": "Filtre",
-    "cols": "Colonnes", "report": "Analyse", "union": "Union", "export": "Export",
+    "source": "Source",
+    "sql": "SQL",
+    "dedup": "Doublons",
+    "validate": "Validation",
+    "pivot": "Pivot",
+    "clean": "Nettoyage",
+    "calc": "Calcul",
+    "filter": "Filtre",
+    "cols": "Colonnes",
+    "report": "Analyse",
+    "union": "Union",
+    "export": "Export",
 }
 TYPE_DESC = {
     "source": "Lecture d'un fichier Excel/CSV",
@@ -48,33 +57,62 @@ TYPE_DESC = {
 }
 
 _AGG_FR = {
-    "SUM": "somme", "AVG": "moyenne", "MIN": "minimum", "MAX": "maximum",
-    "COUNT": "nombre", "COUNT_DISTINCT": "nombre de valeurs distinctes",
-    "MEDIAN": "médiane", "STDDEV": "écart-type", "FIRST": "première valeur",
-    "LAST": "dernière valeur", "STRING_AGG": "concaténation",
+    "SUM": "somme",
+    "AVG": "moyenne",
+    "MIN": "minimum",
+    "MAX": "maximum",
+    "COUNT": "nombre",
+    "COUNT_DISTINCT": "nombre de valeurs distinctes",
+    "MEDIAN": "médiane",
+    "STDDEV": "écart-type",
+    "FIRST": "première valeur",
+    "LAST": "dernière valeur",
+    "STRING_AGG": "concaténation",
 }
 _OP_FR = {
-    "=": "vaut", "==": "vaut", "!=": "est différent de", "<>": "est différent de",
-    ">": "est supérieur à", ">=": "est supérieur ou égal à",
-    "<": "est inférieur à", "<=": "est inférieur ou égal à",
-    "LIKE": "ressemble à", "NOT LIKE": "ne ressemble pas à",
-    "ILIKE": "ressemble à (sans casse)", "IN": "fait partie de",
-    "NOT IN": "ne fait pas partie de", "IS NULL": "est vide",
-    "IS NOT NULL": "n'est pas vide", "BETWEEN": "est compris entre",
+    "=": "vaut",
+    "==": "vaut",
+    "!=": "est différent de",
+    "<>": "est différent de",
+    ">": "est supérieur à",
+    ">=": "est supérieur ou égal à",
+    "<": "est inférieur à",
+    "<=": "est inférieur ou égal à",
+    "LIKE": "ressemble à",
+    "NOT LIKE": "ne ressemble pas à",
+    "ILIKE": "ressemble à (sans casse)",
+    "IN": "fait partie de",
+    "NOT IN": "ne fait pas partie de",
+    "IS NULL": "est vide",
+    "IS NOT NULL": "n'est pas vide",
+    "BETWEEN": "est compris entre",
 }
 _GROUP_FN_FR = {
-    "occurrence": "n° d'occurrence dans le groupe", "group_size": "taille du groupe",
-    "count_distinct": "nb de valeurs distinctes de", "is_duplicate": "valeur répétée dans le groupe",
-    "sum": "somme de", "avg": "moyenne de", "min": "minimum de", "max": "maximum de",
-    "median": "médiane de", "share": "part dans le total du groupe de",
-    "first": "première valeur de", "last": "dernière valeur de",
-    "prev": "valeur précédente de", "next": "valeur suivante de", "concat": "liste des valeurs de",
+    "occurrence": "n° d'occurrence dans le groupe",
+    "group_size": "taille du groupe",
+    "count_distinct": "nb de valeurs distinctes de",
+    "is_duplicate": "valeur répétée dans le groupe",
+    "sum": "somme de",
+    "avg": "moyenne de",
+    "min": "minimum de",
+    "max": "maximum de",
+    "median": "médiane de",
+    "share": "part dans le total du groupe de",
+    "first": "première valeur de",
+    "last": "dernière valeur de",
+    "prev": "valeur précédente de",
+    "next": "valeur suivante de",
+    "concat": "liste des valeurs de",
     "value_when": "valeur conditionnelle",
 }
 _VW_REDUCER_FR = {
-    "first": "la première (selon le tri)", "last": "la dernière (selon le tri)",
-    "min": "la plus petite", "max": "la plus grande", "sum": "la somme",
-    "avg": "la moyenne", "concat": "toutes (concaténées par « , »)",
+    "first": "la première (selon le tri)",
+    "last": "la dernière (selon le tri)",
+    "min": "la plus petite",
+    "max": "la plus grande",
+    "sum": "la somme",
+    "avg": "la moyenne",
+    "concat": "toutes (concaténées par « , »)",
 }
 _GROUP_CHECK_FR = {
     "unique": "toutes les valeurs sont différentes (unicité)",
@@ -87,11 +125,18 @@ _GROUP_CHECK_FR = {
     "distinct_max": "au plus {n} valeurs distinctes",
     "contains": "contient la valeur « {v} »",
     "not_contains": "ne contient pas la valeur « {v} »",
-    "size_eq": "exactement {n} lignes", "size_min": "au moins {n} lignes",
+    "size_eq": "exactement {n} lignes",
+    "size_min": "au moins {n} lignes",
     "size_max": "au plus {n} lignes",
 }
-_CMP_WORD = {"eq": "autant de", "ne": "un nombre différent de", "lt": "moins de",
-             "le": "au plus autant de", "gt": "plus de", "ge": "au moins autant de"}
+_CMP_WORD = {
+    "eq": "autant de",
+    "ne": "un nombre différent de",
+    "lt": "moins de",
+    "le": "au plus autant de",
+    "gt": "plus de",
+    "ge": "au moins autant de",
+}
 
 
 def _q(v) -> str:
@@ -109,16 +154,27 @@ def _col(name) -> str:
 # --------------------------------------------------------------------------- #
 # Tests whose OR can be safely merged into a single "one of: a, b, c" phrase.
 _MERGEABLE = {"equals", "contains", "starts_with", "ends_with"}
-_VERB_ONE = {"equals": "vaut", "contains": "contient",
-             "starts_with": "commence par", "ends_with": "finit par"}
-_VERB_MANY = {"equals": "vaut l'une des valeurs", "contains": "contient l'un de",
-              "starts_with": "commence par l'un de", "ends_with": "finit par l'un de"}
+_VERB_ONE = {
+    "equals": "vaut",
+    "contains": "contient",
+    "starts_with": "commence par",
+    "ends_with": "finit par",
+}
+_VERB_MANY = {
+    "equals": "vaut l'une des valeurs",
+    "contains": "contient l'un de",
+    "starts_with": "commence par l'un de",
+    "ends_with": "finit par l'un de",
+}
 
 
 _RULE_OPPOSITE = {
-    "contains": "not_contains", "not_contains": "contains",
-    "equals": "not_equals", "not_equals": "equals",
-    "is_empty": "not_empty", "not_empty": "is_empty",
+    "contains": "not_contains",
+    "not_contains": "contains",
+    "equals": "not_equals",
+    "not_equals": "equals",
+    "is_empty": "not_empty",
+    "not_empty": "is_empty",
 }
 
 
@@ -131,15 +187,20 @@ def _rule_phrase(r: dict, default_col) -> str:
     if r.get("negate"):
         opp = _RULE_OPPOSITE.get(test)
         if opp:
-            test = opp                          # « ne contient pas » negated -> « contient »
+            test = opp  # « ne contient pas » negated -> « contient »
         else:
             neg = "NON — "
     v = r.get("value", "")
     col = r.get("column") or default_col
     start = int(r.get("start") or 1)
     length = int(r.get("length") or 1)
-    cls = {"letter": "une lettre", "upper": "une majuscule", "lower": "une minuscule",
-           "digit": "un chiffre", "alnum": "alphanumérique"}.get(r.get("charclass"), r.get("charclass") or "?")
+    cls = {
+        "letter": "une lettre",
+        "upper": "une majuscule",
+        "lower": "une minuscule",
+        "digit": "un chiffre",
+        "alnum": "alphanumérique",
+    }.get(r.get("charclass"), r.get("charclass") or "?")
     body = {
         "starts_with": f"{_col(col)} commence par {_q(v)}",
         "ends_with": f"{_col(col)} finit par {_q(v)}",
@@ -173,9 +234,9 @@ def _describe_rules(cond: dict, default_col) -> list[str]:
     if not groups:
         return ["(aucune règle — ne filtre rien)"]
 
-    disjuncts = []                      # ordered list of phrase strings (the OR terms)
-    buckets = {}                        # (col, test) -> index into disjuncts (placeholder)
-    bucket_vals = {}                    # (col, test) -> [values]
+    disjuncts = []  # ordered list of phrase strings (the OR terms)
+    buckets = {}  # (col, test) -> index into disjuncts (placeholder)
+    bucket_vals = {}  # (col, test) -> [values]
 
     for g in groups:
         rules = g.get("rules") or []
@@ -185,22 +246,29 @@ def _describe_rules(cond: dict, default_col) -> list[str]:
             r = rules[0]
             col = r.get("column") or cond.get("column") or default_col
             test = r.get("test")
-            mergeable = (test in _MERGEABLE and not r.get("negate")
-                         and r.get("value") not in (None, ""))
-            if test == "is_in" and not r.get("negate"):    # a list test folds into equals
+            mergeable = (
+                test in _MERGEABLE and not r.get("negate") and r.get("value") not in (None, "")
+            )
+            if test == "is_in" and not r.get("negate"):  # a list test folds into equals
                 key = (col, "equals")
                 if key not in buckets:
-                    buckets[key] = len(disjuncts); disjuncts.append(None); bucket_vals[key] = []
-                bucket_vals[key].extend(p.strip() for p in str(r.get("value", "")).split(",") if p.strip())
+                    buckets[key] = len(disjuncts)
+                    disjuncts.append(None)
+                    bucket_vals[key] = []
+                bucket_vals[key].extend(
+                    p.strip() for p in str(r.get("value", "")).split(",") if p.strip()
+                )
                 continue
             if mergeable:
                 key = (col, test)
                 if key not in buckets:
-                    buckets[key] = len(disjuncts); disjuncts.append(None); bucket_vals[key] = []
+                    buckets[key] = len(disjuncts)
+                    disjuncts.append(None)
+                    bucket_vals[key] = []
                 bucket_vals[key].append(r.get("value"))
                 continue
             disjuncts.append(_rule_phrase(r, default_col))
-        else:                            # an AND group: keep the conjunction explicit
+        else:  # an AND group: keep the conjunction explicit
             sub = " ET ".join(_rule_phrase(r, default_col) for r in rules)
             disjuncts.append(f"({sub})")
 
@@ -229,10 +297,16 @@ def _describe_condition(cond: dict, default_col) -> list[str]:
         return [f"{_col(cond.get('column') or default_col)} suit le format : " + " + ".join(parts)]
     if kind == "group":
         keys = ", ".join(_q(c) for c in (cond.get("group_by") or [])) or "(toute la table)"
-        checks = cond.get("checks") or [{"check": cond.get("check"), "column": cond.get("column"),
-                                         "n": cond.get("n"), "value": cond.get("value")}]
+        checks = cond.get("checks") or [
+            {
+                "check": cond.get("check"),
+                "column": cond.get("column"),
+                "n": cond.get("n"),
+                "value": cond.get("value"),
+            }
+        ]
 
-        def _rules_inline(dnf):                       # premise / consequent rules -> one phrase
+        def _rules_inline(dnf):  # premise / consequent rules -> one phrase
             groups = [g for g in ((dnf or {}).get("groups") or []) if (g.get("rules") or [])]
             return " ".join(_describe_rules({"groups": groups}, default_col)) if groups else ""
 
@@ -260,8 +334,16 @@ def _describe_condition(cond: dict, default_col) -> list[str]:
 
 def _seg_label(seg: dict) -> str:
     t = seg.get("type") or "any"
-    names = {"literal": None, "letter": "lettres", "upper": "MAJ", "lower": "min",
-             "digit": "chiffres", "alnum": "alphanum.", "set": f"[{seg.get('value') or ''}]", "any": "tout"}
+    names = {
+        "literal": None,
+        "letter": "lettres",
+        "upper": "MAJ",
+        "lower": "min",
+        "digit": "chiffres",
+        "alnum": "alphanum.",
+        "set": f"[{seg.get('value') or ''}]",
+        "any": "tout",
+    }
     if t == "literal":
         return _q(seg.get("value") or "")
     base = names.get(t, t)
@@ -349,9 +431,16 @@ def _d_sql(d, ins, a2l, wf):
         if jtype == "CROSS":
             out.append(f"Jointure croisée (toutes les combinaisons) avec {_q(tgt)}.")
         else:
-            conds = " et ".join(f"{_col(o.get('left_column'))} = {_col(o.get('right_column'))}"
-                                for o in (j.get("on") or []))
-            kind = {"INNER": "interne", "LEFT": "à gauche", "RIGHT": "à droite", "FULL": "complète"}.get(jtype, jtype)
+            conds = " et ".join(
+                f"{_col(o.get('left_column'))} = {_col(o.get('right_column'))}"
+                for o in (j.get("on") or [])
+            )
+            kind = {
+                "INNER": "interne",
+                "LEFT": "à gauche",
+                "RIGHT": "à droite",
+                "FULL": "complète",
+            }.get(jtype, jtype)
             out.append(f"Jointure {kind} avec {_q(tgt)} (appariées quand {conds}).")
     if q.get("where"):
         out.append("Ne conserve que les lignes où : " + _sql_chain(q["where"], a2l) + ".")
@@ -361,8 +450,10 @@ def _d_sql(d, ins, a2l, wf):
     if q.get("having"):
         out.append("Ne garde que les groupes où : " + _sql_chain(q["having"], a2l) + ".")
     if q.get("order_by"):
-        parts = [f"{_col(o.get('column'))} ({'décroissant' if (o.get('dir') or 'ASC').upper() == 'DESC' else 'croissant'})"
-                 for o in q["order_by"]]
+        parts = [
+            f"{_col(o.get('column'))} ({'décroissant' if (o.get('dir') or 'ASC').upper() == 'DESC' else 'croissant'})"
+            for o in q["order_by"]
+        ]
         out.append("Trie par " + ", ".join(parts) + ".")
     if q.get("limit") not in (None, "", 0, "0"):
         out.append(f"Limite à {q['limit']} ligne(s).")
@@ -373,9 +464,11 @@ def _d_dedup(d, ins, a2l, wf):
     keys = d.get("key_columns") or []
     keytxt = ", ".join(_q(k) for k in keys) if keys else "la ligne entière"
     keep = "la dernière" if d.get("keep") == "last" else "la première"
-    dups = {"all": "toutes les occurrences des groupes en double",
-            "exemplar": "un exemplaire par groupe en double",
-            "extra": "seulement les occurrences en trop"}.get(d.get("dups_mode", "all"))
+    dups = {
+        "all": "toutes les occurrences des groupes en double",
+        "exemplar": "un exemplaire par groupe en double",
+        "extra": "seulement les occurrences en trop",
+    }.get(d.get("dups_mode", "all"))
     return [
         f"Repère les doublons sur : {keytxt}.",
         f"Conserve {keep} occurrence de chaque groupe.",
@@ -386,7 +479,11 @@ def _d_dedup(d, ins, a2l, wf):
 
 def _d_validate(d, ins, a2l, wf):
     intent = d.get("intent")
-    out = ["Contrôle de conformité." if intent == "control" else "Aiguille les lignes selon des conditions."]
+    out = [
+        "Contrôle de conformité."
+        if intent == "control"
+        else "Aiguille les lignes selon des conditions."
+    ]
     if d.get("target_column"):
         out.append(f"Colonne contrôlée par défaut : {_q(d['target_column'])}.")
     if d.get("case_sensitive"):
@@ -402,11 +499,15 @@ def _d_validate(d, ins, a2l, wf):
         cond = conds.get(m.get("conditionId"))
         cname = cond.get("name") if cond else "(aucune condition)"
         sense = "ne vérifient PAS" if m.get("negate") else "vérifient"
-        out.append(f"→ Sortie {_q(o.get('label') or o.get('id'))} : les lignes qui {sense} la condition {_q(cname)}.")
+        out.append(
+            f"→ Sortie {_q(o.get('label') or o.get('id'))} : les lignes qui {sense} la condition {_q(cname)}."
+        )
     if d.get("routing", "first") == "first":
         out.append("Chaque ligne est dirigée vers la première sortie dont la condition est vraie.")
     if d.get("else_enabled", True):
-        out.append(f"→ Sortie {_q(d.get('else_label') or 'Non classé')} : les lignes ne correspondant à aucune condition.")
+        out.append(
+            f"→ Sortie {_q(d.get('else_label') or 'Non classé')} : les lignes ne correspondant à aucune condition."
+        )
     if d.get("add_flag"):
         out.append("Ajoute une colonne « valide » (oui / non).")
     if d.get("add_reason"):
@@ -417,21 +518,31 @@ def _d_validate(d, ins, a2l, wf):
 def _d_pivot(d, ins, a2l, wf):
     if d.get("mode") == "unpivot":
         vcs = ", ".join(_q(c) for c in (d.get("value_columns") or []))
-        return [f"Dépivote les colonnes {vcs} en deux colonnes : "
-                f"{_q(d.get('name_column') or 'variable')} (le nom) et {_q(d.get('value_column') or 'valeur')} (la valeur)."]
+        return [
+            f"Dépivote les colonnes {vcs} en deux colonnes : "
+            f"{_q(d.get('name_column') or 'variable')} (le nom) et {_q(d.get('value_column') or 'valeur')} (la valeur)."
+        ]
     idx = ", ".join(_q(c) for c in (d.get("index_columns") or []))
     agg = _AGG_FR.get((d.get("agg") or "SUM").upper(), d.get("agg"))
-    return [f"Pivote (tableau croisé) : garde {idx} en lignes, "
-            f"éclate {_col(d.get('pivot_column'))} en colonnes, "
-            f"valeurs = {agg} de {_col(d.get('value_column'))}."]
+    return [
+        f"Pivote (tableau croisé) : garde {idx} en lignes, "
+        f"éclate {_col(d.get('pivot_column'))} en colonnes, "
+        f"valeurs = {agg} de {_col(d.get('value_column'))}."
+    ]
 
 
 _CLEAN_FR = {
-    "trim": "supprime les espaces de début/fin", "upper": "met en MAJUSCULES",
-    "lower": "met en minuscules", "capitalize": "met une Majuscule en tête",
-    "replace": "remplace du texte", "fillna": "remplit les valeurs vides",
-    "to_number": "convertit en nombre", "to_integer": "convertit en entier",
-    "to_date": "convertit en date", "round": "arrondit", "abs": "valeur absolue",
+    "trim": "supprime les espaces de début/fin",
+    "upper": "met en MAJUSCULES",
+    "lower": "met en minuscules",
+    "capitalize": "met une Majuscule en tête",
+    "replace": "remplace du texte",
+    "fillna": "remplit les valeurs vides",
+    "to_number": "convertit en nombre",
+    "to_integer": "convertit en entier",
+    "to_date": "convertit en date",
+    "round": "arrondit",
+    "abs": "valeur absolue",
 }
 
 
@@ -444,7 +555,9 @@ def _d_clean(d, ins, a2l, wf):
         label = _CLEAN_FR.get(o.get("op"), o.get("op"))
         line = f"   {i}. {label} sur {_col(o.get('column'))}"
         if o.get("op") == "replace":
-            line += f" — {_q(o.get('find'))} → {_q(o.get('replace'))}" + (" (regex)" if o.get("regex") else "")
+            line += f" — {_q(o.get('find'))} → {_q(o.get('replace'))}" + (
+                " (regex)" if o.get("regex") else ""
+            )
         elif o.get("op") == "fillna":
             line += f" — par {_q(o.get('value'))}"
         elif o.get("op") == "to_date" and o.get("format"):
@@ -463,18 +576,27 @@ def _calc_op_text(item) -> str:
     c = op.get("column")
     if kind == "extract":
         w = op.get("what") or "after_sep"
-        what = {"after_sep": f"le texte après {_q(op.get('sep'))}",
-                "before_sep": f"le texte avant {_q(op.get('sep'))}",
-                "first_n": f"les {op.get('n', 1)} premiers caractères",
-                "last_n": f"les {op.get('n', 1)} derniers caractères",
-                "mid": f"{op.get('n', 5)} caractères à partir de la position {op.get('start', 1)}"}.get(w, w)
+        what = {
+            "after_sep": f"le texte après {_q(op.get('sep'))}",
+            "before_sep": f"le texte avant {_q(op.get('sep'))}",
+            "first_n": f"les {op.get('n', 1)} premiers caractères",
+            "last_n": f"les {op.get('n', 1)} derniers caractères",
+            "mid": f"{op.get('n', 5)} caractères à partir de la position {op.get('start', 1)}",
+        }.get(w, w)
         return f"extrait {what} de {_col(c)}"
     if kind == "transform":
-        t = {"upper": "en MAJUSCULES", "lower": "en minuscules", "trim": "sans espaces superflus",
-             "replace": f"en remplaçant {_q(op.get('find'))} par {_q(op.get('replace'))}"}.get(op.get("transform"), op.get("transform"))
+        t = {
+            "upper": "en MAJUSCULES",
+            "lower": "en minuscules",
+            "trim": "sans espaces superflus",
+            "replace": f"en remplaçant {_q(op.get('find'))} par {_q(op.get('replace'))}",
+        }.get(op.get("transform"), op.get("transform"))
         return f"{_col(c)} {t}"
     if kind == "combine":
-        segs = [(_q(p.get("value")) if p.get("type") == "text" else _col(p.get("value"))) for p in (op.get("parts") or [])]
+        segs = [
+            (_q(p.get("value")) if p.get("type") == "text" else _col(p.get("value")))
+            for p in (op.get("parts") or [])
+        ]
         sep = f" séparées par {_q(op.get('sep'))}" if op.get("sep") else ""
         return "colle " + " + ".join(segs) + sep
     if kind == "condition":
@@ -496,21 +618,33 @@ def _d_calc(d, ins, a2l, wf):
         for f in gfuncs:
             if f.get("fn") == "value_when":
                 src = f.get("source") or {}
-                src_txt = f"la formule {_q(src.get('expr'))}" if src.get("kind") == "formula" \
+                src_txt = (
+                    f"la formule {_q(src.get('expr'))}"
+                    if src.get("kind") == "formula"
                     else f"la valeur de {_col(src.get('column'))}"
+                )
                 cond_lines = _describe_rules(f.get("condition") or {}, None)
                 cond_txt = " ".join(cond_lines).strip() or "(condition à définir)"
                 red = _VW_REDUCER_FR.get(f.get("reducer") or "first", "la première")
                 fb = f.get("fallback") or {}
-                fb_txt = (f", sinon « {fb.get('value')} »" if fb.get("mode") == "value"
-                          else ", sinon vide")
-                out.append(f"   • {_q(f.get('name'))} = {src_txt} sur les lignes où {cond_txt} "
-                           f"(si plusieurs : {red}){fb_txt}")
+                fb_txt = (
+                    f", sinon « {fb.get('value')} »"
+                    if fb.get("mode") == "value"
+                    else ", sinon vide"
+                )
+                out.append(
+                    f"   • {_q(f.get('name'))} = {src_txt} sur les lignes où {cond_txt} "
+                    f"(si plusieurs : {red}){fb_txt}"
+                )
                 continue
             fn = _GROUP_FN_FR.get(f.get("fn"), f.get("fn"))
             tgt = f" {_col(f.get('column'))}" if f.get("column") else ""
             out.append(f"   • {_q(f.get('name'))} = {fn}{tgt}")
-    cols = [c for c in (d.get("columns") or []) if c.get("enabled") is not False and (c.get("name") or "").strip()]
+    cols = [
+        c
+        for c in (d.get("columns") or [])
+        if c.get("enabled") is not False and (c.get("name") or "").strip()
+    ]
     if cols:
         out.append(f"Ajoute {len(cols)} colonne(s) calculée(s) :")
         for c in cols:
@@ -524,10 +658,15 @@ def _d_filter(d, ins, a2l, wf):
     ref = a2l.get("ref", "(référence non branchée)")
     keep = d.get("mode", "keep") != "exclude"
     verb = "Ne conserve que" if keep else "Retire"
-    out = [f"{verb} les lignes dont {_col(d.get('column'))} figure dans "
-           f"{_col(d.get('ref_column'))} du tableau de référence {_q(ref)}."]
-    out.append("Type : semi-jointure (filtre par présence)." if keep
-               else "Type : anti-jointure (filtre par absence).")
+    out = [
+        f"{verb} les lignes dont {_col(d.get('column'))} figure dans "
+        f"{_col(d.get('ref_column'))} du tableau de référence {_q(ref)}."
+    ]
+    out.append(
+        "Type : semi-jointure (filtre par présence)."
+        if keep
+        else "Type : anti-jointure (filtre par absence)."
+    )
     if d.get("case_insensitive"):
         out.append("Comparaison insensible à la casse.")
     out.append("Aucune colonne de la référence n'est ajoutée — seules les lignes sont filtrées.")
@@ -590,15 +729,27 @@ def _d_report(d, ins, a2l, wf):
     if note:
         out.append(f"Note : {note}")
     cols = d.get("columns") or []
-    out.append("Analyse de " + (", ".join(_q(c) for c in cols) if cols else "toutes les colonnes")
-               + " — voir « Analyse des colonnes » plus bas.")
+    out.append(
+        "Analyse de "
+        + (", ".join(_q(c) for c in cols) if cols else "toutes les colonnes")
+        + " — voir « Analyse des colonnes » plus bas."
+    )
     return out
 
 
 _DESCRIBERS = {
-    "source": _d_source, "sql": _d_sql, "dedup": _d_dedup, "validate": _d_validate,
-    "pivot": _d_pivot, "clean": _d_clean, "calc": _d_calc, "filter": _d_filter,
-    "cols": _d_cols, "report": _d_report, "union": _d_union, "export": _d_export,
+    "source": _d_source,
+    "sql": _d_sql,
+    "dedup": _d_dedup,
+    "validate": _d_validate,
+    "pivot": _d_pivot,
+    "clean": _d_clean,
+    "calc": _d_calc,
+    "filter": _d_filter,
+    "cols": _d_cols,
+    "report": _d_report,
+    "union": _d_union,
+    "export": _d_export,
 }
 
 
@@ -631,7 +782,7 @@ _ROW_BORDER = Border(bottom=_thin)
 _HEAD_BORDER = Border(bottom=Side(style="medium", color="9AA6BC"))
 
 _STEP_COLS = [("Étape", 7), ("Bloc", 24), ("Type", 13), ("Entrées", 24), ("Traitement", 90)]
-_DESC_WRAP = 92                                    # ~chars before the Traitement cell wraps
+_DESC_WRAP = 92  # ~chars before the Traitement cell wraps
 
 
 def _autoheight(ws, row, text):
@@ -644,7 +795,7 @@ def _unique_sheet_name(base: str, used: set) -> str:
     name, k = base, 2
     while name.lower() in used:
         sfx = f" ({k})"
-        name = base[:31 - len(sfx)] + sfx
+        name = base[: 31 - len(sfx)] + sfx
         k += 1
     used.add(name.lower())
     return name
@@ -656,7 +807,10 @@ def _steps_table(ws, start_row, step_ids, nodes, incoming, label_of, wf_name):
     for j, (title, width) in enumerate(_STEP_COLS, 1):
         ws.column_dimensions[get_column_letter(j)].width = width
         c = ws.cell(start_row, j, title)
-        c.font = _HEAD; c.fill = _HEAD_FILL; c.alignment = _TOP; c.border = _HEAD_BORDER
+        c.font = _HEAD
+        c.fill = _HEAD_FILL
+        c.alignment = _TOP
+        c.border = _HEAD_BORDER
     ws.freeze_panes = ws.cell(start_row + 1, 1)
 
     r = start_row + 1
@@ -699,7 +853,9 @@ def _write_report_analysis(ws, start_row, pid, wid, node_id, d):
         _autoheight(ws, r, "Note : " + note)
         r += 1
     if not report:
-        ws.cell(r, 2, "Exécutez le workflow pour générer les analyses (le bloc n'a pas encore tourné).").font = _META
+        ws.cell(
+            r, 2, "Exécutez le workflow pour générer les analyses (le bloc n'a pas encore tourné)."
+        ).font = _META
         return r + 1
     analyses = report.get("analyses") or []
     if not analyses:
@@ -716,14 +872,20 @@ def _write_one_analysis(ws, r, a):
     if a.get("kind") == "keys":
         return _write_keys_analysis(ws, r, a)
     ws.cell(r, 1, a.get("title") or a.get("column") or "Analyse").font = _BODY_STRONG
-    ws.cell(r, 3, f"colonne « {a.get('column')} » · {a.get('distinct', 0)} distinctes · "
-                  f"{a.get('nulls', 0)} vides ({a.get('null_pct', 0)}%) · "
-                  f"{a.get('total', 0)} lignes").font = _META
+    ws.cell(
+        r,
+        3,
+        f"colonne « {a.get('column')} » · {a.get('distinct', 0)} distinctes · "
+        f"{a.get('nulls', 0)} vides ({a.get('null_pct', 0)}%) · "
+        f"{a.get('total', 0)} lignes",
+    ).font = _META
     r += 1
     header_row = r
     for col, t in ((2, "Catégorie"), (3, "Occurrences")):
         cell = ws.cell(r, col, t)
-        cell.font = _HEAD; cell.fill = _HEAD_FILL; cell.border = _HEAD_BORDER
+        cell.font = _HEAD
+        cell.fill = _HEAD_FILL
+        cell.border = _HEAD_BORDER
     r += 1
     data_first = r
     buckets = list(a.get("buckets") or [])
@@ -741,16 +903,18 @@ def _write_one_analysis(ws, r, a):
     if a.get("chart") != "table" and data_last >= data_first:
         chart = PieChart() if a.get("chart") == "pie" else BarChart()
         if isinstance(chart, BarChart):
-            chart.type = "bar"            # horizontal bars read better with text categories
+            chart.type = "bar"  # horizontal bars read better with text categories
             chart.legend = None
-        data = Reference(ws, min_col=3, min_row=header_row, max_row=data_last)   # incl. header as series name
+        data = Reference(
+            ws, min_col=3, min_row=header_row, max_row=data_last
+        )  # incl. header as series name
         cats = Reference(ws, min_col=2, min_row=data_first, max_row=data_last)
         chart.add_data(data, titles_from_data=True)
         chart.set_categories(cats)
         chart.title = a.get("title")
         chart.height, chart.width = 6.5, 11
         ws.add_chart(chart, f"E{header_row}")
-        chart_bottom = header_row + 13    # reserve ~ the chart's vertical span
+        chart_bottom = header_row + 13  # reserve ~ the chart's vertical span
     return max(r, chart_bottom)
 
 
@@ -765,8 +929,11 @@ def _write_keys_analysis(ws, r, a):
         ws.cell(r, 2, a["error"]).font = _META
         return r + 1
 
-    verdict = ("Clé candidate (valeurs uniques)" if a.get("unique")
-               else f"Non unique — {a.get('dup_keys', 0)} clé(s) en doublon")
+    verdict = (
+        "Clé candidate (valeurs uniques)"
+        if a.get("unique")
+        else f"Non unique — {a.get('dup_keys', 0)} clé(s) en doublon"
+    )
     ws.cell(r, 2, "Verdict").font = _HEAD
     ws.cell(r, 3, verdict).font = _BODY_STRONG
     r += 1
@@ -774,45 +941,63 @@ def _write_keys_analysis(ws, r, a):
     def _kv_table(rows, head=("", "")):
         nonlocal r
         for col, t in ((2, head[0]), (3, head[1])):
-            cell = ws.cell(r, col, t); cell.font = _HEAD; cell.fill = _HEAD_FILL; cell.border = _HEAD_BORDER
+            cell = ws.cell(r, col, t)
+            cell.font = _HEAD
+            cell.fill = _HEAD_FILL
+            cell.border = _HEAD_BORDER
         r += 1
         for k, v in rows:
             ws.cell(r, 2, k).font = _BODY
-            cell = ws.cell(r, 3, v); cell.font = _BODY
+            cell = ws.cell(r, 3, v)
+            cell.font = _BODY
             for col in (2, 3):
                 ws.cell(r, col).border = _ROW_BORDER
             r += 1
 
-    _kv_table([
-        ("Lignes", int(a.get("total", 0))),
-        ("Clés distinctes", int(a.get("distinct_keys", 0))),
-        ("Clés en doublon", int(a.get("dup_keys", 0))),
-        ("Lignes en doublon", int(a.get("rows_in_dups", 0))),
-        ("Clés uniques (singletons)", int(a.get("singletons", 0))),
-        ("Clés incomplètes (vides)", int(a.get("null_keys", 0))),
-        ("Taux d'unicité", f"{a.get('uniqueness_pct', 0)}%"),
-        ("Taille de groupe (min / moy / méd / max)",
-         f"{a.get('group_min', 0)} / {a.get('group_avg', 0)} / "
-         f"{a.get('group_median', 0)} / {a.get('group_max', 0)}"),
-    ], head=("Cardinalité", ""))
+    _kv_table(
+        [
+            ("Lignes", int(a.get("total", 0))),
+            ("Clés distinctes", int(a.get("distinct_keys", 0))),
+            ("Clés en doublon", int(a.get("dup_keys", 0))),
+            ("Lignes en doublon", int(a.get("rows_in_dups", 0))),
+            ("Clés uniques (singletons)", int(a.get("singletons", 0))),
+            ("Clés incomplètes (vides)", int(a.get("null_keys", 0))),
+            ("Taux d'unicité", f"{a.get('uniqueness_pct', 0)}%"),
+            (
+                "Taille de groupe (min / moy / méd / max)",
+                f"{a.get('group_min', 0)} / {a.get('group_avg', 0)} / "
+                f"{a.get('group_median', 0)} / {a.get('group_max', 0)}",
+            ),
+        ],
+        head=("Cardinalité", ""),
+    )
     r += 1
 
     dist = a.get("distribution") or []
     if dist:
-        _kv_table([(f"groupes de {b['key']}", int(b["count"])) for b in dist],
-                  head=("Taille de groupe", "Nb de clés"))
+        _kv_table(
+            [(f"groupes de {b['key']}", int(b["count"])) for b in dist],
+            head=("Taille de groupe", "Nb de clés"),
+        )
         r += 1
 
     cons = a.get("consistency") or []
     if cons:
         for col, t in ((2, "Colonne"), (3, "Cohérence par clé")):
-            cell = ws.cell(r, col, t); cell.font = _HEAD; cell.fill = _HEAD_FILL; cell.border = _HEAD_BORDER
+            cell = ws.cell(r, col, t)
+            cell.font = _HEAD
+            cell.fill = _HEAD_FILL
+            cell.border = _HEAD_BORDER
         r += 1
         for e in cons:
             ws.cell(r, 2, e["column"]).font = _BODY
-            txt = ("constante (clé → colonne)" if e.get("constant")
-                   else f"varie dans {e.get('varying_groups', 0)} groupe(s)")
-            cell = ws.cell(r, 3, txt); cell.font = _BODY
+            txt = (
+                "constante (clé → colonne)"
+                if e.get("constant")
+                else f"varie dans {e.get('varying_groups', 0)} groupe(s)"
+            )
+            cell = ws.cell(r, 3, txt)
+            cell.font = _BODY
             for col in (2, 3):
                 ws.cell(r, col).border = _ROW_BORDER
             r += 1
@@ -823,12 +1008,16 @@ def _write_keys_analysis(ws, r, a):
         if not groups:
             return
         for col, t in ((2, title), (3, "Lignes")):
-            cell = ws.cell(r, col, t); cell.font = _HEAD; cell.fill = _HEAD_FILL; cell.border = _HEAD_BORDER
+            cell = ws.cell(r, col, t)
+            cell.font = _HEAD
+            cell.fill = _HEAD_FILL
+            cell.border = _HEAD_BORDER
         r += 1
         for grp in groups:
             label = " · ".join(f"{k}={v}" for k, v in (grp.get("key") or {}).items())
             ws.cell(r, 2, label or "—").font = _BODY
-            cell = ws.cell(r, 3, int(grp.get("size", 0))); cell.font = _BODY
+            cell = ws.cell(r, 3, int(grp.get("size", 0)))
+            cell.font = _BODY
             for col in (2, 3):
                 ws.cell(r, col).border = _ROW_BORDER
             r += 1
@@ -846,10 +1035,12 @@ def build_workbook(pid: str, wid: str) -> bytes:
     name = (wf.get("name") or "Workflow").strip() or "Workflow"
 
     nodes = {n["id"]: n for n in wf.get("nodes", []) if n.get("type") not in ("frame", "group")}
-    edges = [e for e in wf.get("edges", []) if e.get("source") in nodes and e.get("target") in nodes]
+    edges = [
+        e for e in wf.get("edges", []) if e.get("source") in nodes and e.get("target") in nodes
+    ]
     order = engine._topo_order(nodes, edges)
 
-    incoming = {nid: [] for nid in nodes}             # node -> [(handle, source_id)]
+    incoming = {nid: [] for nid in nodes}  # node -> [(handle, source_id)]
     for e in edges:
         incoming[e["target"]].append((e.get("targetHandle") or "in", e.get("source")))
     for nid in incoming:
@@ -857,7 +1048,7 @@ def build_workbook(pid: str, wid: str) -> bytes:
 
     def label_of(nid):
         n = nodes[nid]
-        return (n["data"].get("label") or TYPE_LABEL.get(n["type"], n["type"]))
+        return n["data"].get("label") or TYPE_LABEL.get(n["type"], n["type"])
 
     wb = Workbook()
     synth = wb.active
@@ -875,8 +1066,7 @@ def build_workbook(pid: str, wid: str) -> bytes:
             node = nodes[sid]
             d = node.get("data") or {}
             is_report = node["type"] == "report"
-            base = (label_of(sid) if is_report
-                    else _sanitize_filename(d.get("filename"), "resultat"))
+            base = label_of(sid) if is_report else _sanitize_filename(d.get("filename"), "resultat")
             sn = _unique_sheet_name(_sanitize_sheet_name(base), used_names)
             tab_of[sid] = sn
             ws = wb.create_sheet(sn)
@@ -885,18 +1075,30 @@ def build_workbook(pid: str, wid: str) -> bytes:
 
             if is_report:
                 ws.cell(1, 1, f"État des lieux : {label_of(sid)}").font = _TITLE
-                ws.cell(2, 1, "Bloc d'analyse (non exporté) — profil des données plus bas.").font = _META
+                ws.cell(
+                    2, 1, "Bloc d'analyse (non exporté) — profil des données plus bas."
+                ).font = _META
             else:
                 ws.cell(1, 1, f"Fichier de sortie : {_output_target(d, name)}").font = _TITLE
-                ws.cell(2, 1, f"Bloc Export « {label_of(sid)} » — {_describe_block(node, [], {}, name)[0]}").font = _META
-            ws.cell(3, 1, f"Produit par {len(steps)} étape(s) de traitement, dans l'ordre d'exécution ci-dessous :").font = _BODY
+                ws.cell(
+                    2,
+                    1,
+                    f"Bloc Export « {label_of(sid)} » — {_describe_block(node, [], {}, name)[0]}",
+                ).font = _META
+            ws.cell(
+                3,
+                1,
+                f"Produit par {len(steps)} étape(s) de traitement, dans l'ordre d'exécution ci-dessous :",
+            ).font = _BODY
             next_row = _steps_table(ws, 5, steps, nodes, incoming, label_of, name)
             if is_report:
                 _write_report_analysis(ws, next_row + 1, pid, wid, sid, d)
     else:
         ws = wb.create_sheet(_unique_sheet_name("Traitements", used_names))
         ws.cell(1, 1, "Traitements du workflow").font = _TITLE
-        ws.cell(2, 1, "Ce workflow n'a pas de bloc Export ; voici tous ses traitements, dans l'ordre.").font = _META
+        ws.cell(
+            2, 1, "Ce workflow n'a pas de bloc Export ; voici tous ses traitements, dans l'ordre."
+        ).font = _META
         _steps_table(ws, 4, order, nodes, incoming, label_of, name)
 
     _build_synthesis(synth, name, nodes, order, export_ids, report_ids, tab_of, label_of)
@@ -919,8 +1121,12 @@ def _build_synthesis(ws, name, nodes, order, export_ids, report_ids, tab_of, lab
         return row + 1
 
     ws.cell(1, 1, f"Documentation du workflow : {name}").font = _TITLE
-    ws.cell(2, 1, f"Généré le {datetime.now().strftime('%d/%m/%Y à %H:%M')} — document explicatif, "
-                  "lecture sans l'application.").font = _META
+    ws.cell(
+        2,
+        1,
+        f"Généré le {datetime.now().strftime('%d/%m/%Y à %H:%M')} — document explicatif, "
+        "lecture sans l'application.",
+    ).font = _META
     r = 4
 
     r = section(r, "Comment lire ce document")
@@ -965,15 +1171,18 @@ def _build_synthesis(ws, name, nodes, order, export_ids, report_ids, tab_of, lab
         for eid in export_ids:
             d = nodes[eid].get("data") or {}
             target = _output_target(d, name)
-            disabled = (d.get("enabled") is False)
+            disabled = d.get("enabled") is False
             ws.cell(r, 1, "•").font = _BODY
             cell = ws.cell(r, 2, target + ("   (désactivé)" if disabled else ""))
             cell.font = _BODY
             ws.cell(r, 3, tab_of.get(eid, "")).font = _BODY
             r += 1
     else:
-        msg = ("(aucun fichier exporté — ce workflow ne fait que des analyses, voir ci-dessous)"
-               if report_ids else "(aucun bloc Export — voir l'onglet « Traitements »)")
+        msg = (
+            "(aucun fichier exporté — ce workflow ne fait que des analyses, voir ci-dessous)"
+            if report_ids
+            else "(aucun bloc Export — voir l'onglet « Traitements »)"
+        )
         ws.cell(r, 2, msg).font = _META
         r += 1
     r += 1

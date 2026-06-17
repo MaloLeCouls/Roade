@@ -14,7 +14,9 @@ export default function ProjectView({ pid, onOpenWorkflow }) {
     setFiles(await api.listFiles(pid))
     setWorkflows(await api.listWorkflows(pid))
   }
-  useEffect(() => { reload() }, [pid])
+  useEffect(() => {
+    reload()
+  }, [pid])
 
   const upload = async (e) => {
     const list = Array.from(e.target.files || [])
@@ -30,17 +32,36 @@ export default function ProjectView({ pid, onOpenWorkflow }) {
   }
 
   const openFile = async (name, subdir) => {
-    try { await api.openFile(pid, name, subdir) }
-    catch (e) { alert(`Impossible d'ouvrir le fichier : ${e.message}`) }
+    try {
+      await api.openFile(pid, name, subdir)
+    } catch (e) {
+      alert(`Impossible d'ouvrir le fichier : ${e.message}`)
+    }
   }
 
   const fileRow = (f) => (
     <li key={`${f.subdir || ''}/${f.name}`}>
-      <span className="fname"><Icon name="file" size={13} /> {f.name}</span>
+      <span className="fname">
+        <Icon name="file" size={13} /> {f.name}
+      </span>
       <span className="fsize">{fmtSize(f.size)}</span>
-      <button className="ghost small" onClick={() => openFile(f.name, f.subdir)} title="Ouvrir dans l'application par défaut"><Icon name="external" /></button>
-      <a className="ghost small" href={api.downloadUrl(pid, f.name, f.subdir)} title="Télécharger"><Icon name="download" /></a>
-      <button className="ghost danger small" onClick={() => delFile(f.name, f.subdir)} title="Supprimer"><Icon name="trash" /></button>
+      <button
+        className="ghost small"
+        onClick={() => openFile(f.name, f.subdir)}
+        title="Ouvrir dans l'application par défaut"
+      >
+        <Icon name="external" />
+      </button>
+      <a className="ghost small" href={api.downloadUrl(pid, f.name, f.subdir)} title="Télécharger">
+        <Icon name="download" />
+      </a>
+      <button
+        className="ghost danger small"
+        onClick={() => delFile(f.name, f.subdir)}
+        title="Supprimer"
+      >
+        <Icon name="trash" />
+      </button>
     </li>
   )
 
@@ -58,7 +79,12 @@ export default function ProjectView({ pid, onOpenWorkflow }) {
     setWorkflows(await api.listWorkflows(pid))
   }
 
-  if (!project) return <div className="page"><p className="muted">Chargement…</p></div>
+  if (!project)
+    return (
+      <div className="page">
+        <p className="muted">Chargement…</p>
+      </div>
+    )
 
   const sources = files.filter((f) => f.origin !== 'export')
   const exportFiles = files.filter((f) => f.origin === 'export')
@@ -103,21 +129,27 @@ export default function ProjectView({ pid, onOpenWorkflow }) {
             <>
               {sources.length > 0 && (
                 <div className="file-group">
-                  <div className="file-group-head">Sources <span className="fg-count">{sources.length}</span></div>
+                  <div className="file-group-head">
+                    Sources <span className="fg-count">{sources.length}</span>
+                  </div>
                   <ul className="list">{sources.map(fileRow)}</ul>
                 </div>
               )}
               {exportFiles.length > 0 && (
                 <div className="file-group">
-                  <div className="file-group-head">Exports générés <span className="fg-count">{exportFiles.length}</span></div>
-                  {Object.keys(exportsByWf).sort().map((wf) => (
-                    <div key={wf} className="file-subgroup">
-                      <div className="file-subgroup-head">
-                        <Icon name="folder" size={12} /> {wf || '(racine)'}
+                  <div className="file-group-head">
+                    Exports générés <span className="fg-count">{exportFiles.length}</span>
+                  </div>
+                  {Object.keys(exportsByWf)
+                    .sort()
+                    .map((wf) => (
+                      <div key={wf} className="file-subgroup">
+                        <div className="file-subgroup-head">
+                          <Icon name="folder" size={12} /> {wf || '(racine)'}
+                        </div>
+                        <ul className="list">{exportsByWf[wf].map(fileRow)}</ul>
                       </div>
-                      <ul className="list">{exportsByWf[wf].map(fileRow)}</ul>
-                    </div>
-                  ))}
+                    ))}
                 </div>
               )}
             </>
@@ -134,7 +166,9 @@ export default function ProjectView({ pid, onOpenWorkflow }) {
                 onChange={(e) => setWfName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && createWf()}
               />
-              <button className="primary small" onClick={createWf}>Nouveau</button>
+              <button className="primary small" onClick={createWf}>
+                Nouveau
+              </button>
             </div>
           </div>
           {workflows.length === 0 ? (
@@ -143,8 +177,16 @@ export default function ProjectView({ pid, onOpenWorkflow }) {
             <ul className="list">
               {workflows.map((w) => (
                 <li key={w.id} className="clickable" onClick={() => onOpenWorkflow(w.id)}>
-                  <span className="fname"><Icon name="flow" size={13} /> {w.name}</span>
-                  <button className="ghost danger small" onClick={(e) => delWf(w.id, e)} title="Supprimer"><Icon name="trash" /></button>
+                  <span className="fname">
+                    <Icon name="flow" size={13} /> {w.name}
+                  </span>
+                  <button
+                    className="ghost danger small"
+                    onClick={(e) => delWf(w.id, e)}
+                    title="Supprimer"
+                  >
+                    <Icon name="trash" />
+                  </button>
                 </li>
               ))}
             </ul>

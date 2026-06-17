@@ -8,12 +8,28 @@ export default function SqlNode({ id, data, selected }) {
   const summary = describeQuery(data)
   return (
     <div className={`node node-sql ${selected ? 'sel' : ''}`}>
-      <Handle type="target" position={Position.Left} id="in1" style={{ top: 42 }} className="anchor anchor-in"
-        title="Entrée 1 — table principale (FROM)" />
-      <span className="sql-inlabel" style={{ top: 42 }}>1</span>
-      <Handle type="target" position={Position.Left} id="in2" style={{ top: 72 }} className="anchor anchor-in anchor-in2"
-        title="Entrée 2 — table à joindre (optionnelle, pour une jointure)" />
-      <span className="sql-inlabel" style={{ top: 72 }}>2</span>
+      <Handle
+        type="target"
+        position={Position.Left}
+        id="in1"
+        style={{ top: 42 }}
+        className="anchor anchor-in"
+        title="Entrée 1 — table principale (FROM)"
+      />
+      <span className="sql-inlabel" style={{ top: 42 }}>
+        1
+      </span>
+      <Handle
+        type="target"
+        position={Position.Left}
+        id="in2"
+        style={{ top: 72 }}
+        className="anchor anchor-in anchor-in2"
+        title="Entrée 2 — table à joindre (optionnelle, pour une jointure)"
+      />
+      <span className="sql-inlabel" style={{ top: 72 }}>
+        2
+      </span>
       <div className="node-head">
         <span className="node-title">{data.label || 'SQL'}</span>
         <LockBadge locked={data.locked} />
@@ -21,7 +37,12 @@ export default function SqlNode({ id, data, selected }) {
       <div className="node-body">
         <div className="node-sub">{summary}</div>
       </div>
-      <NodeFooter st={st} running={running === id} onPreview={() => onPreview(id)} onRun={() => onRunNode(id)} />
+      <NodeFooter
+        st={st}
+        running={running === id}
+        onPreview={() => onPreview(id)}
+        onRun={() => onRunNode(id)}
+      />
       <Handle type="source" position={Position.Right} id="out" className="anchor anchor-out" />
     </div>
   )

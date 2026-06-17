@@ -1,0 +1,80 @@
+# Roade — config Python centralisée.
+# Source unique des dépendances backend + outillage (Ruff, pytest).
+# Lockfile : `uv.lock`. Install reproductible : `uv sync`.
+
+[project]
+name = "roade"
+version = "0.1.0"
+description = "Web app pour transformer des fichiers Excel/CSV via un workflow visuel de blocs (FastAPI + DuckDB)."
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.34",
+  "duckdb>=1.3.2",
+  "pandas>=2.3.2",
+  "openpyxl>=3.1.5",
+  "pyarrow>=18",
+  "python-multipart>=0.0.20",
+  "charset-normalizer>=3.4",  # détection d'encoding des CSV (Chantier A — intégrité FR)
+]
+
+[dependency-groups]
+dev = [
+  "ruff>=0.15",
+  "pytest>=8.3",
+  "httpx2>=2",  # requis par starlette.testclient (utilisé par les tests API)
+]
+
+# Pas de [build-system] : Roade n'est pas distribué comme un package Python.
+# uv le traite alors comme un "virtual" project (deps only, pas d'installation du projet).
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["backend"]
+addopts = "-ra"
+
+[tool.ruff]
+# Cible : on tourne sur 3.14 (cf. mémoire python314-wheels), mais on reste compatible 3.11+
+# pour ne pas dépendre d'un point de version trop récent côté lint.
+target-version = "py311"
+line-length = 100
+src = ["backend"]
+extend-exclude = [
+  "projects",          # données des utilisateurs, jamais à lint
+  "frontend",
+  "backend/__pycache__",
+  "_dump_xlsx.py",     # script d'inspection one-shot, hors charte du backend
+]
+
+[tool.ruff.lint]
+# Sélection volontairement calme pour cette première passe (anti-slop : on ne fait
+# pas hurler sur du code existant valable). On resserrera au fur et à mesure que les
+# zones sont refactorées (Chantier D.9).
+select = [
+  "E",   # pycodestyle errors
+  "F",   # pyflakes
+  "I",   # isort
+  "W",   # pycodestyle warnings
+  "UP",  # pyupgrade
+  "B",   # bugbear (anti-pièges)
+]
+ignore = [
+  "E501",  # longueur de ligne : c'est le formateur qui décide
+  "B008",  # FastAPI : `Body(...)` / `File(...)` en defaults, c'est le pattern, pas un bug
+  "B904",  # `raise ... from err` : utile mais pas critique sur les `HTTPException` actuels
+  # Règles désactivées le temps que les modules concernés soient refactorés (D.9).
+  # À rallumer une fois engine.py / query_builder.py découpés.
+  "B905",  # `zip()` sans `strict=` : 9 occurrences dans engine.py, intrusif sans tests
+  "B023",  # `reducer` capturé en closure : motif local volontaire dans engine.py
+  "E741",  # noms `l` / `O` : présents dans query_builder.py, à renommer lors du split
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["engine", "storage", "main", "formula", "query_builder", "workflow_doc"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"

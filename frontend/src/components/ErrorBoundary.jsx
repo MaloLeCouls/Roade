@@ -31,8 +31,12 @@ export default class ErrorBoundary extends Component {
       <div className="be-crash">
         <p className="be-crash-h">Cet affichage a planté.</p>
         <pre>{String(this.state.err.message || this.state.err)}</pre>
-        <p className="muted">Le reste de l'éditeur reste utilisable. Réessayez après avoir réexécuté le bloc.</p>
-        <button className="ghost small" onClick={() => this.setState({ err: null })}>Réessayer</button>
+        <p className="muted">
+          Le reste de l'éditeur reste utilisable. Réessayez après avoir réexécuté le bloc.
+        </p>
+        <button className="ghost small" onClick={() => this.setState({ err: null })}>
+          Réessayer
+        </button>
       </div>
     )
   }

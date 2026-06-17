@@ -6,8 +6,14 @@ export default function ProjectList({ onOpen }) {
   const [name, setName] = useState('')
   const [loading, setLoading] = useState(true)
 
-  const reload = () => api.listProjects().then((p) => { setProjects(p); setLoading(false) })
-  useEffect(() => { reload() }, [])
+  const reload = () =>
+    api.listProjects().then((p) => {
+      setProjects(p)
+      setLoading(false)
+    })
+  useEffect(() => {
+    reload()
+  }, [])
 
   const create = async () => {
     if (!name.trim()) return
@@ -35,7 +41,9 @@ export default function ProjectList({ onOpen }) {
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && create()}
           />
-          <button className="primary" onClick={create}>Créer</button>
+          <button className="primary" onClick={create}>
+            Créer
+          </button>
         </div>
       </div>
 

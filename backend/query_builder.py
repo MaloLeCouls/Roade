@@ -29,13 +29,39 @@ Model shape (all keys optional except it must reference at least one input):
   "limit": 1000
 }
 """
+
 from __future__ import annotations
 
-AGG_FUNCS = {"SUM", "AVG", "MIN", "MAX", "COUNT", "COUNT_DISTINCT",
-             "MEDIAN", "STDDEV", "FIRST", "LAST", "STRING_AGG"}
-COMPARISON_OPS = {"=", "!=", "<>", ">", ">=", "<", "<=",
-                  "LIKE", "NOT LIKE", "ILIKE", "IN", "NOT IN",
-                  "IS NULL", "IS NOT NULL", "BETWEEN"}
+AGG_FUNCS = {
+    "SUM",
+    "AVG",
+    "MIN",
+    "MAX",
+    "COUNT",
+    "COUNT_DISTINCT",
+    "MEDIAN",
+    "STDDEV",
+    "FIRST",
+    "LAST",
+    "STRING_AGG",
+}
+COMPARISON_OPS = {
+    "=",
+    "!=",
+    "<>",
+    ">",
+    ">=",
+    "<",
+    "<=",
+    "LIKE",
+    "NOT LIKE",
+    "ILIKE",
+    "IN",
+    "NOT IN",
+    "IS NULL",
+    "IS NOT NULL",
+    "BETWEEN",
+}
 
 
 def q_ident(name: str) -> str:
@@ -104,7 +130,10 @@ def _select_item(item: dict) -> str:
             ref = q_ref(item.get("input"), _need(col, "Agrégat : choisissez une colonne."))
         sql = _agg_expr(item["func"], ref)
     else:  # column
-        sql = q_ref(item.get("input"), _need(item.get("column"), "Colonne en sortie : choisissez une colonne."))
+        sql = q_ref(
+            item.get("input"),
+            _need(item.get("column"), "Colonne en sortie : choisissez une colonne."),
+        )
     if alias:
         sql += f" AS {q_ident(alias)}"
     return sql
@@ -120,14 +149,16 @@ def _condition(c: dict) -> str:
         if c["func"].upper() == "COUNT" and not c.get("column"):
             ref = "*"
         else:
-            ref = q_ref(c.get("input"), _need(c.get("column"), "Filtre d'agrégat : choisissez une colonne."))
+            ref = q_ref(
+                c.get("input"), _need(c.get("column"), "Filtre d'agrégat : choisissez une colonne.")
+            )
         left = _agg_expr(c["func"], ref)
     else:
         left = q_ref(c.get("input"), _need(c.get("column"), "Filtre : choisissez une colonne."))
 
     vtype = c.get("value_type", "text")
     if op in ("LIKE", "NOT LIKE", "ILIKE"):
-        vtype = "text"      # LIKE/ILIKE patterns are always quoted string literals
+        vtype = "text"  # LIKE/ILIKE patterns are always quoted string literals
     if op in ("IS NULL", "IS NOT NULL"):
         return f"{left} {op}"
     if op in ("IN", "NOT IN"):
@@ -156,8 +187,14 @@ def _join_clause(j: dict) -> str:
         raise ValueError("Jointure sans condition ON")
     parts = []
     for c in conds:
-        l = q_ref(c.get("left_input"), _need(c.get("left_column"), "Jointure : colonne de gauche manquante."))
-        r = q_ref(c.get("right_input"), _need(c.get("right_column"), "Jointure : colonne de droite manquante."))
+        l = q_ref(
+            c.get("left_input"),
+            _need(c.get("left_column"), "Jointure : colonne de gauche manquante."),
+        )
+        r = q_ref(
+            c.get("right_input"),
+            _need(c.get("right_column"), "Jointure : colonne de droite manquante."),
+        )
         parts.append(f"{l} = {r}")
     return f"{jtype} JOIN {q_ident(alias)} ON " + " AND ".join(parts)
 
@@ -199,7 +236,10 @@ def compile_query(model: dict, primary_input: str) -> str:
 
     group_by = model.get("group_by") or []
     if group_by:
-        cols = ", ".join(q_ref(g.get("input"), _need(g.get("column"), "Regroupement : choisissez une colonne.")) for g in group_by)
+        cols = ", ".join(
+            q_ref(g.get("input"), _need(g.get("column"), "Regroupement : choisissez une colonne."))
+            for g in group_by
+        )
         sql += "\nGROUP BY " + cols
 
     having = model.get("having") or []
@@ -211,7 +251,9 @@ def compile_query(model: dict, primary_input: str) -> str:
         parts = []
         for o in order_by:
             d = "DESC" if (o.get("dir") or "ASC").upper() == "DESC" else "ASC"
-            parts.append(f"{q_ref(o.get('input'), _need(o.get('column'), 'Tri : choisissez une colonne.'))} {d}")
+            parts.append(
+                f"{q_ref(o.get('input'), _need(o.get('column'), 'Tri : choisissez une colonne.'))} {d}"
+            )
         sql += "\nORDER BY " + ", ".join(parts)
 
     limit = model.get("limit")

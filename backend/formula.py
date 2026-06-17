@@ -18,6 +18,7 @@ Examples
 ``IF([stock] > 0, "OK", "Rupture")``        -> ``(CASE WHEN "stock" > 0 THEN 'OK' ELSE 'Rupture' END)``
 ``[nom] & " " & [prenom]``                  -> ``"nom" || ' ' || "prenom"``
 """
+
 from __future__ import annotations
 
 import re
@@ -97,6 +98,7 @@ def _call(name):
 def _find_builder(ci: bool):
     """FIND/SEARCH: 1-based position of `find` in `within`, NULL if absent.
     SEARCH (ci=True) is case-insensitive; the optional 3rd arg is a start offset."""
+
     def b(a):
         find = f"lower({a[0]})" if ci else a[0]
         within = f"lower({a[1]})" if ci else a[1]
@@ -105,6 +107,7 @@ def _find_builder(ci: bool):
         start = a[2]
         p = f"strpos(substr({within}, {start}), {find})"
         return f"(CASE WHEN {p} = 0 THEN NULL ELSE {p} + ({start}) - 1 END)"
+
     return b
 
 
@@ -142,41 +145,41 @@ def _fn_regexextract(a):
 
 
 FUNCTIONS = {
-    "IF":       (2, 3, _fn_if),
-    "AND":      (1, None, _join("AND")),
-    "OR":       (1, None, _join("OR")),
-    "NOT":      (1, 1, lambda a: f"(NOT {a[0]})"),
-    "CONCAT":   (1, None, _call("concat")),
-    "UPPER":    (1, 1, _call("upper")),
-    "LOWER":    (1, 1, _call("lower")),
-    "TRIM":     (1, 1, _call("trim")),
-    "LEFT":     (2, 2, lambda a: f"left({a[0]}, {a[1]})"),
-    "RIGHT":    (2, 2, lambda a: f"right({a[0]}, {a[1]})"),
-    "MID":      (3, 3, lambda a: f"substr({a[0]}, {a[1]}, {a[2]})"),
-    "LEN":      (1, 1, _call("length")),
-    "REPT":     (2, 2, lambda a: f"repeat({a[0]}, {a[1]})"),
-    "FIND":     (2, 3, _find_builder(False)),
-    "SEARCH":   (2, 3, _find_builder(True)),
+    "IF": (2, 3, _fn_if),
+    "AND": (1, None, _join("AND")),
+    "OR": (1, None, _join("OR")),
+    "NOT": (1, 1, lambda a: f"(NOT {a[0]})"),
+    "CONCAT": (1, None, _call("concat")),
+    "UPPER": (1, 1, _call("upper")),
+    "LOWER": (1, 1, _call("lower")),
+    "TRIM": (1, 1, _call("trim")),
+    "LEFT": (2, 2, lambda a: f"left({a[0]}, {a[1]})"),
+    "RIGHT": (2, 2, lambda a: f"right({a[0]}, {a[1]})"),
+    "MID": (3, 3, lambda a: f"substr({a[0]}, {a[1]}, {a[2]})"),
+    "LEN": (1, 1, _call("length")),
+    "REPT": (2, 2, lambda a: f"repeat({a[0]}, {a[1]})"),
+    "FIND": (2, 3, _find_builder(False)),
+    "SEARCH": (2, 3, _find_builder(True)),
     "SUBSTITUTE": (3, 3, lambda a: f"replace({a[0]}, {a[1]}, {a[2]})"),
-    "REPLACE":  (4, 4, _fn_replace),
+    "REPLACE": (4, 4, _fn_replace),
     "TEXTBEFORE": (2, 3, _fn_textbefore),
-    "TEXTAFTER":  (2, 3, _fn_textafter),
+    "TEXTAFTER": (2, 3, _fn_textafter),
     "REGEXEXTRACT": (2, 3, _fn_regexextract),
     "REGEXREPLACE": (3, 3, lambda a: f"regexp_replace({a[0]}, {a[1]}, {a[2]}, 'g')"),
-    "ROUND":    (1, 2, lambda a: f"round({', '.join(a)})"),
-    "ABS":      (1, 1, _call("abs")),
-    "MOD":      (2, 2, lambda a: f"mod({a[0]}, {a[1]})"),
-    "POWER":    (2, 2, lambda a: f"pow({a[0]}, {a[1]})"),
-    "MIN":      (1, None, _call("least")),
-    "MAX":      (1, None, _call("greatest")),
+    "ROUND": (1, 2, lambda a: f"round({', '.join(a)})"),
+    "ABS": (1, 1, _call("abs")),
+    "MOD": (2, 2, lambda a: f"mod({a[0]}, {a[1]})"),
+    "POWER": (2, 2, lambda a: f"pow({a[0]}, {a[1]})"),
+    "MIN": (1, None, _call("least")),
+    "MAX": (1, None, _call("greatest")),
     "COALESCE": (1, None, _call("coalesce")),
-    "ISBLANK":  (1, 1, lambda a: f"({a[0]} IS NULL OR CAST({a[0]} AS VARCHAR) = '')"),
-    "YEAR":     (1, 1, _call("year")),
-    "MONTH":    (1, 1, _call("month")),
-    "DAY":      (1, 1, _call("day")),
-    "TODAY":    (0, 0, lambda a: "current_date"),
-    "TEXT":     (1, 2, lambda a: f"CAST({a[0]} AS VARCHAR)"),
-    "VALUE":    (1, 1, lambda a: f"TRY_CAST({a[0]} AS DOUBLE)"),
+    "ISBLANK": (1, 1, lambda a: f"({a[0]} IS NULL OR CAST({a[0]} AS VARCHAR) = '')"),
+    "YEAR": (1, 1, _call("year")),
+    "MONTH": (1, 1, _call("month")),
+    "DAY": (1, 1, _call("day")),
+    "TODAY": (0, 0, lambda a: "current_date"),
+    "TEXT": (1, 2, lambda a: f"CAST({a[0]} AS VARCHAR)"),
+    "VALUE": (1, 1, lambda a: f"TRY_CAST({a[0]} AS DOUBLE)"),
 }
 
 _KEYWORDS = {"TRUE": "TRUE", "FALSE": "FALSE", "NULL": "NULL"}
@@ -270,7 +273,7 @@ class _Parser:
         if t.kind == "NUM":
             return t.val
         if t.kind == "STR":
-            inner = t.val[1:-1].replace('""', '"')        # un-escape Excel ""
+            inner = t.val[1:-1].replace('""', '"')  # un-escape Excel ""
             return "'" + inner.replace("'", "''") + "'"
         if t.kind == "COL":
             name = t.val[1:-1].strip()
@@ -288,9 +291,7 @@ class _Parser:
                 return self._function(up)
             if up in _KEYWORDS:
                 return _KEYWORDS[up]
-            raise FormulaError(
-                f"Nom inconnu « {t.val} ». Pour une colonne, écrivez [{t.val}]."
-            )
+            raise FormulaError(f"Nom inconnu « {t.val} ». Pour une colonne, écrivez [{t.val}].")
         raise FormulaError(f"Élément inattendu : « {t.val} »")
 
     def _function(self, name: str):

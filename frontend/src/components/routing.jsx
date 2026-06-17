@@ -2,8 +2,15 @@ import { useEffect, useState } from 'react'
 import { api } from '../api'
 import Icon from './Icon'
 import {
-  VAL_TESTS, CHAR_CLASS, needs, SEG_TYPES, OUTPUT_COLORS, uid,
-  buildMaskPattern, makeCondition, VS_COLUMN_TESTS,
+  VAL_TESTS,
+  CHAR_CLASS,
+  needs,
+  SEG_TYPES,
+  OUTPUT_COLORS,
+  uid,
+  buildMaskPattern,
+  makeCondition,
+  VS_COLUMN_TESTS,
 } from './validateHelpers'
 
 /*
@@ -20,15 +27,26 @@ import {
 export function useRoutePreview(pid, wid, node, status) {
   const d = node.data
   const [dist, setDist] = useState({ total: 0, counts: {}, error: null, loading: false })
-  const cfgKey = JSON.stringify({ o: d.outputs, cn: d.conditions, r: d.routing, e: d.else_enabled, cs: d.case_sensitive, tc: d.target_column, sp: d.split })
+  const cfgKey = JSON.stringify({
+    o: d.outputs,
+    cn: d.conditions,
+    r: d.routing,
+    e: d.else_enabled,
+    cs: d.case_sensitive,
+    tc: d.target_column,
+    sp: d.split,
+  })
   // Re-run after THIS block executes: running it materializes the upstream, so the
   // dry-run (which reads that input) goes from "Entrée : 0" to the real split.
   const ranKey = status?.ran ? JSON.stringify(status.outputs || status.rows) : ''
   useEffect(() => {
     setDist((s) => ({ ...s, loading: true }))
     const h = setTimeout(() => {
-      api.routePreview(pid, wid, node.id, d)
-        .then((r) => setDist({ total: r.total, counts: r.counts || {}, error: null, loading: false }))
+      api
+        .routePreview(pid, wid, node.id, d)
+        .then((r) =>
+          setDist({ total: r.total, counts: r.counts || {}, error: null, loading: false }),
+        )
         .catch((e) => setDist((s) => ({ ...s, counts: {}, error: e.message, loading: false })))
     }, 350)
     return () => clearTimeout(h)
@@ -44,13 +62,19 @@ export function ConditionsEditor({ node, cols, onChange }) {
   const d = node.data
   const conditions = d.conditions || []
   const setConditions = (next) => onChange({ conditions: next })
-  const updCond = (i, patch) => setConditions(conditions.map((c, j) => (j === i ? { ...c, ...patch } : c)))
-  const addCond = () => setConditions([...conditions, makeCondition({ name: `Condition ${conditions.length + 1}` })])
+  const updCond = (i, patch) =>
+    setConditions(conditions.map((c, j) => (j === i ? { ...c, ...patch } : c)))
+  const addCond = () =>
+    setConditions([...conditions, makeCondition({ name: `Condition ${conditions.length + 1}` })])
   const delCond = (i) => {
     const removed = conditions[i]
     onChange({
       conditions: conditions.filter((_, j) => j !== i),
-      outputs: (d.outputs || []).map((o) => (o.match?.conditionId === removed?.id ? { ...o, match: { conditionId: '', negate: false } } : o)),
+      outputs: (d.outputs || []).map((o) =>
+        o.match?.conditionId === removed?.id
+          ? { ...o, match: { conditionId: '', negate: false } }
+          : o,
+      ),
     })
   }
 
@@ -59,32 +83,64 @@ export function ConditionsEditor({ node, cols, onChange }) {
       <div className="route-toolbar">
         <label className="fld" style={{ flex: 1, marginBottom: 0 }}>
           <span>Colonne par défaut</span>
-          <select value={d.target_column || ''} onChange={(e) => onChange({ target_column: e.target.value })}>
+          <select
+            value={d.target_column || ''}
+            onChange={(e) => onChange({ target_column: e.target.value })}
+          >
             <option value="">—</option>
             {cols.length === 0 && <option value="">(exécutez l'amont)</option>}
-            {cols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+            {cols.map((c) => (
+              <option key={c.name} value={c.name}>
+                {c.name}
+              </option>
+            ))}
           </select>
         </label>
         <label className="qb-check" style={{ marginBottom: 2 }}>
-          <input type="checkbox" checked={!!d.case_sensitive} onChange={(e) => onChange({ case_sensitive: e.target.checked })} />
+          <input
+            type="checkbox"
+            checked={!!d.case_sensitive}
+            onChange={(e) => onChange({ case_sensitive: e.target.checked })}
+          />
           Sensible à la casse
         </label>
       </div>
 
-      {conditions.length === 0 && <div className="qb-hint">Aucune condition. Créez-en une, puis attribuez-la à une sortie (à droite).</div>}
+      {conditions.length === 0 && (
+        <div className="qb-hint">
+          Aucune condition. Créez-en une, puis attribuez-la à une sortie (à droite).
+        </div>
+      )}
       {conditions.map((c, i) => (
         <div className="ccard" key={c.id}>
           <div className="ccard-head">
             <Icon name="filter" size={13} />
-            <input className="ocard-name" value={c.name || ''} placeholder="Nom de la condition"
-              onChange={(e) => updCond(i, { name: e.target.value })} />
-            <button className="ghost danger small" onClick={() => delCond(i)} title="Supprimer la condition"><Icon name="x" /></button>
+            <input
+              className="ocard-name"
+              value={c.name || ''}
+              placeholder="Nom de la condition"
+              onChange={(e) => updCond(i, { name: e.target.value })}
+            />
+            <button
+              className="ghost danger small"
+              onClick={() => delCond(i)}
+              title="Supprimer la condition"
+            >
+              <Icon name="x" />
+            </button>
           </div>
-          <ConditionBuilder cond={c} cols={cols} defaultCol={d.target_column} caseSensitive={!!d.case_sensitive}
-            onChange={(patch) => updCond(i, patch)} />
+          <ConditionBuilder
+            cond={c}
+            cols={cols}
+            defaultCol={d.target_column}
+            caseSensitive={!!d.case_sensitive}
+            onChange={(patch) => updCond(i, patch)}
+          />
         </div>
       ))}
-      <button className="ghost route-add" onClick={addCond}><Icon name="plus" /> Ajouter une condition</button>
+      <button className="ghost route-add" onClick={addCond}>
+        <Icon name="plus" /> Ajouter une condition
+      </button>
     </div>
   )
 }
@@ -95,26 +151,62 @@ function ConditionBuilder({ cond, cols, defaultCol, caseSensitive, onChange }) {
     <div className="cond-builder">
       <div className="cond-builder-head">
         <div className="mode-toggle sm">
-          <button className={kind === 'rules' ? 'on' : ''} onClick={() => onChange({ kind: 'rules' })}>Règles</button>
-          <button className={kind === 'mask' ? 'on' : ''} onClick={() => onChange({ kind: 'mask' })}>Masque</button>
-          <button className={kind === 'group' ? 'on' : ''} onClick={() => onChange({ kind: 'group' })}>Groupe</button>
+          <button
+            className={kind === 'rules' ? 'on' : ''}
+            onClick={() => onChange({ kind: 'rules' })}
+          >
+            Règles
+          </button>
+          <button
+            className={kind === 'mask' ? 'on' : ''}
+            onClick={() => onChange({ kind: 'mask' })}
+          >
+            Masque
+          </button>
+          <button
+            className={kind === 'group' ? 'on' : ''}
+            onClick={() => onChange({ kind: 'group' })}
+          >
+            Groupe
+          </button>
         </div>
         {kind !== 'group' && (
           <label className="cond-col">
             <span className="qb-lbl">colonne</span>
-            <select className="qb-select" value={cond.column || ''} onChange={(e) => onChange({ column: e.target.value })}>
+            <select
+              className="qb-select"
+              value={cond.column || ''}
+              onChange={(e) => onChange({ column: e.target.value })}
+            >
               <option value="">{defaultCol ? `défaut : ${defaultCol}` : '(par défaut)'}</option>
-              {cols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+              {cols.map((c) => (
+                <option key={c.name} value={c.name}>
+                  {c.name}
+                </option>
+              ))}
             </select>
           </label>
         )}
       </div>
-      {kind === 'mask'
-        ? <MaskBuilder segments={cond.segments || []} caseSensitive={caseSensitive} onChange={(segments) => onChange({ segments })} />
-        : kind === 'group'
-          ? <GroupCheckBuilder cond={cond} cols={cols} defaultCol={defaultCol} onChange={onChange} />
-          : <RulesBuilder groups={cond.groups || []} cols={cols} defaultCol={cond.column || defaultCol} onChange={(groups) => onChange({ groups })} />}
-      {kind !== 'group' && <ConditionTester cond={cond} caseSensitive={caseSensitive} onChange={onChange} />}
+      {kind === 'mask' ? (
+        <MaskBuilder
+          segments={cond.segments || []}
+          caseSensitive={caseSensitive}
+          onChange={(segments) => onChange({ segments })}
+        />
+      ) : kind === 'group' ? (
+        <GroupCheckBuilder cond={cond} cols={cols} defaultCol={defaultCol} onChange={onChange} />
+      ) : (
+        <RulesBuilder
+          groups={cond.groups || []}
+          cols={cols}
+          defaultCol={cond.column || defaultCol}
+          onChange={(groups) => onChange({ groups })}
+        />
+      )}
+      {kind !== 'group' && (
+        <ConditionTester cond={cond} caseSensitive={caseSensitive} onChange={onChange} />
+      )}
     </div>
   )
 }
@@ -147,7 +239,14 @@ const GROUP_CHECKS = [
 ]
 
 // Comparison operators for the two-column "nb de valeurs distinctes" check.
-const CMP_OPS = [['eq', '='], ['ne', '≠'], ['lt', '<'], ['le', '≤'], ['gt', '>'], ['ge', '≥']]
+const CMP_OPS = [
+  ['eq', '='],
+  ['ne', '≠'],
+  ['lt', '<'],
+  ['le', '≤'],
+  ['gt', '>'],
+  ['ge', '≥'],
+]
 
 // Group check: routes rows by a property of the *group* (rows sharing a key).
 // Layout reads as a sentence — the repeating KEY on top, then, indented below,
@@ -162,86 +261,151 @@ function GroupCheckAlors({ ck, cols, defaultCol, boxed, onChange, onDelete }) {
   const check = ck.check || 'unique'
   const spec = GROUP_CHECKS.find((g) => g[0] === check) || GROUP_CHECKS[0]
   const onCol = spec[2] === 'col'
-  const isRules = spec[2] === 'rules'        // 'rows_satisfy' consequent (a rules builder)
+  const isRules = spec[2] === 'rules' // 'rows_satisfy' consequent (a rules builder)
   const extra = spec[3]
   const colSelect = (val, onPick, placeholder = '(colonne)') => (
     <select className="qb-select" value={val || ''} onChange={(e) => onPick(e.target.value)}>
       <option value="">{placeholder}</option>
-      {cols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+      {cols.map((c) => (
+        <option key={c.name} value={c.name}>
+          {c.name}
+        </option>
+      ))}
     </select>
   )
   const checkSelect = (
-    <select className="qb-select" value={check} onChange={(e) => onChange({ check: e.target.value })}>
-      {GROUP_CHECKS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+    <select
+      className="qb-select"
+      value={check}
+      onChange={(e) => onChange({ check: e.target.value })}
+    >
+      {GROUP_CHECKS.map(([v, l]) => (
+        <option key={v} value={v}>
+          {l}
+        </option>
+      ))}
     </select>
   )
-  const delBtn = onDelete && <button className="ghost danger small" onClick={onDelete} title="Retirer ce contrôle"><Icon name="x" /></button>
+  const delBtn = onDelete && (
+    <button className="ghost danger small" onClick={onDelete} title="Retirer ce contrôle">
+      <Icon name="x" />
+    </button>
+  )
   // The check's inline extras (N / value / op+col / col2). Same fragment in both
   // flat and boxed modes; appended after the kind selector in the property sentence.
-  const extras = (<>
-    {extra === 'number' && (
-      <input className="qb-input narrow" type="number" min="0" value={ck.n ?? ''}
-        onChange={(e) => onChange({ n: e.target.value })} />
-    )}
-    {extra === 'value' && (<>
-      <button className="rhs-toggle" type="button"
-        onClick={() => onChange({ via: ck.via === 'column' ? 'value' : 'column' })}
-        title={ck.via === 'column' ? "Comparer à une valeur littérale" : "Comparer à une autre colonne"}>
-        {ck.via === 'column' ? 'vs colonne' : 'vs valeur'}
-      </button>
-      {ck.via === 'column'
-        ? colSelect(ck.column2, (v) => onChange({ column2: v }), '(autre colonne)')
-        : <input className="qb-input" placeholder="valeur" value={ck.value ?? ''}
-            onChange={(e) => onChange({ value: e.target.value })} />}
-    </>)}
-    {extra === 'cmpcol' && (<>
-      <select className="qb-select narrow" value={ck.op || 'eq'} onChange={(e) => onChange({ op: e.target.value })}>
-        {CMP_OPS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-      </select>
-      <span className="qb-lbl">celui de</span>
-      {colSelect(ck.column2, (v) => onChange({ column2: v }), '(autre colonne)')}
-    </>)}
-    {extra === 'col2' && colSelect(ck.column2, (v) => onChange({ column2: v }), '(autre colonne)')}
-  </>)
-  return (<>
-    <div className={boxed ? 'grp-clause-h' : 'grp-rule-body'}>
-      {boxed && <span className="grp-clause-tag">ALORS</span>}
-      {isRules ? (<>
-        <span className="qb-lbl">chaque ligne respecte :</span>
-        {checkSelect}
-      </>) : (<>
-        {onCol && colSelect(ck.column, (v) => onChange({ column: v }))}
-        <span className="qb-lbl">doit</span>
-        {checkSelect}
-        {extras}
-      </>)}
-      {delBtn}
-    </div>
-    {isRules && (
-      <RulesBuilder groups={ck.then?.groups || []} cols={cols} defaultCol={defaultCol}
-        onChange={(groups) => onChange({ then: { groups } })} />
-    )}
-  </>)
+  const extras = (
+    <>
+      {extra === 'number' && (
+        <input
+          className="qb-input narrow"
+          type="number"
+          min="0"
+          value={ck.n ?? ''}
+          onChange={(e) => onChange({ n: e.target.value })}
+        />
+      )}
+      {extra === 'value' && (
+        <>
+          <button
+            className="rhs-toggle"
+            type="button"
+            onClick={() => onChange({ via: ck.via === 'column' ? 'value' : 'column' })}
+            title={
+              ck.via === 'column'
+                ? 'Comparer à une valeur littérale'
+                : 'Comparer à une autre colonne'
+            }
+          >
+            {ck.via === 'column' ? 'vs colonne' : 'vs valeur'}
+          </button>
+          {ck.via === 'column' ? (
+            colSelect(ck.column2, (v) => onChange({ column2: v }), '(autre colonne)')
+          ) : (
+            <input
+              className="qb-input"
+              placeholder="valeur"
+              value={ck.value ?? ''}
+              onChange={(e) => onChange({ value: e.target.value })}
+            />
+          )}
+        </>
+      )}
+      {extra === 'cmpcol' && (
+        <>
+          <select
+            className="qb-select narrow"
+            value={ck.op || 'eq'}
+            onChange={(e) => onChange({ op: e.target.value })}
+          >
+            {CMP_OPS.map(([v, l]) => (
+              <option key={v} value={v}>
+                {l}
+              </option>
+            ))}
+          </select>
+          <span className="qb-lbl">celui de</span>
+          {colSelect(ck.column2, (v) => onChange({ column2: v }), '(autre colonne)')}
+        </>
+      )}
+      {extra === 'col2' &&
+        colSelect(ck.column2, (v) => onChange({ column2: v }), '(autre colonne)')}
+    </>
+  )
+  return (
+    <>
+      <div className={boxed ? 'grp-clause-h' : 'grp-rule-body'}>
+        {boxed && <span className="grp-clause-tag">ALORS</span>}
+        {isRules ? (
+          <>
+            <span className="qb-lbl">chaque ligne respecte :</span>
+            {checkSelect}
+          </>
+        ) : (
+          <>
+            {onCol && colSelect(ck.column, (v) => onChange({ column: v }))}
+            <span className="qb-lbl">doit</span>
+            {checkSelect}
+            {extras}
+          </>
+        )}
+        {delBtn}
+      </div>
+      {isRules && (
+        <RulesBuilder
+          groups={ck.then?.groups || []}
+          cols={cols}
+          defaultCol={defaultCol}
+          onChange={(groups) => onChange({ then: { groups } })}
+        />
+      )}
+    </>
+  )
 }
 
 function GroupCheckBuilder({ cond, cols, defaultCol, onChange }) {
   const keys = cond.group_by || []
-  const toggle = (c) => onChange({ group_by: keys.includes(c) ? keys.filter((x) => x !== c) : [...keys, c] })
+  const toggle = (c) =>
+    onChange({ group_by: keys.includes(c) ? keys.filter((x) => x !== c) : [...keys, c] })
   // collapse the picker once a key is set — the long list rarely needs to stay open
   const [keysOpen, setKeysOpen] = useState(keys.length === 0)
   // one or several checks, AND-combined; migrate the legacy single-check shape.
-  const checks = (cond.checks && cond.checks.length)
-    ? cond.checks
-    : [{ check: cond.check || 'unique', column: cond.column || '', n: cond.n, value: cond.value }]
+  const checks =
+    cond.checks && cond.checks.length
+      ? cond.checks
+      : [{ check: cond.check || 'unique', column: cond.column || '', n: cond.n, value: cond.value }]
   const setChecks = (next) => onChange({ checks: next })
   const updCheck = (i, patch) => setChecks(checks.map((c, j) => (j === i ? { ...c, ...patch } : c)))
   const addCheck = () => setChecks([...checks, { check: 'no_null', column: '' }])
   // a ready-to-fill "quand X … alors chaque ligne respecte …" skeleton (the headline case)
-  const addConditional = () => setChecks([...checks, {
-    check: 'rows_satisfy',
-    when: { groups: [{ rules: [{ test: 'equals', value: '' }] }] },
-    then: { groups: [{ rules: [{ test: 'not_empty' }] }] },
-  }])
+  const addConditional = () =>
+    setChecks([
+      ...checks,
+      {
+        check: 'rows_satisfy',
+        when: { groups: [{ rules: [{ test: 'equals', value: '' }] }] },
+        then: { groups: [{ rules: [{ test: 'not_empty' }] }] },
+      },
+    ])
   const delCheck = (i) => setChecks(checks.filter((_, j) => j !== i))
 
   // Group consecutive checks that share an identical non-empty WHEN — a UI
@@ -261,10 +425,12 @@ function GroupCheckBuilder({ cond, cols, defaultCol, onChange }) {
     }
   }
   const updGroupWhen = (g, newGroups) => {
-    setChecks(checks.map((c, j) => g.indices.includes(j) ? { ...c, when: { groups: newGroups } } : c))
+    setChecks(
+      checks.map((c, j) => (g.indices.includes(j) ? { ...c, when: { groups: newGroups } } : c)),
+    )
   }
   const clearGroupWhen = (g) => {
-    setChecks(checks.map((c, j) => g.indices.includes(j) ? { ...c, when: { groups: [] } } : c))
+    setChecks(checks.map((c, j) => (g.indices.includes(j) ? { ...c, when: { groups: [] } } : c)))
   }
   const addAlorsToGroup = (g) => {
     const ref = checks[g.indices[0]]
@@ -278,11 +444,17 @@ function GroupCheckBuilder({ cond, cols, defaultCol, onChange }) {
   return (
     <div className="cond-group-check">
       <div className="grp-key">
-        <button type="button" className="grp-key-head" onClick={() => setKeysOpen((v) => !v)}
-          title={keysOpen ? 'Replier' : 'Déplier'}>
+        <button
+          type="button"
+          className="grp-key-head"
+          onClick={() => setKeysOpen((v) => !v)}
+          title={keysOpen ? 'Replier' : 'Déplier'}
+        >
           <Icon name={keysOpen ? 'down' : 'chev-right'} size={11} />
           <Icon name="list" size={13} />
-          <span>Clé de regroupement <span className="qb-lbl">— ce qui se répète</span></span>
+          <span>
+            Clé de regroupement <span className="qb-lbl">— ce qui se répète</span>
+          </span>
           {!keysOpen && (
             <span className="grp-key-summary">
               {keys.length === 0 ? <em>aucune</em> : keys.join(', ')}
@@ -294,7 +466,11 @@ function GroupCheckBuilder({ cond, cols, defaultCol, onChange }) {
             {cols.length === 0 && <div className="qb-hint">— colonnes non chargées —</div>}
             {cols.map((c) => (
               <label key={c.name} className="qb-check">
-                <input type="checkbox" checked={keys.includes(c.name)} onChange={() => toggle(c.name)} />
+                <input
+                  type="checkbox"
+                  checked={keys.includes(c.name)}
+                  onChange={() => toggle(c.name)}
+                />
                 {c.name} <span className="coltype-inline">{c.type}</span>
               </label>
             ))}
@@ -316,19 +492,32 @@ function GroupCheckBuilder({ cond, cols, defaultCol, onChange }) {
                       <div className="grp-clause-h">
                         <span className="grp-clause-tag">QUAND</span>
                         <span className="qb-lbl">les lignes du groupe qui vérifient :</span>
-                        <button className="ghost danger small" title="Retirer le filtre QUAND (s'applique aux ALORS de ce bloc)"
-                          onClick={() => clearGroupWhen(g)}><Icon name="x" /></button>
+                        <button
+                          className="ghost danger small"
+                          title="Retirer le filtre QUAND (s'applique aux ALORS de ce bloc)"
+                          onClick={() => clearGroupWhen(g)}
+                        >
+                          <Icon name="x" />
+                        </button>
                       </div>
-                      <RulesBuilder groups={checks[g.indices[0]].when?.groups || []}
-                        cols={cols} defaultCol={defaultCol}
-                        onChange={(newGroups) => updGroupWhen(g, newGroups)} />
+                      <RulesBuilder
+                        groups={checks[g.indices[0]].when?.groups || []}
+                        cols={cols}
+                        defaultCol={defaultCol}
+                        onChange={(newGroups) => updGroupWhen(g, newGroups)}
+                      />
                     </div>
                     {/* one or more ALORS sharing the WHEN above */}
                     {g.indices.map((idx) => (
                       <div key={idx} className="grp-clause-box grp-clause-then">
-                        <GroupCheckAlors ck={checks[idx]} cols={cols} defaultCol={defaultCol} boxed
+                        <GroupCheckAlors
+                          ck={checks[idx]}
+                          cols={cols}
+                          defaultCol={defaultCol}
+                          boxed
                           onChange={(p) => updCheck(idx, p)}
-                          onDelete={canDelete ? () => delCheck(idx) : null} />
+                          onDelete={canDelete ? () => delCheck(idx) : null}
+                        />
                       </div>
                     ))}
                     <button className="grp-when-add" onClick={() => addAlorsToGroup(g)}>
@@ -341,30 +530,41 @@ function GroupCheckBuilder({ cond, cols, defaultCol, onChange }) {
                     <button className="grp-when-add" onClick={() => enableWhenOn(g.indices[0])}>
                       <Icon name="plus" size={11} /> ajouter un filtre QUAND…
                     </button>
-                    <GroupCheckAlors ck={checks[g.indices[0]]} cols={cols} defaultCol={defaultCol} boxed={false}
+                    <GroupCheckAlors
+                      ck={checks[g.indices[0]]}
+                      cols={cols}
+                      defaultCol={defaultCol}
+                      boxed={false}
                       onChange={(p) => updCheck(g.indices[0], p)}
-                      onDelete={canDelete ? () => delCheck(g.indices[0]) : null} />
+                      onDelete={canDelete ? () => delCheck(g.indices[0]) : null}
+                    />
                   </div>
                 )}
               </div>
             )
           })}
           <div className="grp-add-row">
-            <button className="ghost small grp-add-check" onClick={addCheck}>+ contrôle (ET)</button>
-            <button className="ghost small grp-add-check" onClick={addConditional}>+ règle conditionnelle (QUAND…)</button>
+            <button className="ghost small grp-add-check" onClick={addCheck}>
+              + contrôle (ET)
+            </button>
+            <button className="ghost small grp-add-check" onClick={addConditional}>
+              + règle conditionnelle (QUAND…)
+            </button>
           </div>
         </div>
       </div>
 
       {keys.length === 0 && (
         <div className="qb-warn">
-          ⚠ Aucune <b>clé de regroupement</b> cochée : le contrôle porte alors sur <b>toute la table</b>
+          ⚠ Aucune <b>clé de regroupement</b> cochée : le contrôle porte alors sur{' '}
+          <b>toute la table</b>
           (l'unicité devient globale → si la colonne a des doublons, tout devient non conforme).
           Cochez ci-dessus la colonne qui se répète (ex. le nom de fichier).
         </div>
       )}
       <div className="qb-hint grp-hint">
-        Une sortie reçoit la condition (groupes conformes) ; mets <b>NON</b> sur l'autre pour isoler les anomalies.
+        Une sortie reçoit la condition (groupes conformes) ; mets <b>NON</b> sur l'autre pour isoler
+        les anomalies.
       </div>
     </div>
   )
@@ -381,11 +581,18 @@ export function RulesBuilder({ groups, cols, defaultCol, onChange }) {
       {groups.map((g, gi) => (
         <div key={gi}>
           {gi > 0 && <div className="cond-or">OU</div>}
-          <ConditionGroup rules={g.rules || []} cols={cols} defaultCol={defaultCol}
-            onChange={(rules) => updGroup(gi, rules)} onDelete={() => delGroup(gi)} />
+          <ConditionGroup
+            rules={g.rules || []}
+            cols={cols}
+            defaultCol={defaultCol}
+            onChange={(rules) => updGroup(gi, rules)}
+            onDelete={() => delGroup(gi)}
+          />
         </div>
       ))}
-      <button className="ghost small cond-addgroup" onClick={addGroup}>+ Groupe (OU)</button>
+      <button className="ghost small cond-addgroup" onClick={addGroup}>
+        + Groupe (OU)
+      </button>
     </div>
   )
 }
@@ -398,15 +605,25 @@ function ConditionGroup({ rules, cols, defaultCol, onChange, onDelete }) {
     <div className="cond-group">
       <div className="cond-group-head">
         <span className="qb-lbl">TOUTES ces conditions (ET)</span>
-        <button className="ghost danger small" onClick={onDelete} title="Supprimer le groupe"><Icon name="x" /></button>
+        <button className="ghost danger small" onClick={onDelete} title="Supprimer le groupe">
+          <Icon name="x" />
+        </button>
       </div>
       {rules.map((r, i) => (
         <div key={i}>
           {i > 0 && <span className="cond-and">ET</span>}
-          <RuleRow r={r} cols={cols} defaultCol={defaultCol} onChange={(p) => upd(i, p)} onDelete={() => del(i)} />
+          <RuleRow
+            r={r}
+            cols={cols}
+            defaultCol={defaultCol}
+            onChange={(p) => upd(i, p)}
+            onDelete={() => del(i)}
+          />
         </div>
       ))}
-      <button className="ghost small" onClick={add}>+ Condition (ET)</button>
+      <button className="ghost small" onClick={add}>
+        + Condition (ET)
+      </button>
     </div>
   )
 }
@@ -414,101 +631,252 @@ function ConditionGroup({ rules, cols, defaultCol, onChange, onDelete }) {
 export function RuleRow({ r, cols, defaultCol, onChange, onDelete }) {
   return (
     <div className="rrow">
-      <button className={`neg ${r.negate ? 'on' : ''}`} onClick={() => onChange({ negate: !r.negate })}
-        title="Inverser cette condition (NON)">NON</button>
-      <select className="qb-select" value={r.column || ''} onChange={(e) => onChange({ column: e.target.value })} title="Colonne testée">
+      <button
+        className={`neg ${r.negate ? 'on' : ''}`}
+        onClick={() => onChange({ negate: !r.negate })}
+        title="Inverser cette condition (NON)"
+      >
+        NON
+      </button>
+      <select
+        className="qb-select"
+        value={r.column || ''}
+        onChange={(e) => onChange({ column: e.target.value })}
+        title="Colonne testée"
+      >
         <option value="">{defaultCol ? `(défaut : ${defaultCol})` : '(colonne par défaut)'}</option>
-        {cols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+        {cols.map((c) => (
+          <option key={c.name} value={c.name}>
+            {c.name}
+          </option>
+        ))}
       </select>
-      <select className="qb-select" value={r.test} onChange={(e) => onChange({ test: e.target.value })}>
-        {VAL_TESTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+      <select
+        className="qb-select"
+        value={r.test}
+        onChange={(e) => onChange({ test: e.target.value })}
+      >
+        {VAL_TESTS.map(([v, l]) => (
+          <option key={v} value={v}>
+            {l}
+          </option>
+        ))}
       </select>
       {needs.position.includes(r.test) && (
-        <><span className="qb-lbl">pos</span>
-          <input className="qb-input narrow" type="number" min="1" value={r.position ?? 1} onChange={(e) => onChange({ position: Number(e.target.value) })} /></>
+        <>
+          <span className="qb-lbl">pos</span>
+          <input
+            className="qb-input narrow"
+            type="number"
+            min="1"
+            value={r.position ?? 1}
+            onChange={(e) => onChange({ position: Number(e.target.value) })}
+          />
+        </>
       )}
       {needs.startlen.includes(r.test) && (
-        <><span className="qb-lbl">de</span>
-          <input className="qb-input narrow" type="number" min="1" value={r.start ?? 1} onChange={(e) => onChange({ start: Number(e.target.value) })} />
+        <>
+          <span className="qb-lbl">de</span>
+          <input
+            className="qb-input narrow"
+            type="number"
+            min="1"
+            value={r.start ?? 1}
+            onChange={(e) => onChange({ start: Number(e.target.value) })}
+          />
           <span className="qb-lbl">sur</span>
-          <input className="qb-input narrow" type="number" min="1" value={r.length ?? 1} onChange={(e) => onChange({ length: Number(e.target.value) })} /></>
+          <input
+            className="qb-input narrow"
+            type="number"
+            min="1"
+            value={r.length ?? 1}
+            onChange={(e) => onChange({ length: Number(e.target.value) })}
+          />
+        </>
       )}
       {needs.cls.includes(r.test) && (
-        <select className="qb-select" value={r.charclass || 'letter'} onChange={(e) => onChange({ charclass: e.target.value })}>
-          {CHAR_CLASS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        <select
+          className="qb-select"
+          value={r.charclass || 'letter'}
+          onChange={(e) => onChange({ charclass: e.target.value })}
+        >
+          {CHAR_CLASS.map(([v, l]) => (
+            <option key={v} value={v}>
+              {l}
+            </option>
+          ))}
         </select>
       )}
       {needs.number.includes(r.test) && (
-        <input className="qb-input narrow" type="number" min="0" value={r.value ?? ''} onChange={(e) => onChange({ value: e.target.value })} />
+        <input
+          className="qb-input narrow"
+          type="number"
+          min="0"
+          value={r.value ?? ''}
+          onChange={(e) => onChange({ value: e.target.value })}
+        />
       )}
       {/* Right-hand side of a value/numeric test: by default a literal input; on
           tests that support it, a toggle flips to a column reference (r.column2). */}
-      {(needs.value.includes(r.test) || needs.numericValue.includes(r.test)) && (<>
-        {VS_COLUMN_TESTS.has(r.test) && (
-          <button className="rhs-toggle" type="button"
-            onClick={() => onChange({ via: r.via === 'column' ? 'value' : 'column' })}
-            title={r.via === 'column' ? "Comparer à une valeur littérale" : "Comparer à une autre colonne"}>
-            {r.via === 'column' ? 'vs colonne' : 'vs valeur'}
-          </button>
-        )}
-        {r.via === 'column' && VS_COLUMN_TESTS.has(r.test) ? (
-          <select className="qb-select" value={r.column2 || ''}
-            onChange={(e) => onChange({ column2: e.target.value })}>
-            <option value="">(autre colonne)</option>
-            {cols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-          </select>
-        ) : (
-          <input className={`qb-input ${needs.numericValue.includes(r.test) ? 'narrow' : ''}`}
-            type={needs.numericValue.includes(r.test) ? 'number' : 'text'}
-            placeholder={r.test === 'is_in' ? 'F0, F1, FE…' : 'valeur'}
-            value={r.value ?? ''}
-            onChange={(e) => onChange({ value: e.target.value })} />
-        )}
-      </>)}
-      {onDelete && <button className="ghost danger small rrow-del" onClick={onDelete}><Icon name="x" /></button>}
+      {(needs.value.includes(r.test) || needs.numericValue.includes(r.test)) && (
+        <>
+          {VS_COLUMN_TESTS.has(r.test) && (
+            <button
+              className="rhs-toggle"
+              type="button"
+              onClick={() => onChange({ via: r.via === 'column' ? 'value' : 'column' })}
+              title={
+                r.via === 'column'
+                  ? 'Comparer à une valeur littérale'
+                  : 'Comparer à une autre colonne'
+              }
+            >
+              {r.via === 'column' ? 'vs colonne' : 'vs valeur'}
+            </button>
+          )}
+          {r.via === 'column' && VS_COLUMN_TESTS.has(r.test) ? (
+            <select
+              className="qb-select"
+              value={r.column2 || ''}
+              onChange={(e) => onChange({ column2: e.target.value })}
+            >
+              <option value="">(autre colonne)</option>
+              {cols.map((c) => (
+                <option key={c.name} value={c.name}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              className={`qb-input ${needs.numericValue.includes(r.test) ? 'narrow' : ''}`}
+              type={needs.numericValue.includes(r.test) ? 'number' : 'text'}
+              placeholder={r.test === 'is_in' ? 'F0, F1, FE…' : 'valeur'}
+              value={r.value ?? ''}
+              onChange={(e) => onChange({ value: e.target.value })}
+            />
+          )}
+        </>
+      )}
+      {onDelete && (
+        <button className="ghost danger small rrow-del" onClick={onDelete}>
+          <Icon name="x" />
+        </button>
+      )}
     </div>
   )
 }
 
 export function MaskBuilder({ segments, caseSensitive, onChange }) {
   const updSeg = (i, patch) => onChange(segments.map((s, j) => (j === i ? { ...s, ...patch } : s)))
-  const moveSeg = (i, dir) => { const j = i + dir; if (j < 0 || j >= segments.length) return; const a = [...segments];[a[i], a[j]] = [a[j], a[i]]; onChange(a) }
+  const moveSeg = (i, dir) => {
+    const j = i + dir
+    if (j < 0 || j >= segments.length) return
+    const a = [...segments]
+    ;[a[i], a[j]] = [a[j], a[i]]
+    onChange(a)
+  }
   const delSeg = (i) => onChange(segments.filter((_, j) => j !== i))
   const pattern = buildMaskPattern(segments, caseSensitive)
   return (
     <div className="mask-builder">
-      <div className="qb-hint">Segment par segment, dans l'ordre. Ex. « AB1-2024 » : Texte « AB » · Chiffres ×1 · Texte « - » · Chiffres ×4.</div>
-      <button className="ghost small" onClick={() => onChange([...segments, { type: 'letter', length: 1 }])}>+ Segment</button>
+      <div className="qb-hint">
+        Segment par segment, dans l'ordre. Ex. « AB1-2024 » : Texte « AB » · Chiffres ×1 · Texte « -
+        » · Chiffres ×4.
+      </div>
+      <button
+        className="ghost small"
+        onClick={() => onChange([...segments, { type: 'letter', length: 1 }])}
+      >
+        + Segment
+      </button>
       <div className="clean-ops">
         {segments.map((s, i) => (
           <div className="vrule" key={i}>
             <div className="qb-row">
               <span className="vrule-idx">{i + 1}</span>
-              <select className="qb-select" value={s.type} onChange={(e) => updSeg(i, { type: e.target.value })}>
-                {SEG_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              <select
+                className="qb-select"
+                value={s.type}
+                onChange={(e) => updSeg(i, { type: e.target.value })}
+              >
+                {SEG_TYPES.map(([v, l]) => (
+                  <option key={v} value={v}>
+                    {l}
+                  </option>
+                ))}
               </select>
-              <button className="mini" onClick={() => moveSeg(i, -1)} disabled={i === 0}><Icon name="up" /></button>
-              <button className="mini" onClick={() => moveSeg(i, 1)} disabled={i === segments.length - 1}><Icon name="down" /></button>
-              <button className="ghost danger small" onClick={() => delSeg(i)}><Icon name="x" /></button>
+              <button className="mini" onClick={() => moveSeg(i, -1)} disabled={i === 0}>
+                <Icon name="up" />
+              </button>
+              <button
+                className="mini"
+                onClick={() => moveSeg(i, 1)}
+                disabled={i === segments.length - 1}
+              >
+                <Icon name="down" />
+              </button>
+              <button className="ghost danger small" onClick={() => delSeg(i)}>
+                <Icon name="x" />
+              </button>
             </div>
             <div className="qb-row indent">
-              {(s.type === 'literal' || s.type === 'set') ? (
-                <><span className="qb-lbl">{s.type === 'set' ? 'caractères' : 'texte'}</span>
-                  <input className="qb-input" value={s.value || ''} onChange={(e) => updSeg(i, { value: e.target.value })} /></>
+              {s.type === 'literal' || s.type === 'set' ? (
+                <>
+                  <span className="qb-lbl">{s.type === 'set' ? 'caractères' : 'texte'}</span>
+                  <input
+                    className="qb-input"
+                    value={s.value || ''}
+                    onChange={(e) => updSeg(i, { value: e.target.value })}
+                  />
+                </>
               ) : (
-                <><span className="qb-lbl">longueur</span>
-                  <input className="qb-input narrow" type="number" min="1" placeholder="exact" value={s.length ?? ''} onChange={(e) => updSeg(i, { length: e.target.value === '' ? '' : Number(e.target.value) })} />
+                <>
+                  <span className="qb-lbl">longueur</span>
+                  <input
+                    className="qb-input narrow"
+                    type="number"
+                    min="1"
+                    placeholder="exact"
+                    value={s.length ?? ''}
+                    onChange={(e) =>
+                      updSeg(i, { length: e.target.value === '' ? '' : Number(e.target.value) })
+                    }
+                  />
                   <span className="qb-lbl">ou min</span>
-                  <input className="qb-input narrow" type="number" min="0" value={s.min ?? ''} onChange={(e) => updSeg(i, { min: e.target.value === '' ? '' : Number(e.target.value) })} />
+                  <input
+                    className="qb-input narrow"
+                    type="number"
+                    min="0"
+                    value={s.min ?? ''}
+                    onChange={(e) =>
+                      updSeg(i, { min: e.target.value === '' ? '' : Number(e.target.value) })
+                    }
+                  />
                   <span className="qb-lbl">max</span>
-                  <input className="qb-input narrow" type="number" min="0" value={s.max ?? ''} onChange={(e) => updSeg(i, { max: e.target.value === '' ? '' : Number(e.target.value) })} /></>
+                  <input
+                    className="qb-input narrow"
+                    type="number"
+                    min="0"
+                    value={s.max ?? ''}
+                    onChange={(e) =>
+                      updSeg(i, { max: e.target.value === '' ? '' : Number(e.target.value) })
+                    }
+                  />
+                </>
               )}
             </div>
           </div>
         ))}
-        {segments.length === 0 && <div className="qb-hint">Aucun segment — cliquez « + Segment ».</div>}
+        {segments.length === 0 && (
+          <div className="qb-hint">Aucun segment — cliquez « + Segment ».</div>
+        )}
       </div>
-      {pattern && <div className="vtest-pattern"><span className="qb-lbl">motif généré</span> <code>{pattern}</code></div>}
+      {pattern && (
+        <div className="vtest-pattern">
+          <span className="qb-lbl">motif généré</span> <code>{pattern}</code>
+        </div>
+      )}
     </div>
   )
 }
@@ -517,17 +885,40 @@ export function MaskBuilder({ segments, caseSensitive, onChange }) {
 // config). Hidden behind a checkbox so it stays out of the way unless wanted.
 function ConditionTester({ cond, caseSensitive, onChange }) {
   const samplesText = cond.test_samples || ''
-  const sampleLines = samplesText.split('\n').map((s) => s.trim()).filter(Boolean)
+  const sampleLines = samplesText
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean)
   const [open, setOpen] = useState(!!samplesText)
   const [test, setTest] = useState({ results: [], error: null, loading: false })
-  const cfgKey = JSON.stringify({ k: cond.kind, g: cond.groups, s: cond.segments, cs: caseSensitive })
+  const cfgKey = JSON.stringify({
+    k: cond.kind,
+    g: cond.groups,
+    s: cond.segments,
+    cs: caseSensitive,
+  })
   useEffect(() => {
-    if (!open || sampleLines.length === 0) { setTest({ results: [], error: null, loading: false }); return }
+    if (!open || sampleLines.length === 0) {
+      setTest({ results: [], error: null, loading: false })
+      return
+    }
     setTest((t) => ({ ...t, loading: true }))
-    const cfg = { kind: cond.kind || 'rules', groups: cond.groups || [], segments: cond.segments || [], case_sensitive: caseSensitive }
+    const cfg = {
+      kind: cond.kind || 'rules',
+      groups: cond.groups || [],
+      segments: cond.segments || [],
+      case_sensitive: caseSensitive,
+    }
     const h = setTimeout(() => {
-      api.validateTest(cfg, sampleLines)
-        .then((r) => setTest({ results: r.ok ? (r.results || []) : [], error: r.ok ? null : r.error, loading: false }))
+      api
+        .validateTest(cfg, sampleLines)
+        .then((r) =>
+          setTest({
+            results: r.ok ? r.results || [] : [],
+            error: r.ok ? null : r.error,
+            loading: false,
+          }),
+        )
         .catch((e) => setTest({ results: [], error: e.message, loading: false }))
     }, 300)
     return () => clearTimeout(h)
@@ -540,14 +931,21 @@ function ConditionTester({ cond, caseSensitive, onChange }) {
         <span className="ports-title">Testeur</span>
         {open && test.loading && <span className="vtest-spin">…</span>}
         {open && sampleLines.length > 0 && !test.error && (
-          <span className={`vtest-score ${passCount === sampleLines.length ? 'all' : ''}`}>{passCount}/{sampleLines.length}</span>
+          <span className={`vtest-score ${passCount === sampleLines.length ? 'all' : ''}`}>
+            {passCount}/{sampleLines.length}
+          </span>
         )}
       </label>
       {open && (
         <>
-          <textarea className="vtest-input" rows={2} spellCheck={false}
+          <textarea
+            className="vtest-input"
+            rows={2}
+            spellCheck={false}
             placeholder={'Exemples (un par ligne)… F0-01073.pdf'}
-            value={samplesText} onChange={(e) => onChange({ test_samples: e.target.value })} />
+            value={samplesText}
+            onChange={(e) => onChange({ test_samples: e.target.value })}
+          />
           {test.error && <div className="qb-warn">{test.error}</div>}
           {sampleLines.length > 0 && !test.error && (
             <div className="vtest-results">
@@ -557,14 +955,24 @@ function ConditionTester({ cond, caseSensitive, onChange }) {
                 return (
                   <div className="vtest-item" key={i}>
                     <div className={`vtest-row ${ok ? 'ok' : 'ko'}`}>
-                      <span className="vtest-mark"><Icon name={ok ? 'check' : 'x'} size={11} /></span>
-                      <span className="vtest-val" title={s}>{s}</span>
-                      {!ok && r?.motif && r.motif !== 'OK' && <span className="vtest-motif" title={r.motif}>{r.motif}</span>}
+                      <span className="vtest-mark">
+                        <Icon name={ok ? 'check' : 'x'} size={11} />
+                      </span>
+                      <span className="vtest-val" title={s}>
+                        {s}
+                      </span>
+                      {!ok && r?.motif && r.motif !== 'OK' && (
+                        <span className="vtest-motif" title={r.motif}>
+                          {r.motif}
+                        </span>
+                      )}
                     </div>
                     {r?.steps?.length > 0 && (
                       <div className="vtest-steps">
                         {r.steps.map((st, j) => (
-                          <span key={j} className={`vstep ${st.status}`} title={st.label}>{st.label}</span>
+                          <span key={j} className={`vstep ${st.status}`} title={st.label}>
+                            {st.label}
+                          </span>
                         ))}
                       </div>
                     )}
@@ -592,8 +1000,8 @@ export function OutputsPane({ pid, wid, node, status, onChange, onRun, onPreview
   const split = d.split || {}
   const isSplit = !!split.enabled
 
-  const [zoom, setZoom] = useState(false)        // enlarge the flow map (many outputs)
-  const [topN, setTopN] = useState(10)           // "keep the N principal outputs" — pruning
+  const [zoom, setZoom] = useState(false) // enlarge the flow map (many outputs)
+  const [topN, setTopN] = useState(10) // "keep the N principal outputs" — pruning
 
   // "Split by value": scan the input for distinct extracted values and turn each
   // into an output. Re-scanning reuses an existing output's id for a value already
@@ -601,28 +1009,61 @@ export function OutputsPane({ pid, wid, node, status, onChange, onRun, onPreview
   const [scan, setScan] = useState({ loading: false, error: null, info: null })
   const scanSplit = () => {
     setScan({ loading: true, error: null, info: null })
-    api.splitScan(pid, wid, node.id, d).then((r) => {
-      const byVal = new Map(outputs.filter((o) => 'value' in o).map((o) => [o.value, o]))
-      const next = (r.values || []).map((v, i) => {
-        const ex = byVal.get(v.value)
-        return ex ? { ...ex, value: v.value }
-          : { id: uid(), label: v.value || '(vide)', color: OUTPUT_COLORS[i % OUTPUT_COLORS.length], value: v.value }
+    api
+      .splitScan(pid, wid, node.id, d)
+      .then((r) => {
+        const byVal = new Map(outputs.filter((o) => 'value' in o).map((o) => [o.value, o]))
+        const next = (r.values || []).map((v, i) => {
+          const ex = byVal.get(v.value)
+          return ex
+            ? { ...ex, value: v.value }
+            : {
+                id: uid(),
+                label: v.value || '(vide)',
+                color: OUTPUT_COLORS[i % OUTPUT_COLORS.length],
+                value: v.value,
+              }
+        })
+        // sort outputs alphabetically (natural order: 01, 02, 10) by value
+        next.sort((a, b) =>
+          String(a.value || '').localeCompare(String(b.value || ''), 'fr', { numeric: true }),
+        )
+        onChange({ outputs: next })
+        setScan({
+          loading: false,
+          error: null,
+          info: {
+            distinct: r.distinct,
+            truncated: r.truncated,
+            total: r.total,
+            found: next.length,
+            samples: r.samples || [],
+          },
+        })
       })
-      // sort outputs alphabetically (natural order: 01, 02, 10) by value
-      next.sort((a, b) => String(a.value || '').localeCompare(String(b.value || ''), 'fr', { numeric: true }))
-      onChange({ outputs: next })
-      setScan({ loading: false, error: null, info: { distinct: r.distinct, truncated: r.truncated, total: r.total, found: next.length, samples: r.samples || [] } })
-    }).catch((e) => setScan({ loading: false, error: e.message, info: null }))
+      .catch((e) => setScan({ loading: false, error: e.message, info: null }))
   }
 
   const items = [
     ...outputs.map((o) => ({
-      id: o.id, label: o.label || o.id, color: o.color, count: dist.counts[o.id] ?? 0,
+      id: o.id,
+      label: o.label || o.id,
+      color: o.color,
+      count: dist.counts[o.id] ?? 0,
       // 'empty' marks the split bucket whose value is "" — rendered in italic muted
       // text everywhere so the (vide) row isn't mistaken for a literal label.
       empty: 'value' in o && o.value === '',
     })),
-    ...(d.else_enabled !== false ? [{ id: 'else', label: d.else_label || 'Non classé', color: d.else_color || '#9aa3b2', count: dist.counts.else ?? 0 }] : []),
+    ...(d.else_enabled !== false
+      ? [
+          {
+            id: 'else',
+            label: d.else_label || 'Non classé',
+            color: d.else_color || '#9aa3b2',
+            count: dist.counts.else ?? 0,
+          },
+        ]
+      : []),
   ]
 
   // Physically reorder outputs by descending count (one-shot). The else bucket
@@ -634,9 +1075,9 @@ export function OutputsPane({ pid, wid, node, status, onChange, onRun, onPreview
       const ca = dist.counts[a.id] ?? 0
       const cb = dist.counts[b.id] ?? 0
       if (cb !== ca) return cb - ca
-      return outputs.indexOf(a) - outputs.indexOf(b)   // stable tiebreaker
+      return outputs.indexOf(a) - outputs.indexOf(b) // stable tiebreaker
     })
-    if (sorted.every((o, i) => o.id === outputs[i].id)) return  // already sorted
+    if (sorted.every((o, i) => o.id === outputs[i].id)) return // already sorted
     onChange({ outputs: sorted })
   }
 
@@ -648,29 +1089,40 @@ export function OutputsPane({ pid, wid, node, status, onChange, onRun, onPreview
     const n = Math.max(1, parseInt(topN, 10) || 1)
     const elsePatch = {
       else_enabled: true,
-      else_label: (d.else_label && d.else_label.trim()) ? d.else_label : 'Autres',
+      else_label: d.else_label && d.else_label.trim() ? d.else_label : 'Autres',
     }
-    if (outputs.length <= n) { onChange(elsePatch); return }
+    if (outputs.length <= n) {
+      onChange(elsePatch)
+      return
+    }
     const ranked = outputs
       .map((o, i) => ({ o, c: dist.counts[o.id] ?? 0, i }))
-      .sort((a, b) => (b.c - a.c) || (a.i - b.i))   // stable: equal counts keep prior order
+      .sort((a, b) => b.c - a.c || a.i - b.i) // stable: equal counts keep prior order
     const keepIds = new Set(ranked.slice(0, n).map((x) => x.o.id))
     onChange({ outputs: outputs.filter((o) => keepIds.has(o.id)), ...elsePatch })
   }
 
-  const setOutput = (i, patch) => onChange({ outputs: outputs.map((o, j) => (j === i ? { ...o, ...patch } : o)) })
-  const addOutput = () => onChange({
-    outputs: [...outputs, {
-      id: uid(), label: `Sortie ${outputs.length + 1}`,
-      color: OUTPUT_COLORS[outputs.length % OUTPUT_COLORS.length],
-      match: { conditionId: conditions[0]?.id || '', negate: false },
-    }],
-  })
+  const setOutput = (i, patch) =>
+    onChange({ outputs: outputs.map((o, j) => (j === i ? { ...o, ...patch } : o)) })
+  const addOutput = () =>
+    onChange({
+      outputs: [
+        ...outputs,
+        {
+          id: uid(),
+          label: `Sortie ${outputs.length + 1}`,
+          color: OUTPUT_COLORS[outputs.length % OUTPUT_COLORS.length],
+          match: { conditionId: conditions[0]?.id || '', negate: false },
+        },
+      ],
+    })
   const delOutput = (i) => onChange({ outputs: outputs.filter((_, j) => j !== i) })
   const moveOutput = (i, dir) => {
     const j = i + dir
     if (j < 0 || j >= outputs.length) return
-    const a = [...outputs];[a[i], a[j]] = [a[j], a[i]]; onChange({ outputs: a })
+    const a = [...outputs]
+    ;[a[i], a[j]] = [a[j], a[i]]
+    onChange({ outputs: a })
   }
   // Reshuffles the palette across outputs — a Fisher-Yates over OUTPUT_COLORS,
   // then assigned in order (cycles past the palette length, but never gives the
@@ -695,21 +1147,41 @@ export function OutputsPane({ pid, wid, node, status, onChange, onRun, onPreview
           {!isSplit && (
             <div className="route-mode">
               <div className="mode-toggle sm">
-                <button className={routing === 'first' ? 'on' : ''} onClick={() => onChange({ routing: 'first' })}
-                  title="Chaque ligne va dans la PREMIÈRE sortie dont la condition est vraie (ensembles disjoints).">Partition</button>
-                <button className={routing === 'all' ? 'on' : ''} onClick={() => onChange({ routing: 'all' })}
-                  title="Une ligne peut aller dans PLUSIEURS sorties.">Chevauchement</button>
+                <button
+                  className={routing === 'first' ? 'on' : ''}
+                  onClick={() => onChange({ routing: 'first' })}
+                  title="Chaque ligne va dans la PREMIÈRE sortie dont la condition est vraie (ensembles disjoints)."
+                >
+                  Partition
+                </button>
+                <button
+                  className={routing === 'all' ? 'on' : ''}
+                  onClick={() => onChange({ routing: 'all' })}
+                  title="Une ligne peut aller dans PLUSIEURS sorties."
+                >
+                  Chevauchement
+                </button>
               </div>
             </div>
           )}
-          <button className="flow-sort" onClick={sortOutputsByCount} disabled={!outputs.length || dist.loading}
-            title={routing === 'first' && !isSplit
-              ? 'Réordonne les sorties par effectif décroissant. Attention : en mode Partition, l\'ordre détermine le routage — le tri va modifier les ensembles.'
-              : 'Réordonne les sorties par effectif décroissant.'}>
+          <button
+            className="flow-sort"
+            onClick={sortOutputsByCount}
+            disabled={!outputs.length || dist.loading}
+            title={
+              routing === 'first' && !isSplit
+                ? "Réordonne les sorties par effectif décroissant. Attention : en mode Partition, l'ordre détermine le routage — le tri va modifier les ensembles."
+                : 'Réordonne les sorties par effectif décroissant.'
+            }
+          >
             <Icon name="sort" size={13} /> Trier par effectif
           </button>
-          <button className="flow-sort" onClick={() => setZoom(true)} disabled={!items.length}
-            title="Agrandir la carte des flux (utile quand il y a beaucoup de sorties)">
+          <button
+            className="flow-sort"
+            onClick={() => setZoom(true)}
+            disabled={!items.length}
+            title="Agrandir la carte des flux (utile quand il y a beaucoup de sorties)"
+          >
             <Icon name="maximize" size={13} /> Agrandir
           </button>
           {onRun && (
@@ -720,11 +1192,15 @@ export function OutputsPane({ pid, wid, node, status, onChange, onRun, onPreview
           <span className="route-total">Entrée : {dist.total.toLocaleString('fr-FR')}</span>
         </div>
         <div className="opane-flow-body">
-          {dist.error && !dist.loading
-            ? <div className="qb-warn">{dist.error}</div>
-            : <FlowMap items={items} total={dist.total} height={230} />}
+          {dist.error && !dist.loading ? (
+            <div className="qb-warn">{dist.error}</div>
+          ) : (
+            <FlowMap items={items} total={dist.total} height={230} />
+          )}
           {dist.loading && (
-            <div className="flow-loading"><span className="vtest-spin">…</span> Calcul de la répartition…</div>
+            <div className="flow-loading">
+              <span className="vtest-spin">…</span> Calcul de la répartition…
+            </div>
           )}
         </div>
       </div>
@@ -734,77 +1210,136 @@ export function OutputsPane({ pid, wid, node, status, onChange, onRun, onPreview
         <div className="ports-head">
           <span className="ports-title">Sorties</span>
           {isSplit ? (
-            <button className="ghost route-add" style={{ marginLeft: 'auto' }} disabled={scan.loading}
-              onClick={scanSplit} title="Analyser la colonne et créer une sortie par valeur distincte">
+            <button
+              className="ghost route-add"
+              style={{ marginLeft: 'auto' }}
+              disabled={scan.loading}
+              onClick={scanSplit}
+              title="Analyser la colonne et créer une sortie par valeur distincte"
+            >
               <Icon name="refresh" size={13} /> {scan.loading ? 'Scan…' : 'Scanner les valeurs'}
             </button>
           ) : (
-            <span className="qb-hint" style={{ marginLeft: 'auto' }}>chaque sortie reçoit une condition</span>
+            <span className="qb-hint" style={{ marginLeft: 'auto' }}>
+              chaque sortie reçoit une condition
+            </span>
           )}
           {outputs.length > 0 && (
-            <button className="ghost small" onClick={shuffleColors}
-              title="Réattribuer une couleur aléatoire à chaque sortie">
+            <button
+              className="ghost small"
+              onClick={shuffleColors}
+              title="Réattribuer une couleur aléatoire à chaque sortie"
+            >
               <Icon name="shuffle" size={13} />
             </button>
           )}
         </div>
-        {isSplit && (scan.error || scan.info) && (
-          scan.error
-            ? <div className="qb-warn">{scan.error}</div>
-            : <>
-                <div className="qb-hint">
-                  {scan.info.found} sortie(s) sur {scan.info.distinct} valeur(s) distincte(s).
-                  {scan.info.truncated && ' Plus de 200 valeurs — affinez l\'extraction.'}
+        {isSplit &&
+          (scan.error || scan.info) &&
+          (scan.error ? (
+            <div className="qb-warn">{scan.error}</div>
+          ) : (
+            <>
+              <div className="qb-hint">
+                {scan.info.found} sortie(s) sur {scan.info.distinct} valeur(s) distincte(s).
+                {scan.info.truncated && " Plus de 200 valeurs — affinez l'extraction."}
+              </div>
+              {scan.info.samples?.length > 0 && (
+                <div className="split-preview">
+                  <div className="split-prev-title">Aperçu de l'extraction</div>
+                  {scan.info.samples.map((sp, i) => (
+                    <div className="split-prev-row" key={i}>
+                      <span className="split-prev-raw" title={sp.raw}>
+                        {sp.raw}
+                      </span>
+                      <span className="split-prev-arrow">→</span>
+                      <code className="split-val">{sp.key === '' ? '(vide)' : sp.key}</code>
+                    </div>
+                  ))}
                 </div>
-                {scan.info.samples?.length > 0 && (
-                  <div className="split-preview">
-                    <div className="split-prev-title">Aperçu de l'extraction</div>
-                    {scan.info.samples.map((sp, i) => (
-                      <div className="split-prev-row" key={i}>
-                        <span className="split-prev-raw" title={sp.raw}>{sp.raw}</span>
-                        <span className="split-prev-arrow">→</span>
-                        <code className="split-val">{sp.key === '' ? '(vide)' : sp.key}</code>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </>
-        )}
+              )}
+            </>
+          ))}
         {isSplit && outputs.length === 0 && !scan.loading && (
-          <div className="qb-hint">Définissez l'extraction à gauche, puis cliquez sur <b>Scanner les valeurs</b>.</div>
+          <div className="qb-hint">
+            Définissez l'extraction à gauche, puis cliquez sur <b>Scanner les valeurs</b>.
+          </div>
         )}
         {isSplit && outputs.length > 1 && (
           <div className="prune-row">
             <span className="qb-lbl">Garder les</span>
-            <input className="qb-input" type="number" min="1" max={outputs.length} style={{ width: 60 }}
-              value={topN} onChange={(e) => setTopN(e.target.value)} />
+            <input
+              className="qb-input"
+              type="number"
+              min="1"
+              max={outputs.length}
+              style={{ width: 60 }}
+              value={topN}
+              onChange={(e) => setTopN(e.target.value)}
+            />
             <span className="qb-lbl">principales par effectif —</span>
-            <button className="ghost small" onClick={pruneToTopN}
-              title="Supprime toutes les autres sorties. Les lignes qu'elles recevaient retombent dans la sortie « reste » (activée et nommée « Autres » par défaut).">
+            <button
+              className="ghost small"
+              onClick={pruneToTopN}
+              title="Supprime toutes les autres sorties. Les lignes qu'elles recevaient retombent dans la sortie « reste » (activée et nommée « Autres » par défaut)."
+            >
               <Icon name="filter" size={12} /> Élaguer le reste
             </button>
           </div>
         )}
         <div className="opane-outs-list">
           {outputs.map((o, i) => (
-            <OutputRow key={o.id} o={o} index={i} last={i === outputs.length - 1} conditions={conditions}
+            <OutputRow
+              key={o.id}
+              o={o}
+              index={i}
+              last={i === outputs.length - 1}
+              conditions={conditions}
               splitMode={isSplit}
-              count={dist.counts[o.id]} onChange={(patch) => setOutput(i, patch)} onDelete={() => delOutput(i)}
-              onMove={(dir) => moveOutput(i, dir)} onPreview={() => onPreview(o.id)} />
+              count={dist.counts[o.id]}
+              onChange={(patch) => setOutput(i, patch)}
+              onDelete={() => delOutput(i)}
+              onMove={(dir) => moveOutput(i, dir)}
+              onPreview={() => onPreview(o.id)}
+            />
           ))}
-          {!isSplit && <button className="ghost route-add" onClick={addOutput}><Icon name="plus" /> Ajouter une sortie</button>}
+          {!isSplit && (
+            <button className="ghost route-add" onClick={addOutput}>
+              <Icon name="plus" /> Ajouter une sortie
+            </button>
+          )}
           <div className="route-else">
             <label className="qb-check">
-              <input type="checkbox" checked={d.else_enabled !== false} onChange={(e) => onChange({ else_enabled: e.target.checked })} />
+              <input
+                type="checkbox"
+                checked={d.else_enabled !== false}
+                onChange={(e) => onChange({ else_enabled: e.target.checked })}
+              />
               Sortie « reste » pour les lignes non classées
             </label>
             {d.else_enabled !== false && (
               <div className="route-else-cfg">
-                <input type="color" value={d.else_color || '#9aa3b2'} onChange={(e) => onChange({ else_color: e.target.value })} />
-                <input className="qb-input" value={d.else_label || ''} placeholder="Non classé"
-                  onChange={(e) => onChange({ else_label: e.target.value })} />
-                {dist.counts.else != null && <span className="route-count">{dist.counts.else.toLocaleString('fr-FR')}</span>}
-                <button className="mini" title="Aperçu de cette sortie" onClick={() => onPreview('else')}><Icon name="eye" /></button>
+                <input
+                  type="color"
+                  value={d.else_color || '#9aa3b2'}
+                  onChange={(e) => onChange({ else_color: e.target.value })}
+                />
+                <input
+                  className="qb-input"
+                  value={d.else_label || ''}
+                  placeholder="Non classé"
+                  onChange={(e) => onChange({ else_label: e.target.value })}
+                />
+                {dist.counts.else != null && (
+                  <span className="route-count">{dist.counts.else.toLocaleString('fr-FR')}</span>
+                )}
+                <button
+                  className="mini"
+                  title="Aperçu de cette sortie"
+                  onClick={() => onPreview('else')}
+                >
+                  <Icon name="eye" />
+                </button>
               </div>
             )}
           </div>
@@ -814,19 +1349,48 @@ export function OutputsPane({ pid, wid, node, status, onChange, onRun, onPreview
   )
 }
 
-function OutputRow({ o, index, last, conditions, count, splitMode, onChange, onDelete, onMove, onPreview }) {
+function OutputRow({
+  o,
+  index,
+  last,
+  conditions,
+  count,
+  splitMode,
+  onChange,
+  onDelete,
+  onMove,
+  onPreview,
+}) {
   const match = o.match || { conditionId: '', negate: false }
   const setMatch = (patch) => onChange({ match: { ...match, ...patch } })
   return (
     <div className="ocard" style={{ borderLeftColor: o.color }}>
       <div className="ocard-head">
-        <input type="color" value={o.color || '#4E79A7'} onChange={(e) => onChange({ color: e.target.value })} title="Couleur de la sortie" />
-        <input className="ocard-name" value={o.label || ''} placeholder="Nom de la sortie" onChange={(e) => onChange({ label: e.target.value })} />
+        <input
+          type="color"
+          value={o.color || '#4E79A7'}
+          onChange={(e) => onChange({ color: e.target.value })}
+          title="Couleur de la sortie"
+        />
+        <input
+          className="ocard-name"
+          value={o.label || ''}
+          placeholder="Nom de la sortie"
+          onChange={(e) => onChange({ label: e.target.value })}
+        />
         {count != null && <span className="route-count">{count.toLocaleString('fr-FR')}</span>}
-        <button className="mini" title="Aperçu des données de cette sortie" onClick={onPreview}><Icon name="eye" /></button>
-        <button className="mini" onClick={() => onMove(-1)} disabled={index === 0}><Icon name="up" /></button>
-        <button className="mini" onClick={() => onMove(1)} disabled={last}><Icon name="down" /></button>
-        <button className="ghost danger small" onClick={onDelete}><Icon name="x" /></button>
+        <button className="mini" title="Aperçu des données de cette sortie" onClick={onPreview}>
+          <Icon name="eye" />
+        </button>
+        <button className="mini" onClick={() => onMove(-1)} disabled={index === 0}>
+          <Icon name="up" />
+        </button>
+        <button className="mini" onClick={() => onMove(1)} disabled={last}>
+          <Icon name="down" />
+        </button>
+        <button className="ghost danger small" onClick={onDelete}>
+          <Icon name="x" />
+        </button>
       </div>
       {splitMode ? (
         <div className="ocard-attr">
@@ -836,18 +1400,33 @@ function OutputRow({ o, index, last, conditions, count, splitMode, onChange, onD
           </code>
         </div>
       ) : (
-      <>
-      <div className="ocard-attr">
-        <span className="qb-lbl">reçoit</span>
-        <button className={`neg ${match.negate ? 'on' : ''}`} onClick={() => setMatch({ negate: !match.negate })}
-          title="Inverser : les lignes qui NE satisfont PAS la condition">NON</button>
-        <select className="qb-select" value={match.conditionId || ''} onChange={(e) => setMatch({ conditionId: e.target.value })}>
-          <option value="">— choisir une condition —</option>
-          {conditions.map((c) => <option key={c.id} value={c.id}>{c.name || c.id}</option>)}
-        </select>
-      </div>
-      {!match.conditionId && <div className="qb-hint">Sans condition attribuée, cette sortie reste vide.</div>}
-      </>
+        <>
+          <div className="ocard-attr">
+            <span className="qb-lbl">reçoit</span>
+            <button
+              className={`neg ${match.negate ? 'on' : ''}`}
+              onClick={() => setMatch({ negate: !match.negate })}
+              title="Inverser : les lignes qui NE satisfont PAS la condition"
+            >
+              NON
+            </button>
+            <select
+              className="qb-select"
+              value={match.conditionId || ''}
+              onChange={(e) => setMatch({ conditionId: e.target.value })}
+            >
+              <option value="">— choisir une condition —</option>
+              {conditions.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name || c.id}
+                </option>
+              ))}
+            </select>
+          </div>
+          {!match.conditionId && (
+            <div className="qb-hint">Sans condition attribuée, cette sortie reste vide.</div>
+          )}
+        </>
       )}
     </div>
   )
@@ -855,9 +1434,16 @@ function OutputRow({ o, index, last, conditions, count, splitMode, onChange, onD
 
 // One-stage Sankey: a single input bar on the left fans out into the outputs.
 export function FlowMap({ items, total, height = 380 }) {
-  const W = 760, barW = 15, gap = 10, padL = 96, padR = 198
+  const W = 760,
+    barW = 15,
+    gap = 10,
+    padL = 96,
+    padR = 198
   const n = items.length
-  const S = Math.max(1, items.reduce((a, it) => a + (it.count || 0), 0))
+  const S = Math.max(
+    1,
+    items.reduce((a, it) => a + (it.count || 0), 0),
+  )
   // Right-side bands get a minimum height so a tiny category (and its two-line
   // label) stays fully readable instead of collapsing onto its neighbour. The SVG
   // grows taller if the floors no longer fit, so every output is always visible.
@@ -866,19 +1452,24 @@ export function FlowMap({ items, total, height = 380 }) {
   const usableH = Math.max(20, H - gap * Math.max(0, n - 1))
   const floor = Math.min(minSlot, usableH / Math.max(1, n))
   const extra = Math.max(0, usableH - floor * n)
-  const leftX = padL, rightX = W - padR
+  const leftX = padL,
+    rightX = W - padR
   // top/bottom padding so a band's three-line label (which extends below its
   // centre) is never clipped at the edges of the SVG.
-  const padT = 6, padB = 22
+  const padT = 6,
+    padB = 22
   // share of the whole input, 2 decimals, French formatting (e.g. "75,55 %")
-  const pct = (c) => (total > 0 ? `${((c || 0) / total * 100).toFixed(2).replace('.', ',')} %` : '')
-  let ly = 0, ry = 0
+  const pct = (c) =>
+    total > 0 ? `${(((c || 0) / total) * 100).toFixed(2).replace('.', ',')} %` : ''
+  let ly = 0,
+    ry = 0
   const ribbons = items.map((it) => {
     const c = it.count || 0
     const lh = (c / S) * H
     const rh = floor + (c / S) * extra
     const seg = { it, ly0: ly, ly1: ly + lh, ry0: ry, ry1: ry + rh }
-    ly += lh; ry += rh + gap
+    ly += lh
+    ry += rh + gap
     return seg
   })
   const ribbon = (x0, a0, b0, x1, a1, b1) => {
@@ -886,24 +1477,47 @@ export function FlowMap({ items, total, height = 380 }) {
     return `M ${x0} ${a0} C ${mx} ${a0}, ${mx} ${a1}, ${x1} ${a1} L ${x1} ${b1} C ${mx} ${b1}, ${mx} ${b0}, ${x0} ${b0} Z`
   }
   return (
-    <svg viewBox={`0 0 ${W} ${H + padT + padB}`} className="flow-svg" preserveAspectRatio="xMidYMid meet">
+    <svg
+      viewBox={`0 0 ${W} ${H + padT + padB}`}
+      className="flow-svg"
+      preserveAspectRatio="xMidYMid meet"
+    >
       <g transform={`translate(0, ${padT})`}>
         <rect x={leftX - barW} y={0} width={barW} height={H} rx={2} fill="#9aa3b2" />
-        <text x={leftX - barW - 6} y={14} textAnchor="end" className="flow-in">Entrée</text>
-        <text x={leftX - barW - 6} y={28} textAnchor="end" className="flow-in-n">{total.toLocaleString('fr-FR')}</text>
+        <text x={leftX - barW - 6} y={14} textAnchor="end" className="flow-in">
+          Entrée
+        </text>
+        <text x={leftX - barW - 6} y={28} textAnchor="end" className="flow-in-n">
+          {total.toLocaleString('fr-FR')}
+        </text>
         {ribbons.map(({ it, ly0, ly1, ry0, ry1 }) => (
           <g key={it.id}>
             <path d={ribbon(leftX, ly0, ly1, rightX, ry0, ry1)} fill={it.color} opacity="0.5" />
-            <rect x={rightX} y={ry0} width={barW} height={Math.max(1, ry1 - ry0)} rx={2} fill={it.color} />
-            <text x={rightX + barW + 7} y={(ry0 + ry1) / 2 - 1}
-              className={`flow-lbl ${it.empty ? 'flow-lbl-empty' : ''}`}>
-              {it.label}<tspan className="flow-pct"> · {pct(it.count)}</tspan>
+            <rect
+              x={rightX}
+              y={ry0}
+              width={barW}
+              height={Math.max(1, ry1 - ry0)}
+              rx={2}
+              fill={it.color}
+            />
+            <text
+              x={rightX + barW + 7}
+              y={(ry0 + ry1) / 2 - 1}
+              className={`flow-lbl ${it.empty ? 'flow-lbl-empty' : ''}`}
+            >
+              {it.label}
+              <tspan className="flow-pct"> · {pct(it.count)}</tspan>
             </text>
-            <text x={rightX + barW + 7} y={(ry0 + ry1) / 2 + 12} className="flow-cnt">{(it.count || 0).toLocaleString('fr-FR')}</text>
+            <text x={rightX + barW + 7} y={(ry0 + ry1) / 2 + 12} className="flow-cnt">
+              {(it.count || 0).toLocaleString('fr-FR')}
+            </text>
           </g>
         ))}
         {S === 1 && items.every((it) => !it.count) && (
-          <text x={W / 2} y={H / 2} textAnchor="middle" className="flow-empty">— exécute l'amont pour voir la répartition —</text>
+          <text x={W / 2} y={H / 2} textAnchor="middle" className="flow-empty">
+            — exécute l'amont pour voir la répartition —
+          </text>
         )}
       </g>
     </svg>
@@ -914,7 +1528,9 @@ export function FlowMap({ items, total, height = 380 }) {
 // stays readable even with dozens of outputs (e.g. after a "split by value").
 function FlowMapModal({ items, total, onClose }) {
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose()
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
@@ -924,8 +1540,12 @@ function FlowMapModal({ items, total, onClose }) {
       <div className="modal flowmap-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h3>Carte des flux</h3>
-          <span className="route-total" style={{ marginLeft: 12 }}>Entrée : {total.toLocaleString('fr-FR')} · {items.length} sortie(s)</span>
-          <button className="ghost small" style={{ marginLeft: 'auto' }} onClick={onClose}><Icon name="x" /></button>
+          <span className="route-total" style={{ marginLeft: 12 }}>
+            Entrée : {total.toLocaleString('fr-FR')} · {items.length} sortie(s)
+          </span>
+          <button className="ghost small" style={{ marginLeft: 'auto' }} onClick={onClose}>
+            <Icon name="x" />
+          </button>
         </div>
         <div className="flowmap-modal-body">
           <FlowMap items={items} total={total} height={height} />

@@ -1,5 +1,7 @@
 # Roade
 
+[![CI](https://github.com/MaloLeCouls/Roade/actions/workflows/ci.yml/badge.svg)](https://github.com/MaloLeCouls/Roade/actions/workflows/ci.yml)
+
 Du breton "Roadenn", "Donnée" en français :)
 
 Petite application web pour transformer des fichiers **Excel/CSV** en assemblant
@@ -62,18 +64,30 @@ Puis ouvrir http://localhost:5173
 
 ```powershell
 # Backend
-.\backend\.venv\Scripts\python.exe -m uvicorn main:app --app-dir backend --port 8000
+.\.venv\Scripts\python.exe -m uvicorn main:app --app-dir backend --port 8000
 # Frontend (autre terminal)
 cd frontend ; npm run dev
 ```
 
 ### Installation
 
+Prérequis : **Python ≥ 3.11**, **Node ≥ 18**, et [uv](https://docs.astral.sh/uv/)
+(`py -m pip install uv` si tu ne l'as pas).
+
 ```powershell
-py -m venv backend\.venv
-backend\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
-npm install --prefix frontend
+uv sync                       # crée .venv\ et installe les deps Python verrouillées (uv.lock)
+npm install --prefix frontend # installe les deps Node verrouillées (package-lock.json)
 ```
+
+### Mode production (un seul process)
+
+```powershell
+npm run build --prefix frontend                                 # produit frontend/dist/
+.\.venv\Scripts\python.exe -m uvicorn main:app --app-dir backend # sert API + dist sur :8000
+```
+
+Ouvre alors `http://localhost:8000` — pas besoin de Vite. Si `frontend/dist/`
+n'existe pas, le backend tourne quand même : seuls les `/api/*` répondent (mode dev).
 
 ## Stack
 

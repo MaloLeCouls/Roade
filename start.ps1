@@ -4,7 +4,7 @@ $root = $PSScriptRoot
 Write-Host "Demarrage du backend (http://127.0.0.1:8000) ..."
 Start-Process powershell -ArgumentList @(
   '-NoExit', '-Command',
-  "& '$root\backend\.venv\Scripts\python.exe' -m uvicorn main:app --host 127.0.0.1 --port 8000 --app-dir '$root\backend' --reload"
+  "& '$root\.venv\Scripts\python.exe' -m uvicorn main:app --host 127.0.0.1 --port 8000 --app-dir '$root\backend' --reload"
 )
 
 Write-Host "Demarrage du frontend (http://localhost:5173) ..."

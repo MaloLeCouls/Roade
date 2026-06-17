@@ -14,18 +14,38 @@ export default function GroupNode({ id, data, selected }) {
   const set = (patch) => onNodeDataChange?.(id, patch)
 
   return (
-    <div className={`node-group ${selected ? 'sel' : ''}`} style={{ width: w, height: h, '--gc': color }}>
-      <NodeResizer color={color} isVisible={selected} minWidth={180} minHeight={120}
-        onResize={(_, p) => set({ w: Math.round(p.width), h: Math.round(p.height) })} />
+    <div
+      className={`node-group ${selected ? 'sel' : ''}`}
+      style={{ width: w, height: h, '--gc': color }}
+    >
+      <NodeResizer
+        color={color}
+        isVisible={selected}
+        minWidth={180}
+        minHeight={120}
+        onResize={(_, p) => set({ w: Math.round(p.width), h: Math.round(p.height) })}
+      />
       <div className="group-titlebar" style={{ background: color }}>
         {editing ? (
-          <input autoFocus className="group-title-input nodrag" value={data.label || ''} placeholder="Groupe"
+          <input
+            autoFocus
+            className="group-title-input nodrag"
+            value={data.label || ''}
+            placeholder="Groupe"
             onChange={(e) => set({ label: e.target.value })}
             onBlur={() => setEditing(false)}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') setEditing(false) }} />
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === 'Escape') setEditing(false)
+            }}
+          />
         ) : (
-          <span className="group-title" title="Glisser pour déplacer le cadre et son contenu · double-clic pour renommer"
-            onDoubleClick={() => setEditing(true)}>{data.label || 'Groupe'}</span>
+          <span
+            className="group-title"
+            title="Glisser pour déplacer le cadre et son contenu · double-clic pour renommer"
+            onDoubleClick={() => setEditing(true)}
+          >
+            {data.label || 'Groupe'}
+          </span>
         )}
       </div>
     </div>

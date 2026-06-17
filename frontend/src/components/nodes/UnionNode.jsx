@@ -7,7 +7,13 @@ export default function UnionNode({ id, data, selected }) {
   const st = status[id] || {}
   return (
     <div className={`node node-union ${selected ? 'sel' : ''}`}>
-      <Handle type="target" position={Position.Left} id="in" style={{ top: 40 }} className="anchor anchor-in" />
+      <Handle
+        type="target"
+        position={Position.Left}
+        id="in"
+        style={{ top: 40 }}
+        className="anchor anchor-in"
+      />
       <div className="node-head">
         <span className="node-title">{data.label || 'Union'}</span>
         <LockBadge locked={data.locked} />
@@ -19,7 +25,12 @@ export default function UnionNode({ id, data, selected }) {
           {data.distinct ? ' · sans doublons' : ''}
         </div>
       </div>
-      <NodeFooter st={st} running={running === id} onPreview={() => onPreview(id)} onRun={() => onRunNode(id)} />
+      <NodeFooter
+        st={st}
+        running={running === id}
+        onPreview={() => onPreview(id)}
+        onRun={() => onRunNode(id)}
+      />
       <Handle type="source" position={Position.Right} id="out" className="anchor anchor-out" />
     </div>
   )

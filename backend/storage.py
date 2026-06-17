@@ -12,13 +12,14 @@ projects/
         <node_id>.parquet      # materialized output of each block
         <node_id>.meta.json    # cached preview (columns, sample, stats)
 """
+
 from __future__ import annotations
 
 import json
 import re
+import shutil
 import time
 import uuid
-import shutil
 from pathlib import Path
 
 # projects/ lives next to the backend/ folder, at the repo root.
@@ -171,34 +172,33 @@ def _handle_suffix(handle: str) -> str:
     return "" if handle in (None, "", "out") else f"__{handle}"
 
 
-def node_parquet(project_id: str, workflow_id: str, node_id: str,
-                 handle: str = "out") -> Path:
+def node_parquet(project_id: str, workflow_id: str, node_id: str, handle: str = "out") -> Path:
     return data_dir(project_id, workflow_id) / f"{node_id}{_handle_suffix(handle)}.parquet"
 
 
-def node_meta_path(project_id: str, workflow_id: str, node_id: str,
-                   handle: str = "out") -> Path:
+def node_meta_path(project_id: str, workflow_id: str, node_id: str, handle: str = "out") -> Path:
     return data_dir(project_id, workflow_id) / f"{node_id}{_handle_suffix(handle)}.meta.json"
 
 
-def read_node_meta(project_id: str, workflow_id: str, node_id: str,
-                   handle: str = "out") -> dict | None:
+def read_node_meta(
+    project_id: str, workflow_id: str, node_id: str, handle: str = "out"
+) -> dict | None:
     p = node_meta_path(project_id, workflow_id, node_id, handle)
     if not p.exists():
         return None
     return json.loads(p.read_text(encoding="utf-8"))
 
 
-def write_node_meta(project_id: str, workflow_id: str, node_id: str, meta: dict,
-                    handle: str = "out") -> None:
+def write_node_meta(
+    project_id: str, workflow_id: str, node_id: str, meta: dict, handle: str = "out"
+) -> None:
     data_dir(project_id, workflow_id).mkdir(parents=True, exist_ok=True)
     node_meta_path(project_id, workflow_id, node_id, handle).write_text(
         json.dumps(meta, indent=2), encoding="utf-8"
     )
 
 
-def prune_node_outputs(project_id: str, workflow_id: str, node_id: str,
-                       keep_handles) -> list[str]:
+def prune_node_outputs(project_id: str, workflow_id: str, node_id: str, keep_handles) -> list[str]:
     # Delete any .parquet/.meta.json on disk for this node whose handle isn't
     # in `keep_handles`. Called right after a node re-materializes so a config
     # that drops an output (or toggles `else` off) doesn't leave a ghost file
@@ -214,11 +214,11 @@ def prune_node_outputs(project_id: str, workflow_id: str, node_id: str,
         for ext in (".parquet", ".meta.json"):
             if not nm.endswith(ext):
                 continue
-            stem = nm[:-len(ext)]
+            stem = nm[: -len(ext)]
             if stem == node_id:
                 handle = "out"
             elif stem.startswith(prefix):
-                handle = stem[len(prefix):]
+                handle = stem[len(prefix) :]
             else:
                 continue
             if handle not in keep:

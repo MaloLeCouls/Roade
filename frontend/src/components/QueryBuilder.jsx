@@ -5,16 +5,44 @@
  */
 import Icon from './Icon'
 
-const AGG = ['SUM', 'AVG', 'MIN', 'MAX', 'COUNT', 'COUNT_DISTINCT', 'MEDIAN', 'STDDEV', 'STRING_AGG']
-const OPS = ['=', '!=', '>', '>=', '<', '<=', 'LIKE', 'NOT LIKE', 'IN', 'NOT IN', 'IS NULL', 'IS NOT NULL', 'BETWEEN']
+const AGG = [
+  'SUM',
+  'AVG',
+  'MIN',
+  'MAX',
+  'COUNT',
+  'COUNT_DISTINCT',
+  'MEDIAN',
+  'STDDEV',
+  'STRING_AGG',
+]
+const OPS = [
+  '=',
+  '!=',
+  '>',
+  '>=',
+  '<',
+  '<=',
+  'LIKE',
+  'NOT LIKE',
+  'IN',
+  'NOT IN',
+  'IS NULL',
+  'IS NOT NULL',
+  'BETWEEN',
+]
 const JOIN_TYPES = ['INNER', 'LEFT', 'RIGHT', 'FULL', 'CROSS']
-const VALUE_TYPES = [['text', 'texte'], ['number', 'nombre'], ['boolean', 'booléen'], ['raw', 'brut']]
+const VALUE_TYPES = [
+  ['text', 'texte'],
+  ['number', 'nombre'],
+  ['boolean', 'booléen'],
+  ['raw', 'brut'],
+]
 
 function colOptions(inputs) {
   const out = []
   for (const inp of inputs)
-    for (const c of inp.columns || [])
-      out.push({ input: inp.alias, name: c.name, type: c.type })
+    for (const c of inp.columns || []) out.push({ input: inp.alias, name: c.name, type: c.type })
   return out
 }
 
@@ -34,7 +62,9 @@ function ColPicker({ inputs, value, onChange, allowEmpty }) {
     >
       {/* always show an explicit empty option so an unpicked column reads as
           « — colonne — » instead of silently defaulting to the first one */}
-      <option value="">{opts.length === 0 ? '(exécutez les blocs en amont)' : '— colonne —'}</option>
+      <option value="">
+        {opts.length === 0 ? '(exécutez les blocs en amont)' : '— colonne —'}
+      </option>
       {inputs.map((inp) => (
         <optgroup key={inp.alias} label={`${inp.alias} — ${inp.label || ''}`}>
           {(inp.columns || []).map((c) => (
@@ -53,7 +83,11 @@ function Section({ title, children, onAdd, addLabel }) {
     <div className="qb-section">
       <div className="qb-section-head">
         <span>{title}</span>
-        {onAdd && <button className="ghost small" onClick={onAdd}>+ {addLabel || 'Ajouter'}</button>}
+        {onAdd && (
+          <button className="ghost small" onClick={onAdd}>
+            + {addLabel || 'Ajouter'}
+          </button>
+        )}
       </div>
       <div className="qb-section-body">{children}</div>
     </div>
@@ -70,18 +104,22 @@ export default function QueryBuilder({ value, onChange, inputs }) {
     arr[i] = { ...arr[i], ...patch }
     setList(key, arr)
   }
-  const del = (key, i) => setList(key, list(key).filter((_, j) => j !== i))
+  const del = (key, i) =>
+    setList(
+      key,
+      list(key).filter((_, j) => j !== i),
+    )
 
   const hasSecond = inputs.length > 1
   const primary = inputs[0]?.alias || 'in1'
-  const firstCol = inputs[0]?.columns?.[0]?.name || ''   // sensible default so a new item isn't column-less
+  const firstCol = inputs[0]?.columns?.[0]?.name || '' // sensible default so a new item isn't column-less
 
   return (
     <div className="qb">
       {inputs.length === 0 && (
         <div className="qb-warn">
-          Connectez au moins une entrée (ancre <b>in1</b>) à ce bloc, puis exécutez les blocs
-          amont pour charger leurs colonnes.
+          Connectez au moins une entrée (ancre <b>in1</b>) à ce bloc, puis exécutez les blocs amont
+          pour charger leurs colonnes.
         </div>
       )}
 
@@ -89,40 +127,77 @@ export default function QueryBuilder({ value, onChange, inputs }) {
       <Section
         title="Colonnes en sortie (SELECT)"
         addLabel="colonne"
-        onAdd={() => setList('select', [...list('select'), { kind: 'column', input: primary, column: firstCol }])}
+        onAdd={() =>
+          setList('select', [
+            ...list('select'),
+            { kind: 'column', input: primary, column: firstCol },
+          ])
+        }
       >
         <label className="qb-check">
-          <input type="checkbox" checked={!!q.distinct} onChange={(e) => set({ distinct: e.target.checked })} />
+          <input
+            type="checkbox"
+            checked={!!q.distinct}
+            onChange={(e) => set({ distinct: e.target.checked })}
+          />
           Lignes distinctes (DISTINCT)
         </label>
-        {list('select').length === 0 && <div className="qb-hint">Vide → toutes les colonnes (*)</div>}
+        {list('select').length === 0 && (
+          <div className="qb-hint">Vide → toutes les colonnes (*)</div>
+        )}
         {list('select').map((it, i) => (
           <div className="qb-row" key={i}>
-            <select className="qb-select narrow" value={it.kind || 'column'}
-              onChange={(e) => upd('select', i, { kind: e.target.value })}>
+            <select
+              className="qb-select narrow"
+              value={it.kind || 'column'}
+              onChange={(e) => upd('select', i, { kind: e.target.value })}
+            >
               <option value="column">Colonne</option>
               <option value="agg">Agrégat</option>
               <option value="expr">Expression</option>
             </select>
 
             {it.kind === 'expr' ? (
-              <input className="qb-input grow" placeholder="ex: Montant * 1.2"
-                value={it.expression || ''} onChange={(e) => upd('select', i, { expression: e.target.value })} />
+              <input
+                className="qb-input grow"
+                placeholder="ex: Montant * 1.2"
+                value={it.expression || ''}
+                onChange={(e) => upd('select', i, { expression: e.target.value })}
+              />
             ) : it.kind === 'agg' ? (
               <>
-                <select className="qb-select narrow" value={it.func || 'SUM'}
-                  onChange={(e) => upd('select', i, { func: e.target.value })}>
-                  {AGG.map((a) => <option key={a}>{a}</option>)}
+                <select
+                  className="qb-select narrow"
+                  value={it.func || 'SUM'}
+                  onChange={(e) => upd('select', i, { func: e.target.value })}
+                >
+                  {AGG.map((a) => (
+                    <option key={a}>{a}</option>
+                  ))}
                 </select>
-                <ColPicker inputs={inputs} value={it} onChange={(v) => upd('select', i, v || { input: primary, column: '' })} />
+                <ColPicker
+                  inputs={inputs}
+                  value={it}
+                  onChange={(v) => upd('select', i, v || { input: primary, column: '' })}
+                />
               </>
             ) : (
-              <ColPicker inputs={inputs} value={it} onChange={(v) => upd('select', i, v || { input: primary, column: '' })} />
+              <ColPicker
+                inputs={inputs}
+                value={it}
+                onChange={(v) => upd('select', i, v || { input: primary, column: '' })}
+              />
             )}
 
-            <input className="qb-input alias" placeholder="alias"
-              value={it.alias || ''} onChange={(e) => upd('select', i, { alias: e.target.value })} />
-            <button className="ghost danger small" onClick={() => del('select', i)}><Icon name="x" /></button>
+            <input
+              className="qb-input alias"
+              placeholder="alias"
+              value={it.alias || ''}
+              onChange={(e) => upd('select', i, { alias: e.target.value })}
+            />
+            <button className="ghost danger small" onClick={() => del('select', i)}>
+              <Icon name="x" />
+            </button>
           </div>
         ))}
       </Section>
@@ -132,99 +207,230 @@ export default function QueryBuilder({ value, onChange, inputs }) {
         <Section
           title="Jointures (JOIN)"
           addLabel="jointure"
-          onAdd={() => setList('joins', [...list('joins'), {
-            input: inputs[1].alias, type: 'INNER',
-            on: [{ left_input: primary, left_column: '', right_input: inputs[1].alias, right_column: '' }],
-          }])}
+          onAdd={() =>
+            setList('joins', [
+              ...list('joins'),
+              {
+                input: inputs[1].alias,
+                type: 'INNER',
+                on: [
+                  {
+                    left_input: primary,
+                    left_column: '',
+                    right_input: inputs[1].alias,
+                    right_column: '',
+                  },
+                ],
+              },
+            ])
+          }
         >
           {list('joins').map((j, i) => (
             <div className="qb-block" key={i}>
               <div className="qb-row">
-                <select className="qb-select narrow" value={j.type}
-                  onChange={(e) => upd('joins', i, { type: e.target.value })}>
-                  {JOIN_TYPES.map((t) => <option key={t}>{t}</option>)}
+                <select
+                  className="qb-select narrow"
+                  value={j.type}
+                  onChange={(e) => upd('joins', i, { type: e.target.value })}
+                >
+                  {JOIN_TYPES.map((t) => (
+                    <option key={t}>{t}</option>
+                  ))}
                 </select>
                 <span className="qb-lbl">JOIN</span>
-                <select className="qb-select narrow" value={j.input}
-                  onChange={(e) => upd('joins', i, { input: e.target.value })}>
-                  {inputs.map((inp) => <option key={inp.alias} value={inp.alias}>{inp.alias}</option>)}
+                <select
+                  className="qb-select narrow"
+                  value={j.input}
+                  onChange={(e) => upd('joins', i, { input: e.target.value })}
+                >
+                  {inputs.map((inp) => (
+                    <option key={inp.alias} value={inp.alias}>
+                      {inp.alias}
+                    </option>
+                  ))}
                 </select>
-                <button className="ghost danger small" onClick={() => del('joins', i)}><Icon name="x" /></button>
+                <button className="ghost danger small" onClick={() => del('joins', i)}>
+                  <Icon name="x" />
+                </button>
               </div>
-              {j.type !== 'CROSS' && (j.on || []).map((c, k) => (
-                <div className="qb-row indent" key={k}>
-                  <span className="qb-lbl">ON</span>
-                  <ColPicker inputs={inputs} value={{ input: c.left_input, column: c.left_column }}
-                    onChange={(v) => updJoinOn(i, k, { left_input: v?.input, left_column: v?.column })} />
-                  <span className="qb-eq">=</span>
-                  <ColPicker inputs={inputs} value={{ input: c.right_input, column: c.right_column }}
-                    onChange={(v) => updJoinOn(i, k, { right_input: v?.input, right_column: v?.column })} />
-                </div>
-              ))}
+              {j.type !== 'CROSS' &&
+                (j.on || []).map((c, k) => (
+                  <div className="qb-row indent" key={k}>
+                    <span className="qb-lbl">ON</span>
+                    <ColPicker
+                      inputs={inputs}
+                      value={{ input: c.left_input, column: c.left_column }}
+                      onChange={(v) =>
+                        updJoinOn(i, k, { left_input: v?.input, left_column: v?.column })
+                      }
+                    />
+                    <span className="qb-eq">=</span>
+                    <ColPicker
+                      inputs={inputs}
+                      value={{ input: c.right_input, column: c.right_column }}
+                      onChange={(v) =>
+                        updJoinOn(i, k, { right_input: v?.input, right_column: v?.column })
+                      }
+                    />
+                  </div>
+                ))}
             </div>
           ))}
         </Section>
       )}
 
       {/* ---------------- WHERE ---------------- */}
-      <Section title="Filtres (WHERE)" addLabel="filtre"
-        onAdd={() => setList('where', [...list('where'), { input: primary, column: firstCol, op: '=', value_type: 'text', connector: 'AND' }])}>
+      <Section
+        title="Filtres (WHERE)"
+        addLabel="filtre"
+        onAdd={() =>
+          setList('where', [
+            ...list('where'),
+            { input: primary, column: firstCol, op: '=', value_type: 'text', connector: 'AND' },
+          ])
+        }
+      >
         {list('where').map((c, i) => (
-          <ConditionRow key={i} c={c} i={i} inputs={inputs} onUpd={(p) => upd('where', i, p)} onDel={() => del('where', i)} showConnector={i > 0} />
+          <ConditionRow
+            key={i}
+            c={c}
+            i={i}
+            inputs={inputs}
+            onUpd={(p) => upd('where', i, p)}
+            onDel={() => del('where', i)}
+            showConnector={i > 0}
+          />
         ))}
       </Section>
 
       {/* ---------------- GROUP BY ---------------- */}
-      <Section title="Regroupement (GROUP BY)" addLabel="colonne"
-        onAdd={() => setList('group_by', [...list('group_by'), { input: primary, column: firstCol }])}>
+      <Section
+        title="Regroupement (GROUP BY)"
+        addLabel="colonne"
+        onAdd={() =>
+          setList('group_by', [...list('group_by'), { input: primary, column: firstCol }])
+        }
+      >
         {list('group_by').map((g, i) => (
           <div className="qb-row" key={i}>
-            <ColPicker inputs={inputs} value={g} onChange={(v) => upd('group_by', i, v || { input: primary, column: '' })} />
-            <button className="ghost danger small" onClick={() => del('group_by', i)}><Icon name="x" /></button>
+            <ColPicker
+              inputs={inputs}
+              value={g}
+              onChange={(v) => upd('group_by', i, v || { input: primary, column: '' })}
+            />
+            <button className="ghost danger small" onClick={() => del('group_by', i)}>
+              <Icon name="x" />
+            </button>
           </div>
         ))}
       </Section>
 
       {/* ---------------- HAVING ---------------- */}
       {list('group_by').length > 0 && (
-        <Section title="Filtres d'agrégat (HAVING)" addLabel="condition"
-          onAdd={() => setList('having', [...list('having'), { func: 'SUM', input: primary, column: firstCol, op: '>', value_type: 'number', connector: 'AND' }])}>
+        <Section
+          title="Filtres d'agrégat (HAVING)"
+          addLabel="condition"
+          onAdd={() =>
+            setList('having', [
+              ...list('having'),
+              {
+                func: 'SUM',
+                input: primary,
+                column: firstCol,
+                op: '>',
+                value_type: 'number',
+                connector: 'AND',
+              },
+            ])
+          }
+        >
           {list('having').map((c, i) => (
             <div className="qb-row" key={i}>
-              {i > 0 && <select className="qb-select tiny" value={c.connector || 'AND'} onChange={(e) => upd('having', i, { connector: e.target.value })}><option>AND</option><option>OR</option></select>}
-              <select className="qb-select tiny" value={c.func || 'SUM'} onChange={(e) => upd('having', i, { func: e.target.value })}>
-                {AGG.map((a) => <option key={a}>{a}</option>)}
+              {i > 0 && (
+                <select
+                  className="qb-select tiny"
+                  value={c.connector || 'AND'}
+                  onChange={(e) => upd('having', i, { connector: e.target.value })}
+                >
+                  <option>AND</option>
+                  <option>OR</option>
+                </select>
+              )}
+              <select
+                className="qb-select tiny"
+                value={c.func || 'SUM'}
+                onChange={(e) => upd('having', i, { func: e.target.value })}
+              >
+                {AGG.map((a) => (
+                  <option key={a}>{a}</option>
+                ))}
               </select>
               <ColPicker inputs={inputs} value={c} onChange={(v) => upd('having', i, v || {})} />
-              <select className="qb-select tiny" value={c.op} onChange={(e) => upd('having', i, { op: e.target.value })}>
-                {OPS.map((o) => <option key={o}>{o}</option>)}
+              <select
+                className="qb-select tiny"
+                value={c.op}
+                onChange={(e) => upd('having', i, { op: e.target.value })}
+              >
+                {OPS.map((o) => (
+                  <option key={o}>{o}</option>
+                ))}
               </select>
-              <input className="qb-input narrow" value={c.value || ''} onChange={(e) => upd('having', i, { value: e.target.value })} />
-              <button className="ghost danger small" onClick={() => del('having', i)}><Icon name="x" /></button>
+              <input
+                className="qb-input narrow"
+                value={c.value || ''}
+                onChange={(e) => upd('having', i, { value: e.target.value })}
+              />
+              <button className="ghost danger small" onClick={() => del('having', i)}>
+                <Icon name="x" />
+              </button>
             </div>
           ))}
         </Section>
       )}
 
       {/* ---------------- ORDER BY ---------------- */}
-      <Section title="Tri (ORDER BY)" addLabel="colonne"
-        onAdd={() => setList('order_by', [...list('order_by'), { input: primary, column: firstCol, dir: 'ASC' }])}>
+      <Section
+        title="Tri (ORDER BY)"
+        addLabel="colonne"
+        onAdd={() =>
+          setList('order_by', [
+            ...list('order_by'),
+            { input: primary, column: firstCol, dir: 'ASC' },
+          ])
+        }
+      >
         {list('order_by').map((o, i) => (
           <div className="qb-row" key={i}>
-            <ColPicker inputs={inputs} value={o} onChange={(v) => upd('order_by', i, v || { input: primary, column: '' })} />
-            <select className="qb-select narrow" value={o.dir} onChange={(e) => upd('order_by', i, { dir: e.target.value })}>
+            <ColPicker
+              inputs={inputs}
+              value={o}
+              onChange={(v) => upd('order_by', i, v || { input: primary, column: '' })}
+            />
+            <select
+              className="qb-select narrow"
+              value={o.dir}
+              onChange={(e) => upd('order_by', i, { dir: e.target.value })}
+            >
               <option value="ASC">croissant</option>
               <option value="DESC">décroissant</option>
             </select>
-            <button className="ghost danger small" onClick={() => del('order_by', i)}><Icon name="x" /></button>
+            <button className="ghost danger small" onClick={() => del('order_by', i)}>
+              <Icon name="x" />
+            </button>
           </div>
         ))}
       </Section>
 
       {/* ---------------- LIMIT ---------------- */}
       <Section title="Limite de lignes (LIMIT)">
-        <input className="qb-input narrow" type="number" min="0" placeholder="aucune"
-          value={q.limit ?? ''} onChange={(e) => set({ limit: e.target.value === '' ? null : Number(e.target.value) })} />
+        <input
+          className="qb-input narrow"
+          type="number"
+          min="0"
+          placeholder="aucune"
+          value={q.limit ?? ''}
+          onChange={(e) => set({ limit: e.target.value === '' ? null : Number(e.target.value) })}
+        />
       </Section>
     </div>
   )
@@ -243,36 +449,68 @@ const LIKE_OPS = ['LIKE', 'NOT LIKE', 'ILIKE']
 function ConditionRow({ c, inputs, onUpd, onDel, showConnector }) {
   const noValue = c.op === 'IS NULL' || c.op === 'IS NOT NULL'
   const isLike = LIKE_OPS.includes(c.op)
-  const placeholder = isLike ? '%motif%' : (c.op === 'IN' || c.op === 'NOT IN' ? 'a, b, c' : 'valeur')
+  const placeholder = isLike ? '%motif%' : c.op === 'IN' || c.op === 'NOT IN' ? 'a, b, c' : 'valeur'
   return (
     <div className="qb-row">
       {showConnector && (
-        <select className="qb-select tiny" value={c.connector || 'AND'} onChange={(e) => onUpd({ connector: e.target.value })}>
-          <option>AND</option><option>OR</option>
+        <select
+          className="qb-select tiny"
+          value={c.connector || 'AND'}
+          onChange={(e) => onUpd({ connector: e.target.value })}
+        >
+          <option>AND</option>
+          <option>OR</option>
         </select>
       )}
       <ColPicker inputs={inputs} value={c} onChange={(v) => onUpd(v || {})} />
-      <select className="qb-select tiny" value={c.op} onChange={(e) => onUpd({ op: e.target.value })}>
-        {OPS.map((o) => <option key={o}>{o}</option>)}
+      <select
+        className="qb-select tiny"
+        value={c.op}
+        onChange={(e) => onUpd({ op: e.target.value })}
+      >
+        {OPS.map((o) => (
+          <option key={o}>{o}</option>
+        ))}
       </select>
       {!noValue && (
         <>
-          <input className="qb-input narrow" placeholder={placeholder}
-            value={c.value || ''} onChange={(e) => onUpd({ value: e.target.value })} />
+          <input
+            className="qb-input narrow"
+            placeholder={placeholder}
+            value={c.value || ''}
+            onChange={(e) => onUpd({ value: e.target.value })}
+          />
           {c.op === 'BETWEEN' && (
-            <input className="qb-input narrow" placeholder="et…" value={c.value2 || ''} onChange={(e) => onUpd({ value2: e.target.value })} />
+            <input
+              className="qb-input narrow"
+              placeholder="et…"
+              value={c.value2 || ''}
+              onChange={(e) => onUpd({ value2: e.target.value })}
+            />
           )}
           {/* LIKE patterns are always text; the type picker would only mislead (« brut » breaks the SQL) */}
           {isLike ? (
-            <span className="qb-lbl" title="Jokers : % = n'importe quelle suite, _ = un caractère">texte · % _</span>
+            <span className="qb-lbl" title="Jokers : % = n'importe quelle suite, _ = un caractère">
+              texte · % _
+            </span>
           ) : (
-            <select className="qb-select tiny" value={c.value_type || 'text'} onChange={(e) => onUpd({ value_type: e.target.value })}>
-              {VALUE_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            <select
+              className="qb-select tiny"
+              value={c.value_type || 'text'}
+              onChange={(e) => onUpd({ value_type: e.target.value })}
+            >
+              {VALUE_TYPES.map(([v, l]) => (
+                <option key={v} value={v}>
+                  {l}
+                </option>
+              ))}
             </select>
           )}
         </>
       )}
-      <button className="ghost danger small" onClick={onDel}><Icon name="x" /></button>
+      <button className="ghost danger small" onClick={onDel}>
+        <Icon name="x" />
+      </button>
     </div>
   )
 }
