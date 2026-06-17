@@ -144,6 +144,89 @@ def test_excel_export_refuses_beyond_limits():
         engine._check_excel_limits(_FakeDF())
 
 
+def test_cast_to_number_with_fr_comma(tmp_path):
+    """A.5 — l'utilisateur peut forcer une colonne en `number` sans bloc Nettoyage.
+    Les ratés sont comptés (`failed`) et exposés dans le résultat du bloc."""
+    pid, fd = _new_project("CastNum")
+    (fd / "p.csv").write_text("Article;Prix\nA;12,5\nB;7,3\nC;abc\n", encoding="utf-8")
+
+    wf = storage.create_workflow(pid, "W")
+    wid = wf["id"]
+    wf["nodes"] = [
+        {
+            "id": "s",
+            "type": "source",
+            "position": {},
+            "data": {
+                "file": "p.csv",
+                # decimal sniffé en `,` (cf. A.2) ; on force juste un cast number.
+                "casts": [{"column": "Prix", "type": "number"}],
+            },
+        }
+    ]
+    wf["edges"] = []
+    storage.save_workflow(pid, wf)
+    res = engine.run_workflow(pid, wid)
+    rep = res["results"]["s"].get("casts_report")
+    assert rep == [{"column": "Prix", "type": "number", "failed": 1}], rep
+
+
+def test_cast_to_date_fr(tmp_path):
+    """A.6 — une colonne `JJ/MM/AAAA` typée en date est triable chronologiquement."""
+    pid, fd = _new_project("CastDate")
+    (fd / "p.csv").write_text(
+        "Doc;Date\nA;05/03/2024\nB;12/01/2024\nC;01/12/2023\n", encoding="utf-8"
+    )
+
+    wf = storage.create_workflow(pid, "W")
+    wid = wf["id"]
+    wf["nodes"] = [
+        {
+            "id": "s",
+            "type": "source",
+            "position": {},
+            "data": {
+                "file": "p.csv",
+                "casts": [{"column": "Date", "type": "date", "format": "%d/%m/%Y"}],
+            },
+        }
+    ]
+    wf["edges"] = []
+    storage.save_workflow(pid, wf)
+    engine.run_workflow(pid, wid)
+
+    # Tri chronologique : la plus ancienne (01/12/2023) doit sortir en tête.
+    srt = engine.preview_node(pid, wid, "s", sort="Date", direction="asc")
+    docs = [r["Doc"] for r in srt["rows"]]
+    assert docs == ["C", "B", "A"], docs
+
+
+def test_cast_boolean_fr_aliases(tmp_path):
+    """A.5 — les valeurs FR (`oui`/`non`/`vrai`/`faux`) sont reconnues."""
+    pid, fd = _new_project("CastBool")
+    (fd / "p.csv").write_text(
+        "Article;Actif\nA;oui\nB;non\nC;VRAI\nD;peut-être\n", encoding="utf-8"
+    )
+    wf = storage.create_workflow(pid, "W")
+    wid = wf["id"]
+    wf["nodes"] = [
+        {
+            "id": "s",
+            "type": "source",
+            "position": {},
+            "data": {
+                "file": "p.csv",
+                "casts": [{"column": "Actif", "type": "boolean"}],
+            },
+        }
+    ]
+    wf["edges"] = []
+    storage.save_workflow(pid, wf)
+    res = engine.run_workflow(pid, wid)
+    rep = res["results"]["s"]["casts_report"][0]
+    assert rep["column"] == "Actif" and rep["failed"] == 1, rep  # "peut-être"
+
+
 def test_fingerprint_invalidated_by_read_options(tmp_path):
     """Changer encoding ou decimal change la fingerprint Source → cache invalidé
     (A.9). Le bug serait un cache hit avec un décodage différent."""

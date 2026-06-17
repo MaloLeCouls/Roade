@@ -180,3 +180,28 @@ def test_api_preview(project_with_csv_workflow):
     assert "columns" in body and "rows" in body
     assert any(c["name"] == "nom" for c in body["columns"])
     assert body["row_count"] == 3
+
+
+def test_api_runs_history(project_with_csv_workflow):
+    """A.10 — après un run, l'historique remonte le détail (status, ran/cached,
+    durée). Un second run sans changement marque le node `s` comme `cached`."""
+    pid, wid = project_with_csv_workflow
+
+    # 1er run : on consomme le flux pour que le record soit append.
+    _ = client.get(f"/api/projects/{pid}/workflows/{wid}/run-stream").content
+    runs = client.get(f"/api/projects/{pid}/workflows/{wid}/runs").json()
+    assert isinstance(runs, list) and len(runs) == 1
+    r0 = runs[0]
+    assert r0["status"] == "ok"
+    assert [e["node_id"] for e in r0["ran"]] == ["s"]
+    assert r0["cached"] == []
+    assert isinstance(r0["duration_ms"], int) and r0["duration_ms"] >= 0
+
+    # 2e run sans modif : le node `s` doit être servi par le cache.
+    _ = client.get(f"/api/projects/{pid}/workflows/{wid}/run-stream").content
+    runs2 = client.get(f"/api/projects/{pid}/workflows/{wid}/runs").json()
+    assert len(runs2) == 2  # plus récent en tête
+    r_latest = runs2[0]
+    assert r_latest["status"] == "ok"
+    assert r_latest["ran"] == []
+    assert [e["node_id"] for e in r_latest["cached"]] == ["s"]

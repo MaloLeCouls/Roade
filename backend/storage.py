@@ -214,6 +214,46 @@ def write_node_meta(
     )
 
 
+# --------------------------------------------------------------------------- #
+# Runs history (A.10) — JSONL append-only par workflow
+# --------------------------------------------------------------------------- #
+# La progression est live (SSE) et perdue dès qu'on ferme l'onglet. On garde
+# ici une trace persistante des derniers runs pour pouvoir comparer, voir si
+# tel bloc a été recalculé ou servi par le cache, et combien de temps il a
+# mis. Le format est JSONL : append-only en O(1), pas de lock à gérer.
+
+
+def _runs_path(project_id: str, workflow_id: str) -> Path:
+    return data_dir(project_id, workflow_id) / "runs.jsonl"
+
+
+def append_run(project_id: str, workflow_id: str, entry: dict) -> None:
+    p = _runs_path(project_id, workflow_id)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with p.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def list_runs(project_id: str, workflow_id: str, limit: int = 50) -> list[dict]:
+    """Return the most recent runs (newest first), at most `limit`."""
+    p = _runs_path(project_id, workflow_id)
+    if not p.exists():
+        return []
+    # Pour des historiques courts (< quelques milliers), lire tout est OK.
+    # Si ça grandit, on tronquera le fichier régulièrement (à voir plus tard).
+    lines = p.read_text(encoding="utf-8").splitlines()
+    out = []
+    for ln in lines[-limit:][::-1]:
+        ln = ln.strip()
+        if not ln:
+            continue
+        try:
+            out.append(json.loads(ln))
+        except json.JSONDecodeError:
+            continue  # ligne corrompue → on l'ignore plutôt que faire planter l'historique
+    return out
+
+
 def prune_node_outputs(project_id: str, workflow_id: str, node_id: str, keep_handles) -> list[str]:
     # Delete any .parquet/.meta.json on disk for this node whose handle isn't
     # in `keep_handles`. Called right after a node re-materializes so a config

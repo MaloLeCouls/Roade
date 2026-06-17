@@ -387,6 +387,12 @@ def document_workflow(pid: str, wid: str):
     )
 
 
+@app.get("/api/projects/{pid}/workflows/{wid}/runs")
+def list_runs(pid: str, wid: str, limit: int = Query(50, ge=1, le=500)):
+    """Historique des derniers runs (A.10) — du plus récent au plus ancien."""
+    return storage.list_runs(pid, wid, limit=limit)
+
+
 @app.get("/api/projects/{pid}/workflows/{wid}/run-stream")
 def run_stream(
     pid: str,

@@ -241,6 +241,72 @@ def _resolve_read_options(path, data: dict) -> tuple[dict, dict]:
     return opts, detected
 
 
+# A.5 — cast explicite par colonne au plus tôt (à la lecture de la source),
+# pour ne pas obliger l'utilisateur à insérer un bloc Nettoyage juste pour
+# typer ses colonnes. A.6 — y inclut le parsing de dates (format explicite ou
+# `dayfirst=True` par défaut, contexte FR).
+_BOOL_MAP = {
+    "true": True,
+    "vrai": True,
+    "oui": True,
+    "yes": True,
+    "1": True,
+    "false": False,
+    "faux": False,
+    "non": False,
+    "no": False,
+    "0": False,
+}
+
+
+def _apply_casts(df: pd.DataFrame, casts, decimal: str, thousands) -> tuple[pd.DataFrame, list]:
+    """Apply user-defined per-column casts. Returns the new df + a report
+    `[{column, type, failed}]` exposé dans l'aperçu pour signaler les ratés
+    (cf. todo A.5)."""
+    report = []
+    if not casts:
+        return df, report
+    for c in casts:
+        col = c.get("column")
+        kind = (c.get("type") or "").lower()
+        if not col or col not in df.columns or kind in ("", "auto"):
+            continue
+        before_na = int(df[col].isna().sum())
+        if kind == "number":
+            s = df[col].astype(str)
+            if thousands:
+                s = s.str.replace(thousands, "", regex=False)
+            # Si la colonne avait déjà été reparsée à `,` par pandas (decimal=',')
+            # cette substitution est sans effet ; sinon on uniformise.
+            if decimal == ",":
+                s = s.str.replace(",", ".", regex=False)
+            new = pd.to_numeric(s, errors="coerce")
+        elif kind == "date":
+            fmt = c.get("format") or None
+            try:
+                new = pd.to_datetime(df[col], format=fmt, errors="coerce", dayfirst=True)
+            except Exception:  # noqa: BLE001
+                new = pd.to_datetime(df[col], errors="coerce", dayfirst=True)
+        elif kind == "text":
+            # `astype(str)` convertit NaN en "nan" — on garde les vides.
+            new = df[col].where(df[col].notna(), None).astype(object)
+            mask = new.notna()
+            new = new.where(~mask, new[mask].astype(str))
+        elif kind == "boolean":
+            new = df[col].astype(str).str.strip().str.lower().map(_BOOL_MAP)
+        else:
+            continue
+        # Pour `text` on ne compte pas les ratés (il n'y en a pas).
+        if kind == "text":
+            failed = 0
+        else:
+            after_na = int(new.isna().sum())
+            failed = max(0, after_na - before_na)
+        df[col] = new
+        report.append({"column": col, "type": kind, "failed": failed})
+    return df, report
+
+
 def _source_fingerprint(pid, node) -> str | None:
     """Identity of a source's inputs: file + sheet + header + read options +
     size + mtime. Changes whenever the underlying file or its read options
@@ -482,8 +548,16 @@ def _run_source(con, pid, node, ins):
     if not path.exists():
         raise ValueError(f"fichier introuvable : {file}")
     df = _read_source(path, d.get("sheet"), d.get("header_row") or 0, d)
+    # A.5 — casts utilisateur explicites (number / date / text / boolean) AVANT
+    # matérialisation, pour ne pas forcer un détour par un bloc Nettoyage.
+    df, casts_report = _apply_casts(df, d.get("casts"), d.get("decimal") or "", d.get("thousands"))
+    extra = {}
+    if casts_report:
+        extra["casts_report"] = casts_report
     fp = _source_fingerprint(pid, node)
-    return {"out": df}, ({"source_fingerprint": fp} if fp else {})
+    if fp:
+        extra["source_fingerprint"] = fp
+    return {"out": df}, extra
 
 
 def _run_sql(con, pid, node, ins):
@@ -2542,7 +2616,7 @@ def _reuse_result(pid, wid, node, handles, ntype, locked, signature) -> dict:
         outputs[h] = m.get("row_count", 0)
         if i == 0:
             columns = m.get("columns", [])
-            for k in ("compiled_sql", "clean_report", "report"):
+            for k in ("compiled_sql", "clean_report", "report", "casts_report"):
                 if k in m:
                     extra[k] = m[k]
     return {
@@ -2653,7 +2727,7 @@ def _execute_node(
         "row_count": outputs.get(handles[0], 0),
         "columns": columns,
     }
-    for k in ("compiled_sql", "clean_report", "report"):
+    for k in ("compiled_sql", "clean_report", "report", "casts_report"):
         if k in extra:
             result[k] = extra[k]
     return result
@@ -2688,6 +2762,22 @@ def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False):
     yield {"event": "start", "total": len(run_ids)}
     sig_by_node = _signatures_for(pid, wid, nodes, edges, order)
 
+    # A.10 — historique de runs : on collecte un résumé du run en cours et on
+    # l'append à `runs.jsonl` à la fin. Utile pour comparer deux exécutions,
+    # voir ce qui a été recalculé vs servi par le cache, repérer un bloc lent.
+    import time as _time
+
+    run_started_at = _time.time()
+    run_record = {
+        "started_at_ms": int(run_started_at * 1000),
+        "only_node": only_node,
+        "force": force,
+        "ran": [],  # blocs effectivement recalculés
+        "cached": [],  # blocs servis par le cache
+        "errors": [],  # {node_id, label, message}
+        "status": "ok",  # ok | error | aborted
+    }
+
     # If the workflow was renamed since last run, move its export folder so the
     # on-disk layout follows the rename instead of leaving orphans behind.
     # Only acts on a FULL run (only_node=None) — a single-node run is too narrow
@@ -2713,6 +2803,7 @@ def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False):
                 "type": node["type"],
             }
             single_force = force and only_node is not None and nid == only_node
+            node_started = _time.time()
             try:
                 result = _execute_node(
                     con,
@@ -2729,12 +2820,23 @@ def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False):
                     produced=produced,
                 )
             except Exception as e:  # noqa: BLE001 - reported to the client
-                yield {
-                    "event": "error",
-                    "node_id": nid,
-                    "message": f"{node['data'].get('label', nid)} : {e}",
-                }
+                label = node["data"].get("label", nid)
+                run_record["errors"].append({"node_id": nid, "label": label, "message": str(e)})
+                run_record["status"] = "error"
+                yield {"event": "error", "node_id": nid, "message": f"{label} : {e}"}
+                # On persist quand même le run partiel : pouvoir diagnostiquer un
+                # échec après coup compte autant que tracer un succès.
+                _persist_run_record(pid, wid, run_record, run_started_at)
                 return
+            elapsed_ms = int((_time.time() - node_started) * 1000)
+            entry = {
+                "node_id": nid,
+                "label": node["data"].get("label", nid),
+                "type": node["type"],
+                "elapsed_ms": elapsed_ms,
+                "row_count": result.get("row_count", 0),
+            }
+            (run_record["cached"] if result.get("cached") else run_record["ran"]).append(entry)
             yield {"event": "node_done", "node_id": nid, "result": result}
         # write the multi-sheet workbooks once every sheet has been gathered
         for wb_path, sheets in export_sink.items():
@@ -2752,9 +2854,22 @@ def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False):
         if only_node is None:
             wf["last_exports"] = {"dir": target_dir.name, "files": sorted(produced)}
             storage.save_workflow(pid, wf)
+        _persist_run_record(pid, wid, run_record, run_started_at)
         yield {"event": "done"}
     finally:
         con.close()
+
+
+def _persist_run_record(pid: str, wid: str, record: dict, started_at: float) -> None:
+    """Tag the duration totale + append to the workflow's `runs.jsonl`.
+    Best-effort : on n'interrompt jamais un run pour une erreur d'historique."""
+    import time as _time
+
+    record["duration_ms"] = int((_time.time() - started_at) * 1000)
+    try:
+        storage.append_run(pid, wid, record)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def run_workflow(pid, wid, only_node=None) -> dict:
