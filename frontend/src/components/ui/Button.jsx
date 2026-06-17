@@ -9,6 +9,8 @@
 // *nouveau* bouton doit passer par cette primitive — pas de class `primary`
 // posée à la main.
 
+import { forwardRef } from 'react'
+
 const VARIANTS = new Set(['primary', 'secondary', 'ghost', 'danger'])
 const SIZES = new Set(['sm', 'md', 'lg'])
 
@@ -16,21 +18,25 @@ function classList(...parts) {
   return parts.filter(Boolean).join(' ')
 }
 
-export default function Button({
-  variant = 'secondary',
-  size = 'md',
-  icon = null,
-  loading = false,
-  disabled = false,
-  type = 'button',
-  className = '',
-  children,
-  ...rest
-}) {
+const Button = forwardRef(function Button(
+  {
+    variant = 'secondary',
+    size = 'md',
+    icon = null,
+    loading = false,
+    disabled = false,
+    type = 'button',
+    className = '',
+    children,
+    ...rest
+  },
+  ref,
+) {
   const v = VARIANTS.has(variant) ? variant : 'secondary'
   const s = SIZES.has(size) ? size : 'md'
   return (
     <button
+      ref={ref}
       type={type}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
@@ -41,4 +47,6 @@ export default function Button({
       {children && <span className="btn-label">{children}</span>}
     </button>
   )
-}
+})
+
+export default Button

@@ -325,16 +325,42 @@ function RowsTable({
           {filterOpen && (
             <tr className="filter-row">
               <th className="idx"></th>
-              {columns.map((c) => (
-                <th key={c.name}>
-                  <input
-                    className="col-filter"
-                    placeholder="contient…"
-                    value={filters[c.name]?.value ?? ''}
-                    onChange={(e) => onFilter(c.name, e.target.value)}
-                  />
-                </th>
-              ))}
+              {columns.map((c) => {
+                // E.10 — l'opérateur du filtre dépend du point d'entrée :
+                //   - tapé ici (header)  → `contains` (recherche partielle)
+                //   - cliqué dans le profil d'une valeur → `equals` (exact)
+                // Avant, l'utilisateur n'avait aucun moyen de voir lequel
+                // s'appliquait. On affiche maintenant le pictogramme dans
+                // le champ et on l'explique dans le `title`.
+                const f = filters[c.name]
+                const isEquals = f?.op === 'equals'
+                const isNull = f?.op === 'is_null'
+                return (
+                  <th key={c.name}>
+                    <div className="col-filter-wrap">
+                      <span
+                        className="col-filter-op"
+                        title={
+                          isEquals
+                            ? 'Filtre exact (=) — appliqué depuis le profil'
+                            : isNull
+                              ? 'Filtre : valeur vide'
+                              : 'Filtre par sous-chaîne (contient…)'
+                        }
+                        aria-hidden="true"
+                      >
+                        {isEquals ? '=' : isNull ? '∅' : '~'}
+                      </span>
+                      <input
+                        className="col-filter"
+                        placeholder={isEquals ? '= valeur exacte' : 'contient…'}
+                        value={isNull ? '' : (f?.value ?? '')}
+                        onChange={(e) => onFilter(c.name, e.target.value)}
+                      />
+                    </div>
+                  </th>
+                )
+              })}
             </tr>
           )}
         </thead>

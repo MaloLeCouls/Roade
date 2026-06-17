@@ -423,11 +423,13 @@ def peek_source(
     sheets = None
     hr = int(header_row or 0)
     detected: dict = {}
+    warnings: list[str] = []  # A.8 — pièges détectés (cellules fusionnées, etc.)
     if path.suffix.lower() in _EXCEL_EXT:
         with pd.ExcelFile(path) as xl:  # context-manager closes the file handle
             sheets = list(xl.sheet_names)
             target = sheet if (sheet and sheet in sheets) else sheets[0]
             df = pd.read_excel(xl, sheet_name=target, skiprows=hr, nrows=100)
+        warnings.extend(_xlsx_warnings(path, target))
     else:
         opts, detected = _resolve_read_options(path, data or {})
         df = _read_source(path, sheet, hr, data).head(100)
@@ -441,7 +443,45 @@ def peek_source(
         except Exception:  # noqa: BLE001
             pass
     columns = [{"name": str(c), "type": _dtype_label(df[c].dtype)} for c in df.columns]
-    return {"sheets": sheets, "columns": columns, "detected": detected}
+    return {"sheets": sheets, "columns": columns, "detected": detected, "warnings": warnings}
+
+
+def _xlsx_warnings(path, sheet: str | None) -> list[str]:
+    """Détecte les pièges d'un xlsx FR — cellules fusionnées dans la zone
+    d'en-tête (cf. todo A.8). Best-effort : un fichier qu'openpyxl ne sait pas
+    ouvrir retourne juste [], on n'interrompt pas l'aperçu pour ça."""
+    out: list[str] = []
+    try:
+        import openpyxl
+
+        wb = openpyxl.load_workbook(path, read_only=False, data_only=True)
+        try:
+            ws = wb[sheet] if sheet and sheet in wb.sheetnames else wb.active
+            # Fusion dans les 10 premières lignes = en-tête, où ça produit des
+            # cellules vides à l'aperçu sans qu'on sache pourquoi.
+            merged_in_header = [r for r in ws.merged_cells.ranges if r.min_row <= 10]
+            if merged_in_header:
+                out.append(
+                    f"{len(merged_in_header)} cellule(s) fusionnée(s) dans les 10 premières "
+                    "lignes. pandas vide les fusions — l'aperçu peut afficher des trous qui "
+                    "n'existent pas dans Excel. Ouvrez le fichier et défusionnez avant import."
+                )
+            # En-tête potentiellement sur plusieurs lignes : la 1ère ligne a peu
+            # de valeurs (uniquement les cellules de gauche), la 2e en a plus.
+            row1 = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1), [])]
+            row2 = [c.value for c in next(ws.iter_rows(min_row=2, max_row=2), [])]
+            n1 = sum(1 for v in row1 if v not in (None, ""))
+            n2 = sum(1 for v in row2 if v not in (None, ""))
+            if n1 > 0 and n2 > n1 + 1:
+                out.append(
+                    "L'en-tête semble s'étendre sur plusieurs lignes (1re ligne incomplète). "
+                    "Augmentez « Lignes d'en-tête à ignorer » pour démarrer à la bonne ligne."
+                )
+        finally:
+            wb.close()
+    except Exception:  # noqa: BLE001 — best-effort
+        pass
+    return out
 
 
 def _guess_sep_from_head(text: str) -> str | None:

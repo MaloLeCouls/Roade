@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { api } from '../api'
+import { useConfirm } from './ui/ConfirmDialog'
 
 // Formats légers utilisés sur les cartes projet — pas une lib i18n, mais le strict
 // minimum pour avoir « hier », « il y a 3 jours » etc. lisible côté FR (C.6).
@@ -26,6 +27,8 @@ export default function ProjectList({ onOpen }) {
   // est tombée. Une fois 'ready', on garde la dernière liste affichée même
   // pendant un reload (évite de flasher un skeleton entre 2 actions).
   const [status, setStatus] = useState('loading')
+  // E.4 — ConfirmDialog au lieu du `window.confirm` natif.
+  const [askConfirm, confirmNode] = useConfirm()
 
   const reload = (firstLoad = false) => {
     if (firstLoad) setStatus('loading')
@@ -51,7 +54,13 @@ export default function ProjectList({ onOpen }) {
 
   const remove = async (pid, e) => {
     e.stopPropagation()
-    if (!confirm('Supprimer ce projet et tout son contenu ?')) return
+    const ok = await askConfirm({
+      title: 'Supprimer ce projet ?',
+      message: 'Le dossier sur disque, les fichiers et tous les workflows seront supprimés.',
+      confirmLabel: 'Supprimer',
+      danger: true,
+    })
+    if (!ok) return
     await api.deleteProject(pid)
     reload()
   }
@@ -103,6 +112,8 @@ export default function ProjectList({ onOpen }) {
           </p>
         </div>
       )}
+
+      {confirmNode}
 
       {status === 'ready' && projects.length > 0 && (
         <div className="grid">

@@ -2227,6 +2227,9 @@ function SourceConfig({ pid, node, files, set, onSchema }) {
   const [sheets, setSheets] = useState(null)
   const [detected, setDetected] = useState({}) // {encoding, sep, decimal} renvoyé par /peek
   const [colCount, setColCount] = useState(null)
+  // A.8 — pièges xlsx remontés par le backend (cellules fusionnées, en-tête
+  // multi-lignes…). Affichés en surface-warn dans l'aperçu Source.
+  const [warnings, setWarnings] = useState([])
 
   const refresh = (file, sheet, headerRow, opts) => {
     if (!file) return
@@ -2236,6 +2239,7 @@ function SourceConfig({ pid, node, files, set, onSchema }) {
         if (p.sheets) setSheets(p.sheets)
         setDetected(p.detected || {})
         setColCount(p.columns?.length ?? null)
+        setWarnings(p.warnings || [])
         onSchema(node.id, p.columns)
       })
       .catch(() => {})
@@ -2294,6 +2298,15 @@ function SourceConfig({ pid, node, files, set, onSchema }) {
             ))}
           </select>
         </label>
+      )}
+
+      {/* A.8 — avertissements xlsx (cellules fusionnées, en-tête multi-lignes). */}
+      {warnings.length > 0 && (
+        <div className="notice notice-warn" role="alert">
+          {warnings.map((w, i) => (
+            <p key={i}>{w}</p>
+          ))}
+        </div>
       )}
 
       <label className="fld">

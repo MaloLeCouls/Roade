@@ -8,6 +8,9 @@ export const EditorContext = createContext({
   onPreview: () => {},
   onRunNode: () => {},
   onDeleteEdge: () => {},
+  // E.5 — async confirm fourni par WorkflowEditor pour les actions destructives
+  // déclenchées depuis le canevas (ex : suppression de lien depuis ButtonEdge).
+  confirmDelete: null,
 })
 
 export const useEditor = () => useContext(EditorContext)

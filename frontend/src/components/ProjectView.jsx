@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
+
 import { api } from '../api'
 import Icon from './Icon'
+import { useConfirm } from './ui/ConfirmDialog'
 
 export default function ProjectView({ pid, onOpenWorkflow }) {
   const [project, setProject] = useState(null)
@@ -9,6 +11,8 @@ export default function ProjectView({ pid, onOpenWorkflow }) {
   const [wfName, setWfName] = useState('')
   // C.5 — { name, index, total, progress: 0..1 } pendant un upload (sinon null).
   const [uploading, setUploading] = useState(null)
+  // E.4 — ConfirmDialog au lieu du `window.confirm` natif.
+  const [askConfirm, confirmNode] = useConfirm()
   const fileInput = useRef()
 
   const reload = async () => {
@@ -33,7 +37,13 @@ export default function ProjectView({ pid, onOpenWorkflow }) {
   }
 
   const delFile = async (name, subdir) => {
-    if (!confirm(`Supprimer ${name} ?`)) return
+    const ok = await askConfirm({
+      title: `Supprimer ${name} ?`,
+      message: subdir ? 'Ce fichier est un export généré.' : 'Le fichier source sera supprimé.',
+      confirmLabel: 'Supprimer',
+      danger: true,
+    })
+    if (!ok) return
     await api.deleteFile(pid, name, subdir)
     setFiles(await api.listFiles(pid))
   }
@@ -81,7 +91,13 @@ export default function ProjectView({ pid, onOpenWorkflow }) {
 
   const delWf = async (wid, e) => {
     e.stopPropagation()
-    if (!confirm('Supprimer ce workflow ?')) return
+    const ok = await askConfirm({
+      title: 'Supprimer ce workflow ?',
+      message: 'Le workflow et tous ses parquets matérialisés seront supprimés.',
+      confirmLabel: 'Supprimer',
+      danger: true,
+    })
+    if (!ok) return
     await api.deleteWorkflow(pid, wid)
     setWorkflows(await api.listWorkflows(pid))
   }
@@ -113,6 +129,8 @@ export default function ProjectView({ pid, onOpenWorkflow }) {
           </div>
         )}
       </div>
+
+      {confirmNode}
 
       <div className="cols">
         <section className="panel">

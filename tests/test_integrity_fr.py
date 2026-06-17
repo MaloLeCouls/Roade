@@ -227,6 +227,26 @@ def test_cast_boolean_fr_aliases(tmp_path):
     assert rep["column"] == "Actif" and rep["failed"] == 1, rep  # "peut-être"
 
 
+def test_xlsx_merged_cells_warning(tmp_path):
+    """A.8 — un xlsx avec cellules fusionnées dans l'en-tête doit générer un
+    avertissement clair, pas un résultat trompeur silencieux."""
+    import openpyxl
+
+    pid, fd = _new_project("XlsxMerged")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.cell(1, 1, "Catégorie A")
+    ws.merge_cells("A1:C1")  # fusion ligne 1 colonnes A-C
+    ws.append(["nom", "prix", "stock"])
+    ws.append(["a", 1, 10])
+    wb.save(fd / "x.xlsx")
+    wb.close()
+
+    info = engine.peek_source(pid, "x.xlsx", None, 0)
+    warns = info.get("warnings") or []
+    assert any("fusionn" in w.lower() for w in warns), warns
+
+
 def test_fingerprint_invalidated_by_read_options(tmp_path):
     """Changer encoding ou decimal change la fingerprint Source → cache invalidé
     (A.9). Le bug serait un cache hit avec un décodage différent."""

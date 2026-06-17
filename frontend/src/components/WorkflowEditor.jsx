@@ -16,6 +16,7 @@ import '@xyflow/react/dist/style.css'
 
 import { api } from '../api'
 import { EditorContext } from './editorContext'
+import { useConfirm } from './ui/ConfirmDialog'
 import SourceNode from './nodes/SourceNode'
 import SqlNode from './nodes/SqlNode'
 import DedupNode from './nodes/DedupNode'
@@ -1078,6 +1079,10 @@ function Editor({ pid, wid, onBack }) {
     return ins
   }, [selectedNode, edges, schemas, nodes])
 
+  // E.4 + E.5 — un seul useConfirm pour tout l'éditeur, partagé via le context
+  // pour que les composants imbriqués (ButtonEdge, …) puissent en bénéficier.
+  const [askConfirm, confirmNode] = useConfirm()
+
   const ctx = useMemo(
     () => ({
       status,
@@ -1086,6 +1091,7 @@ function Editor({ pid, wid, onBack }) {
       onRunNode: (id, force) => doRun(id, force),
       onDeleteEdge,
       onNodeDataChange: updateNodeData,
+      confirmDelete: askConfirm,
     }),
     [
       status,
@@ -1096,6 +1102,7 @@ function Editor({ pid, wid, onBack }) {
       wfName,
       onDeleteEdge,
       updateNodeData,
+      askConfirm,
     ],
   )
 
@@ -1369,6 +1376,29 @@ function Editor({ pid, wid, onBack }) {
               <Controls />
               <MiniMap pannable zoomable nodeColor={miniColor} />
             </ReactFlow>
+            {/* E.9 — légende discrète des deux signaux qui se ressemblent (point
+                jaune « modifié depuis le dernier run » vs badge « non exécuté »).
+                Au survol seul, ne mange pas de pixels en permanence. */}
+            <details className="canvas-legend">
+              <summary aria-label="Légende des indicateurs de bloc">Légende</summary>
+              <ul>
+                <li>
+                  <span className="legend-dot legend-dot-dirty" aria-hidden="true" />
+                  <span>
+                    <b>Périmé</b> — la config a changé depuis le dernier run, le bloc sera
+                    recalculé.
+                  </span>
+                </li>
+                <li>
+                  <span className="legend-badge" aria-hidden="true">
+                    non exécuté
+                  </span>
+                  <span>
+                    <b>Jamais exécuté</b> — aucun résultat n'a été matérialisé pour ce bloc.
+                  </span>
+                </li>
+              </ul>
+            </details>
             {nodes.length === 0 && (
               <div className="canvas-hint">
                 Ajoutez un bloc <b>📥 Source</b> pour commencer, puis reliez-le à un bloc{' '}
@@ -1514,6 +1544,7 @@ function Editor({ pid, wid, onBack }) {
               </div>
             )
           })()}
+        {confirmNode}
       </div>
     </EditorContext.Provider>
   )

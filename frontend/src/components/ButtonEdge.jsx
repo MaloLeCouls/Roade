@@ -14,7 +14,7 @@ export default function ButtonEdge({
   style,
   markerEnd,
 }) {
-  const { onDeleteEdge } = useEditor()
+  const { onDeleteEdge, confirmDelete } = useEditor()
   const [path, labelX, labelY] = getBezierPath({
     sourceX,
     sourceY,
@@ -23,6 +23,21 @@ export default function ButtonEdge({
     targetY,
     targetPosition,
   })
+  // E.5 — supprimer un lien sans filet, alors que les blocs sont confirmés,
+  // est une incohérence interne. On demande confirmation. (Tant que l'undo
+  // global de E.1 n'est pas en place, c'est le mini-filet qu'on a.)
+  const onClick = async (e) => {
+    e.stopPropagation()
+    if (confirmDelete) {
+      const ok = await confirmDelete({
+        title: 'Supprimer ce lien ?',
+        confirmLabel: 'Supprimer',
+        danger: true,
+      })
+      if (!ok) return
+    }
+    onDeleteEdge(id)
+  }
   return (
     <>
       <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} />
@@ -35,10 +50,7 @@ export default function ButtonEdge({
             pointerEvents: 'all',
           }}
           title="Supprimer le lien"
-          onClick={(e) => {
-            e.stopPropagation()
-            onDeleteEdge(id)
-          }}
+          onClick={onClick}
         >
           <Icon name="x" size={11} />
         </div>
