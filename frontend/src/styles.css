@@ -4569,3 +4569,14 @@ table.dt th.idx {
   font-size: var(--fs-xs);
   padding: 0 2px;
 }
+
+/* ---- Shortcuts section heading (E.8) ------------------------------------- */
+.shortcuts-section {
+  margin: var(--s-4) 0 var(--s-2);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  color: var(--ink);
+}
+.shortcuts-section:first-of-type {
+  margin-top: 0;
+}

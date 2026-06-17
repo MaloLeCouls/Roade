@@ -431,8 +431,17 @@ function PivotConfig({ node, inputs, set }) {
 
       {mode === 'pivot' ? (
         <>
+          {/* F.2 — info-bubble pour Pivot : c'était le seul bloc « concept-lourd »
+              sans aucune explication contextuelle (audit 03 dissymétrie #2). */}
           <p className="qb-hint">
-            Transforme les valeurs d'une colonne en nouvelles colonnes (comme un TCD Excel).
+            Transforme les valeurs d'une colonne en nouvelles colonnes (comme un TCD Excel).{' '}
+            <InfoBubble>
+              <b>Pivot</b> = un TCD Excel : pour chaque combinaison des <b>colonnes conservées</b>,
+              on crée une ligne ; la <b>colonne à éclater</b> devient autant de nouvelles colonnes
+              que de valeurs distinctes (« Janvier », « Février »…), chacune remplie par l'agrégat
+              de la <b>colonne de valeurs</b>. Choisissez <b>SUM</b> pour des montants, <b>COUNT</b>{' '}
+              pour compter, <b>AVG</b> pour une moyenne.
+            </InfoBubble>
           </p>
           <div className="fld">
             <span>Lignes (colonnes conservées)</span>
@@ -467,7 +476,15 @@ function PivotConfig({ node, inputs, set }) {
         </>
       ) : (
         <>
-          <p className="qb-hint">Transforme plusieurs colonnes en deux colonnes (nom, valeur).</p>
+          <p className="qb-hint">
+            Transforme plusieurs colonnes en deux colonnes (nom, valeur).{' '}
+            <InfoBubble>
+              <b>Dépivot</b> = inverse de Pivot. Plusieurs colonnes (« Janvier », « Février »…)
+              deviennent <b>deux</b> colonnes : un libellé (le nom de l'ancienne colonne) et la
+              valeur correspondante. Utile pour repasser à un format « tidy » avant un <b>SQL</b> ou
+              un <b>Calc</b>.
+            </InfoBubble>
+          </p>
           <div className="fld">
             <span>Colonnes à dépivoter</span>
             <ColChecklist inputs={inputs} selected={vals} onToggle={toggleVal} />
