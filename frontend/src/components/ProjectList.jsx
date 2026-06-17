@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { api } from '../api'
+import { clickableProps } from '../lib/a11y'
 import { useConfirm } from './ui/ConfirmDialog'
 
 // Formats légers utilisés sur les cartes projet — pas une lib i18n, mais le strict
@@ -118,7 +119,11 @@ export default function ProjectList({ onOpen }) {
       {status === 'ready' && projects.length > 0 && (
         <div className="grid">
           {projects.map((p) => (
-            <div key={p.id} className="card" onClick={() => onOpen(p.id)}>
+            <div
+              key={p.id}
+              className="card"
+              {...clickableProps(() => onOpen(p.id), { label: `Ouvrir le projet ${p.name}` })}
+            >
               <div className="card-title">{p.name}</div>
               <div className="card-sub">{p.id}</div>
               <div className="card-meta">
@@ -136,7 +141,11 @@ export default function ProjectList({ onOpen }) {
                   {p.file_count ?? 0} fichier{(p.file_count ?? 0) > 1 ? 's' : ''}
                 </span>
               </div>
-              <button className="ghost danger small" onClick={(e) => remove(p.id, e)}>
+              <button
+                className="ghost danger small"
+                onClick={(e) => remove(p.id, e)}
+                aria-label={`Supprimer le projet ${p.name}`}
+              >
                 Supprimer
               </button>
             </div>

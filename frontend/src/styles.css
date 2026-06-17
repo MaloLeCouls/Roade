@@ -4580,3 +4580,33 @@ table.dt th.idx {
 .shortcuts-section:first-of-type {
   margin-top: 0;
 }
+
+/* ========================================================================= */
+/* E.7 — passe a11y globale                                                   */
+/* ========================================================================= */
+
+/* Focus visible uniforme : tout élément focusable au clavier (button, input,
+   select, a[href], [tabindex]) reçoit le même contour quand la *navigation
+   clavier* est active. `:focus-visible` n'apparaît PAS au clic souris — pas
+   d'outline parasite sur les boutons cliqués (anti-slop : pas de bruit). */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Anti-clignote pour les utilisateurs avec `prefers-reduced-motion`.
+   On désactive TOUTES les animations et transitions plutôt que de les nommer
+   une par une : les rares animations qui « informent » (barre de progrès, glow
+   d'exécution) ont déjà leur règle dédiée en `@media (prefers-reduced-motion)`
+   plus haut pour rester visibles statiquement. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

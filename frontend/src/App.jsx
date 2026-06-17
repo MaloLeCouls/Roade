@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { api } from './api'
+import { clickableProps } from './lib/a11y'
 import ProjectList from './components/ProjectList'
 import ProjectView from './components/ProjectView'
 import Toaster from './components/Toaster'
@@ -62,7 +63,10 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <div className="brand" onClick={goProjects}>
+        <div
+          className="brand"
+          {...clickableProps(goProjects, { label: 'Retour à la liste des projets' })}
+        >
           Roade
         </div>
         <Breadcrumb view={view} setView={setView} />
@@ -108,24 +112,33 @@ function Breadcrumb({ view, setView }) {
       .catch(() => {})
   }, [view.name, view.pid, view.wid])
   return (
-    <div className="breadcrumb">
-      <span className="crumb" onClick={() => setView({ name: 'projects' })}>
+    <nav className="breadcrumb" aria-label="Fil d'Ariane">
+      <span className="crumb" {...clickableProps(() => setView({ name: 'projects' }))}>
         Projets
       </span>
       {view.pid && (
         <>
-          <span className="sep">/</span>
-          <span className="crumb" onClick={() => setView({ name: 'project', pid: view.pid })}>
+          <span className="sep" aria-hidden="true">
+            /
+          </span>
+          <span
+            className="crumb"
+            {...clickableProps(() => setView({ name: 'project', pid: view.pid }))}
+          >
             {pname || view.pid}
           </span>
         </>
       )}
       {view.name === 'workflow' && (
         <>
-          <span className="sep">/</span>
-          <span className="crumb current">{wname || 'Workflow'}</span>
+          <span className="sep" aria-hidden="true">
+            /
+          </span>
+          <span className="crumb current" aria-current="page">
+            {wname || 'Workflow'}
+          </span>
         </>
       )}
-    </div>
+    </nav>
   )
 }

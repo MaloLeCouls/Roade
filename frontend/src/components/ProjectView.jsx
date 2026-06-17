@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { api } from '../api'
+import { clickableProps } from '../lib/a11y'
 import Icon from './Icon'
 import { useConfirm } from './ui/ConfirmDialog'
 
@@ -66,16 +67,23 @@ export default function ProjectView({ pid, onOpenWorkflow }) {
         className="ghost small"
         onClick={() => openFile(f.name, f.subdir)}
         title="Ouvrir dans l'application par défaut"
+        aria-label={`Ouvrir ${f.name} dans l'application par défaut`}
       >
         <Icon name="external" />
       </button>
-      <a className="ghost small" href={api.downloadUrl(pid, f.name, f.subdir)} title="Télécharger">
+      <a
+        className="ghost small"
+        href={api.downloadUrl(pid, f.name, f.subdir)}
+        title="Télécharger"
+        aria-label={`Télécharger ${f.name}`}
+      >
         <Icon name="download" />
       </a>
       <button
         className="ghost danger small"
         onClick={() => delFile(f.name, f.subdir)}
         title="Supprimer"
+        aria-label={`Supprimer ${f.name}`}
       >
         <Icon name="trash" />
       </button>
@@ -218,7 +226,13 @@ export default function ProjectView({ pid, onOpenWorkflow }) {
           ) : (
             <ul className="list">
               {workflows.map((w) => (
-                <li key={w.id} className="clickable" onClick={() => onOpenWorkflow(w.id)}>
+                <li
+                  key={w.id}
+                  className="clickable"
+                  {...clickableProps(() => onOpenWorkflow(w.id), {
+                    label: `Ouvrir le workflow ${w.name}`,
+                  })}
+                >
                   <span className="fname">
                     <Icon name="flow" size={13} /> {w.name}
                   </span>
@@ -226,6 +240,7 @@ export default function ProjectView({ pid, onOpenWorkflow }) {
                     className="ghost danger small"
                     onClick={(e) => delWf(w.id, e)}
                     title="Supprimer"
+                    aria-label={`Supprimer le workflow ${w.name}`}
                   >
                     <Icon name="trash" />
                   </button>

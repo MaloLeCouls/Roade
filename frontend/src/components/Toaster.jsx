@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+import { clickableProps } from '../lib/a11y'
 import { notify, subscribeToasts } from '../toast'
 
 const AUTO_DISMISS_MS = 5000
@@ -38,7 +39,7 @@ export default function Toaster() {
         <div
           key={i.id}
           className={`toast toast-${i.level}`}
-          onClick={() => dismiss(i.id)}
+          {...clickableProps(() => dismiss(i.id), { label: `Fermer le message : ${i.message}` })}
           title="Cliquer pour fermer"
         >
           {i.message}
