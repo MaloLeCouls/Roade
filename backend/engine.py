@@ -2776,6 +2776,20 @@ def _execute_node(
 # --------------------------------------------------------------------------- #
 # Run
 # --------------------------------------------------------------------------- #
+# E.2 — drapeaux d'annulation. Un POST sur `/cancel` ajoute (pid, wid) ici, et
+# `iter_run_workflow` regarde entre chaque bloc. Simple set en mémoire : pas de
+# besoin de DB tant que le runner est mono-process (cf. graine 3 cloud — quand
+# on aura un broker, ce sera là qu'il faudra changer).
+_cancel_requested: set[tuple[str, str]] = set()
+
+
+def request_cancel(pid: str, wid: str) -> None:
+    """Demande l'annulation d'un run en cours. Le runner verra le drapeau
+    entre 2 blocs (granularité : un bloc en cours d'exécution ne s'arrête
+    pas en plein milieu — il termine, puis le run s'arrête)."""
+    _cancel_requested.add((pid, wid))
+
+
 def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False):
     wf = storage.get_workflow(pid, wid)
     if not wf:
@@ -2833,8 +2847,18 @@ def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False):
     con = duckdb.connect()
     export_sink = {}  # workbook_path -> [(sheet, df), …]
     produced = set()  # filenames written by this run
+    cancel_key = (pid, wid)
+    _cancel_requested.discard(cancel_key)  # drapeaux d'un run précédent
     try:
         for nid in run_ids:
+            # E.2 — granularité d'annulation : entre 2 blocs. Un bloc en cours
+            # termine son calcul (sinon on laisserait son parquet à moitié).
+            if cancel_key in _cancel_requested:
+                _cancel_requested.discard(cancel_key)
+                run_record["status"] = "aborted"
+                yield {"event": "aborted"}
+                _persist_run_record(pid, wid, run_record, run_started_at)
+                return
             node = nodes[nid]
             yield {
                 "event": "node_start",

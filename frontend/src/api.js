@@ -181,4 +181,7 @@ export const api = {
     }
     return es
   },
+
+  // E.2 — annule un run en cours côté serveur (le runner check entre 2 blocs).
+  cancelRun: (pid, wid) => sendJSON(`/projects/${enc(pid)}/workflows/${enc(wid)}/cancel`, 'POST'),
 }

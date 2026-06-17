@@ -15,8 +15,12 @@ import {
 import '@xyflow/react/dist/style.css'
 
 import { api } from '../api'
+import { hasBlockingIssues, preflightWorkflow } from '../lib/preflight'
+import { notify } from '../toast'
 import { EditorContext } from './editorContext'
+import CommandPalette from './ui/CommandPalette'
 import { useConfirm } from './ui/ConfirmDialog'
+import ShortcutsHelp from './ui/ShortcutsHelp'
 import SourceNode from './nodes/SourceNode'
 import SqlNode from './nodes/SqlNode'
 import DedupNode from './nodes/DedupNode'
@@ -96,10 +100,12 @@ function removedRouteHandles(node, patch) {
 // Render the block's free-text comment (data.description) as a sticky note above
 // the node — lets the user document the workflow at a glance. One wrapper instead
 // of editing all nine node components. Also shows a discreet "modified since last
-// run" dot (data.__dirty, injected by the editor).
+// run" dot (data.__dirty, injected by the editor) and — for E.3 — a static
+// error badge when the block has preflight issues (entrée non branchée, etc.).
 function withComment(Comp) {
   return function Commented(props) {
     const note = props.data?.description
+    const issues = props.data?.__preflight
     return (
       <>
         {note ? <div className="node-comment">{note}</div> : null}
@@ -108,6 +114,15 @@ function withComment(Comp) {
             className="node-dirty"
             title="Modifié depuis la dernière exécution — sera recalculé"
           />
+        ) : null}
+        {issues && issues.length > 0 ? (
+          <span
+            className="node-preflight"
+            title={issues.map((i) => `• ${i.message}`).join('\n')}
+            aria-label={`${issues.length} erreur(s) de configuration`}
+          >
+            !
+          </span>
         ) : null}
         <Comp {...props} />
       </>
@@ -321,6 +336,10 @@ function Editor({ pid, wid, onBack }) {
   const [status, setStatus] = useState({}) // nodeId -> {ran, rows, error}
   const [runStamps, setRunStamps] = useState({}) // nodeId -> data-sig at last run (change tracking)
   const [busy, setBusy] = useState(false)
+  // E.2 — référence à la connexion SSE en cours pour pouvoir la fermer côté
+  // client quand l'utilisateur clique « Stop » (le serveur l'arrêtera tout
+  // seul, mais on coupe aussi le flux côté UI pour rendre la main tout de suite).
+  const runStreamRef = useRef(null)
   const [progress, setProgress] = useState({
     active: false,
     total: 0,
@@ -448,6 +467,120 @@ function Editor({ pid, wid, onBack }) {
     }, 600)
     return () => clearTimeout(saveTimer.current)
   }, [nodes, edges, wfName])
+
+  // E.6 — palette de commandes + aide raccourcis.
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
+
+  // Save explicite (Ctrl+S) — flush immédiatement le debounce de l'autosave.
+  // (Une `flushSave` plus bas, sans notification, est utilisée avant un run.)
+  const quickSave = useCallback(() => {
+    clearTimeout(saveTimer.current)
+    setSaveState('saving')
+    return api
+      .saveWorkflow(pid, { id: wid, name: wfName, nodes: stripNodes(nodes), edges })
+      .then(() => {
+        setSaveState('saved')
+        notify('Enregistré.', 'ok')
+      })
+      .catch(() => setSaveState('error'))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pid, wid, wfName, nodes, edges])
+
+  // Duplique le bloc sélectionné (Ctrl+D) — offset de 40px pour qu'on le voie.
+  const duplicateSelected = useCallback(() => {
+    const selected = rf.getNodes?.().filter((n) => n.selected) || []
+    if (selected.length === 0) {
+      notify("Sélectionnez d'abord un bloc à dupliquer.", 'warn')
+      return
+    }
+    const newNodes = selected.map((n) => ({
+      ...n,
+      id: uid(),
+      selected: false,
+      position: { x: (n.position?.x || 0) + 40, y: (n.position?.y || 0) + 40 },
+      data: { ...n.data },
+    }))
+    setNodes((nds) => [...nds.map((n) => ({ ...n, selected: false })), ...newNodes])
+  }, [rf, setNodes])
+
+  // E.6 — raccourcis globaux. On évite de tirer dessus quand le focus est dans
+  // un input/textarea/contenteditable (laisse le navigateur faire son job).
+  useEffect(() => {
+    const inField = (el) => {
+      if (!el) return false
+      const tag = el.tagName
+      return (
+        tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable === true
+      )
+    }
+    const onKey = (e) => {
+      const mod = e.ctrlKey || e.metaKey
+      if (mod && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        quickSave()
+      } else if (mod && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setPaletteOpen(true)
+      } else if (mod && e.key.toLowerCase() === 'd' && !inField(document.activeElement)) {
+        e.preventDefault()
+        duplicateSelected()
+      } else if (mod && e.key.toLowerCase() === 'z' && !inField(document.activeElement)) {
+        // E.1 — Ctrl+Z (Cmd+Z) restaure la dernière suppression.
+        e.preventDefault()
+        undoDeletion()
+      } else if (e.key === '?' && !inField(document.activeElement) && !mod) {
+        e.preventDefault()
+        setHelpOpen(true)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [quickSave, duplicateSelected, undoDeletion])
+
+  // Liste de commandes pour la palette (Ctrl+K). Anti-slop : pas de tout
+  // exposer, juste les actions de premier rang.
+  const commands = useMemo(
+    () => [
+      {
+        id: 'run',
+        label: 'Exécuter le workflow',
+        shortcut: '',
+        keywords: 'run',
+        action: () => doRun(null),
+      },
+      {
+        id: 'save',
+        label: 'Enregistrer maintenant',
+        shortcut: 'Ctrl+S',
+        keywords: 'save flush',
+        action: quickSave,
+      },
+      {
+        id: 'duplicate',
+        label: 'Dupliquer le bloc sélectionné',
+        shortcut: 'Ctrl+D',
+        keywords: 'copy',
+        action: duplicateSelected,
+      },
+      {
+        id: 'undo',
+        label: 'Annuler la dernière suppression',
+        shortcut: 'Ctrl+Z',
+        keywords: 'undo restore',
+        action: undoDeletion,
+      },
+      {
+        id: 'help',
+        label: 'Voir tous les raccourcis',
+        shortcut: '?',
+        keywords: 'shortcuts',
+        action: () => setHelpOpen(true),
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [quickSave, duplicateSelected, undoDeletion],
+  )
 
   // ---- C.3 garde-fou beforeunload ----
   // Pendant que l'autosave debounce les 600 ms (ou pendant la requête PUT), une
@@ -719,10 +852,49 @@ function Editor({ pid, wid, onBack }) {
   const removeByIds = (ids) => forgetNodes(new Set(ids))
   const deleteNode = (id) => removeByIds([id])
   const deleteSelection = () => removeByIds(nodes.filter((n) => n.selected).map((n) => n.id))
+  // E.1 (minimal) — pile d'« undo de suppression » (50 entrées max). On capture
+  // les nodes supprimés ET les arêtes qui les bordaient, parce que React Flow
+  // efface les arêtes adjacentes en silence — sans elles, un Ctrl+Z restaurerait
+  // un bloc déconnecté du graphe. Le vrai undo général (zustand + commands)
+  // viendra dans une seconde passe (cf. roadmap §6 #2).
+  const undoStackRef = useRef([])
+  const pushDeletion = useCallback((deletedNodes, deletedEdges) => {
+    const entry = {
+      nodes: deletedNodes.map((n) => ({ ...n, selected: false })),
+      edges: deletedEdges.map((e) => ({ ...e })),
+    }
+    undoStackRef.current = [...undoStackRef.current.slice(-49), entry]
+  }, [])
   const onNodesDelete = useCallback(
-    (deleted) => forgetNodes(deleted.map((n) => n.id)),
-    [forgetNodes],
+    (deleted) => {
+      const ids = new Set(deleted.map((n) => n.id))
+      const relatedEdges = edges.filter((e) => ids.has(e.source) || ids.has(e.target))
+      pushDeletion(deleted, relatedEdges)
+      forgetNodes([...ids])
+    },
+    [forgetNodes, edges, pushDeletion],
   )
+  const onEdgesDelete = useCallback(
+    (deleted) => {
+      pushDeletion([], deleted)
+    },
+    [pushDeletion],
+  )
+  const undoDeletion = useCallback(() => {
+    const stack = undoStackRef.current
+    if (stack.length === 0) {
+      notify('Rien à annuler.', 'warn')
+      return
+    }
+    const last = stack[stack.length - 1]
+    undoStackRef.current = stack.slice(0, -1)
+    if (last.nodes.length) setNodes((nds) => [...nds, ...last.nodes])
+    if (last.edges.length) setEdges((eds) => [...eds, ...last.edges])
+    const parts = []
+    if (last.nodes.length) parts.push(`${last.nodes.length} bloc(s)`)
+    if (last.edges.length) parts.push(`${last.edges.length} lien(s)`)
+    notify(`Restauré : ${parts.join(' + ')}`, 'ok')
+  }, [setNodes, setEdges])
 
   // ---- ComfyUI-style frames: dragging a group carries the blocks inside it ----
   const nodeBox = (n) => {
@@ -952,6 +1124,20 @@ function Editor({ pid, wid, onBack }) {
   // Streaming run: live progress, ComfyUI-style.
   const doRun = async (onlyNode = null, force = false, allExports = false) => {
     if (busy) return
+    // E.3 — pré-run : sur un run complet du workflow, on bloque si des erreurs
+    // statiques sont visibles. On laisse passer le run d'un nœud unique (l'user
+    // peut explorer un sous-graphe encore en cours d'édition).
+    if (!onlyNode) {
+      const preflightNow = preflightWorkflow(nodes, edges)
+      if (hasBlockingIssues(preflightNow)) {
+        const firstId = Object.keys(preflightNow)[0]
+        const first = preflightNow[firstId][0]
+        const label = nodes.find((n) => n.id === firstId)?.data?.label || firstId
+        const more = Object.keys(preflightNow).length - 1
+        notify(`${label} : ${first.message}` + (more > 0 ? ` (+${more} bloc(s))` : ''), 'error')
+        return
+      }
+    }
     setBanner(null)
     setBusy(true)
     setProgress({
@@ -971,7 +1157,7 @@ function Editor({ pid, wid, onBack }) {
         startTimer.current = null
       }
     }
-    api.runStream(
+    runStreamRef.current = api.runStream(
       pid,
       wid,
       onlyNode,
@@ -1030,6 +1216,16 @@ function Editor({ pid, wid, onBack }) {
             }))
           setBanner({ type: 'error', text: ev.message || "Erreur d'exécution" })
           api.listFiles(pid).then(setFiles)
+        } else if (ev.event === 'aborted') {
+          // E.2 — annulation propre côté serveur. On ne touche pas au cache
+          // (les blocs déjà exécutés gardent leur parquet), on signale juste
+          // que le run s'est arrêté volontairement.
+          clearStartTimer()
+          stopAnim()
+          setNodeFrac(0)
+          setBusy(false)
+          setProgress((p) => ({ ...p, active: false, currentId: null }))
+          setBanner({ type: 'info', text: 'Run interrompu.' })
         }
       },
       force,
@@ -1146,6 +1342,12 @@ function Editor({ pid, wid, onBack }) {
     return dirty
   }, [nodes, edges, runStamps])
 
+  // E.3 — validation statique des erreurs structurelles (entrée non branchée,
+  // SQL vide, cycle, …). Recomputée à chaque modif de nodes/edges, propagée
+  // aux nodes via `data.__preflight` pour que `withComment` puisse afficher
+  // le badge.
+  const preflight = useMemo(() => preflightWorkflow(nodes, edges), [nodes, edges])
+
   // highlight the currently-executing node (ComfyUI-style) + flag stale blocks.
   // Frames are dragged by their title bar only and rendered behind the blocks.
   const decoratedNodes = useMemo(
@@ -1156,14 +1358,18 @@ function Editor({ pid, wid, onBack }) {
         if (n.type === 'stop' && n.parentId) return { ...n, draggable: false, zIndex: 5 }
         const active = progress.currentId === n.id
         const dirty = dirtyMap[n.id]
-        if (!active && !dirty) return n
+        const issues = preflight[n.id]
+        if (!active && !dirty && !issues) return n
+        const newData = { ...n.data }
+        if (dirty) newData.__dirty = true
+        if (issues) newData.__preflight = issues
         return {
           ...n,
           className: active ? 'rf-active' : undefined,
-          data: dirty ? { ...n.data, __dirty: true } : n.data,
+          data: newData,
         }
       }),
-    [nodes, progress.currentId, dirtyMap],
+    [nodes, progress.currentId, dirtyMap, preflight],
   )
 
   // colour links by the data type leaving the source port; make them deletable
@@ -1262,9 +1468,29 @@ function Editor({ pid, wid, onBack }) {
               <Icon name="download" /> Documenter
             </button>
             <div className="run-split">
-              <button className="primary" disabled={busy} onClick={() => doRun(null)}>
-                {busy ? 'Exécution…' : 'Exécuter le workflow'}
-              </button>
+              {busy ? (
+                // E.2 — pendant l'exécution, le bouton devient un Stop. Coupe
+                // le flux SSE côté client (UI rend la main immédiatement) et
+                // demande l'annulation au runner (qui s'arrêtera entre 2 blocs).
+                <button
+                  className="btn-stop"
+                  onClick={() => {
+                    runStreamRef.current?.close?.()
+                    runStreamRef.current = null
+                    api.cancelRun(pid, wid).catch(() => {})
+                    setBusy(false)
+                    setProgress((p) => ({ ...p, active: false, currentId: null }))
+                    setBanner({ type: 'info', text: 'Run interrompu.' })
+                  }}
+                  title="Interrompre le run en cours"
+                >
+                  <Icon name="x" size={12} /> Stop
+                </button>
+              ) : (
+                <button className="primary" disabled={busy} onClick={() => doRun(null)}>
+                  Exécuter le workflow
+                </button>
+              )}
               <button
                 className="primary run-caret"
                 disabled={busy}
@@ -1336,6 +1562,7 @@ function Editor({ pid, wid, onBack }) {
               onNodeDrag={onNodeDrag}
               onNodeDragStop={onNodeDragStop}
               onNodesDelete={onNodesDelete}
+              onEdgesDelete={onEdgesDelete}
               onNodeClick={(e, n) => {
                 setSelectedId(n.id)
                 // multi-selecting (selection mode, or Maj/Ctrl/Cmd held): keep adding
@@ -1545,6 +1772,12 @@ function Editor({ pid, wid, onBack }) {
             )
           })()}
         {confirmNode}
+        <CommandPalette
+          open={paletteOpen}
+          onClose={() => setPaletteOpen(false)}
+          commands={commands}
+        />
+        <ShortcutsHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
       </div>
     </EditorContext.Provider>
   )

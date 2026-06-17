@@ -4445,8 +4445,127 @@ table.dt th.idx {
   font-size: var(--fs-sm);
   line-height: 1.5;
 }
-.notice p { margin: 0 0 var(--s-2); }
-.notice p:last-child { margin-bottom: 0; }
-.notice-warn { background: var(--surface-4); border-left-color: var(--warn); }
-.notice-error { background: var(--surface-5); border-left-color: var(--danger); }
-.notice-ok { border-left-color: var(--ok); }
+.notice p {
+  margin: 0 0 var(--s-2);
+}
+.notice p:last-child {
+  margin-bottom: 0;
+}
+.notice-warn {
+  background: var(--surface-4);
+  border-left-color: var(--warn);
+}
+.notice-error {
+  background: var(--surface-5);
+  border-left-color: var(--danger);
+}
+.notice-ok {
+  border-left-color: var(--ok);
+}
+
+/* ---- Preflight badge (E.3) ----------------------------------------------- */
+.node-preflight {
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--danger);
+  color: #fff;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 2px var(--panel);
+  z-index: var(--z-sticky);
+  cursor: help;
+}
+
+/* ---- Stop button (E.2) --------------------------------------------------- */
+.btn-stop {
+  background: var(--danger);
+  border: 1px solid var(--danger);
+  color: #fff;
+  border-radius: var(--radius-md);
+  padding: var(--s-2) var(--s-3);
+  font-weight: var(--fw-medium);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  cursor: pointer;
+}
+.btn-stop:hover {
+  filter: brightness(0.92);
+}
+
+/* ---- CommandPalette + ShortcutsHelp (E.6) -------------------------------- */
+.cmd-input {
+  width: 100%;
+  font-size: var(--fs-md);
+  padding: var(--s-2) var(--s-3);
+  margin-bottom: var(--s-3);
+}
+.cmd-empty {
+  margin: var(--s-3) 0 0;
+}
+.cmd-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 360px;
+  overflow: auto;
+}
+.cmd-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.cmd-item-on {
+  background: var(--surface-2);
+}
+.cmd-label {
+  flex: 1;
+}
+.cmd-hint {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.cmd-kbd,
+.shortcuts-keys kbd {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: var(--fs-xs);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  border: 1px solid var(--line-soft);
+  color: var(--ink);
+}
+
+.shortcuts-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--s-2);
+}
+.shortcuts-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+.shortcuts-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 110px;
+}
+.shortcuts-plus {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  padding: 0 2px;
+}

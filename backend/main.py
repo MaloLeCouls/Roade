@@ -393,6 +393,15 @@ def list_runs(pid: str, wid: str, limit: int = Query(50, ge=1, le=500)):
     return storage.list_runs(pid, wid, limit=limit)
 
 
+@app.post("/api/projects/{pid}/workflows/{wid}/cancel")
+def cancel_run(pid: str, wid: str):
+    """Demande l'annulation du run en cours (E.2). Best-effort : un bloc en
+    cours d'exécution n'est PAS interrompu en plein milieu — la boucle
+    s'arrête entre 2 blocs pour ne pas laisser de parquet à demi-écrit."""
+    engine.request_cancel(pid, wid)
+    return {"ok": True}
+
+
 @app.get("/api/projects/{pid}/workflows/{wid}/run-stream")
 def run_stream(
     pid: str,
