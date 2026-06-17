@@ -1,8 +1,12 @@
 """Roade backend — FastAPI HTTP API over the storage + engine modules.
 
 Run with:  uvicorn main:app --host 127.0.0.1 --port 8000 --app-dir backend
-The Vite dev server proxies /api -> http://127.0.0.1:8000.
+
+Dev :  le serveur Vite (port 5173) proxifie /api -> http://127.0.0.1:8000.
+Prod : si `frontend/dist/` existe (après `npm run build`), FastAPI sert aussi
+       l'app buildée à la racine — un seul process pour l'API + le frontend.
 """
+
 from __future__ import annotations
 
 import json
@@ -10,26 +14,84 @@ import os
 import subprocess
 import sys
 from io import BytesIO
+from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
-from pathlib import Path
-
-from fastapi import FastAPI, Body, UploadFile, File, HTTPException, Query
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, ConfigDict, Field
 
-import storage
 import engine
+import storage
 import workflow_doc
 
 app = FastAPI(title="Roade API")
 
+# CORS volontairement étroit (cf. todo B.1). Roade est mono-utilisateur local :
+# le seul cas où l'on a besoin de CORS, c'est le dev avec Vite (port 5173) qui
+# appelle l'API sur 8000. En prod « un seul process » (todo 0.8), le frontend
+# est servi par FastAPI lui-même → même origine, aucune en-tête CORS requise.
+# `allow_origins=["*"]` exposait l'API à n'importe quel onglet ouvert dans le
+# navigateur (cf. chaîne exploitable audit 07 § 8).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type"],
 )
+
+
+# --------------------------------------------------------------------------- #
+# Bodies JSON validés (Pydantic) — todo B.5
+# --------------------------------------------------------------------------- #
+# Les bodies « catalogue de bloc » sont volontairement libres (extra=allow) :
+# imposer un schéma profond casserait à chaque ajout de fonctionnalité dans un
+# bloc et déplacerait la validation utile (clé X obligatoire pour ce type Y)
+# dans `engine.py` où elle existe déjà. On valide ici la *forme du shell* — ce
+# qui suffit à arrêter un body manifestement invalide AVANT qu'il n'atteigne
+# l'engine, et à renvoyer un 422 propre au front.
+
+
+class CreateProjectBody(BaseModel):
+    """POST /api/projects."""
+
+    name: str = Field(..., min_length=1, max_length=200)
+
+
+class CreateWorkflowBody(BaseModel):
+    """POST /api/projects/{pid}/workflows."""
+
+    name: str = Field(default="Nouveau workflow", max_length=200)
+
+
+class SaveWorkflowBody(BaseModel):
+    """PUT /api/projects/{pid}/workflows/{wid}."""
+
+    model_config = ConfigDict(extra="allow")
+    name: str | None = None
+    nodes: list[dict[str, Any]] = Field(default_factory=list)
+    edges: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ValidateTestBody(BaseModel):
+    """POST /api/validate/test."""
+
+    config: dict[str, Any] = Field(default_factory=dict)
+    samples: list[Any] = Field(default_factory=list)
+
+
+class FreeJsonBody(BaseModel):
+    """Bodies très libres (route-preview / split-scan) : on accepte un objet,
+    on refuse tout sauf ça (liste, str, null) — c'est déjà mieux que rien."""
+
+    model_config = ConfigDict(extra="allow")
 
 
 @app.get("/api/health")
@@ -46,8 +108,8 @@ def list_projects():
 
 
 @app.post("/api/projects")
-def create_project(payload: dict = Body(...)):
-    name = (payload.get("name") or "").strip()
+def create_project(payload: CreateProjectBody):
+    name = payload.name.strip()
     if not name:
         raise HTTPException(400, "Nom de projet requis")
     return storage.create_project(name)
@@ -101,9 +163,33 @@ def list_files(pid: str):
     if exports_root.exists():
         for wf_dir in sorted(p for p in exports_root.iterdir() if p.is_dir()):
             for f in sorted(p for p in wf_dir.iterdir() if p.is_file()):
-                files.append({"name": f.name, "size": f.stat().st_size,
-                              "origin": "export", "subdir": wf_dir.name})
+                files.append(
+                    {
+                        "name": f.name,
+                        "size": f.stat().st_size,
+                        "origin": "export",
+                        "subdir": wf_dir.name,
+                    }
+                )
     return files
+
+
+def _safe_upload_name(raw: str | None) -> str:
+    """Reject path-traversal at upload time (todo B.2).
+
+    On rejette plutôt qu'on sanitise : si un client envoie `../x.exe`, le
+    réduire à `x.exe` silencieusement masque l'attaque (et change le nom de
+    fichier perçu par l'utilisateur). Le serveur tournant en local n'est pas
+    une excuse — c'est l'un des deux maillons exploitables de l'audit 07 § 8.
+    """
+    name = (raw or "").strip()
+    if not name:
+        raise HTTPException(400, "Nom de fichier manquant")
+    if any(c in name for c in ("/", "\\", "\0")):
+        raise HTTPException(400, "Nom de fichier invalide (séparateur de chemin)")
+    if name in (".", "..") or name.startswith("..") or "/.." in name or "\\.." in name:
+        raise HTTPException(400, "Nom de fichier invalide (..)")
+    return name
 
 
 @app.post("/api/projects/{pid}/files")
@@ -111,11 +197,12 @@ async def upload_file(pid: str, file: UploadFile = File(...)):
     fd = storage.files_dir(pid)
     if not fd.exists():
         raise HTTPException(404, "Projet introuvable")
-    dest = fd / file.filename
+    name = _safe_upload_name(file.filename)
+    dest = fd / name
     with dest.open("wb") as out:
         while chunk := await file.read(1 << 20):
             out.write(chunk)
-    return {"name": file.filename, "size": dest.stat().st_size}
+    return {"name": name, "size": dest.stat().st_size}
 
 
 @app.get("/api/projects/{pid}/files/{name}")
@@ -134,9 +221,24 @@ def delete_file(pid: str, name: str, subdir: str | None = Query(None)):
     return {"ok": True}
 
 
+# Extensions « data » que Roade accepte d'ouvrir avec l'application native (Excel,
+# explorateur de texte, etc.). Tout le reste — .exe, .bat, .cmd, .ps1, .lnk, .scr,
+# .js, .jar, .vbs… — est refusé, parce que `os.startfile` lance le programme
+# associé : ouvrir un .lnk déposé dans le projet, c'est exécuter ce qu'il pointe.
+# Cf. audit 07 § 5.5, chaîne d'exécution exploitable (todo B.3).
+_OS_OPENABLE = frozenset(
+    {".csv", ".tsv", ".txt", ".xlsx", ".xls", ".xlsm", ".parquet", ".json", ".md"}
+)
+
+
 def _open_in_os(path) -> None:
     """Open a file with the OS default application (Excel, etc.). Local use only:
     the backend runs on the same machine as the user."""
+    ext = Path(path).suffix.lower()
+    if ext and ext not in _OS_OPENABLE:
+        raise HTTPException(
+            400, f"Type de fichier non ouvrable depuis Roade : {ext or '(sans extension)'}"
+        )
     if sys.platform.startswith("win"):
         os.startfile(str(path))  # noqa: S606 - Windows-only, trusted local path
     elif sys.platform == "darwin":
@@ -152,6 +254,8 @@ def open_file(pid: str, name: str, subdir: str | None = Query(None)):
         raise HTTPException(404, "Fichier introuvable")
     try:
         _open_in_os(path)
+    except HTTPException:
+        raise  # nos refus 400 (extensions non whitelistées) doivent remonter intacts
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"Impossible d'ouvrir le fichier : {e}")
     return {"ok": True}
@@ -173,15 +277,35 @@ def open_files_folder(pid: str, subdir: str | None = Query(None)):
         raise HTTPException(404, "Dossier introuvable")
     try:
         _open_in_os(fd)
+    except HTTPException:
+        raise
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"Impossible d'ouvrir le dossier : {e}")
     return {"ok": True}
 
 
 @app.get("/api/projects/{pid}/peek")
-def peek(pid: str, file: str, sheet: str | None = None, header_row: int = 0):
+def peek(
+    pid: str,
+    file: str,
+    sheet: str | None = None,
+    header_row: int = 0,
+    encoding: str | None = Query(None),
+    decimal: str | None = Query(None),
+    thousands: str | None = Query(None),
+):
+    data = {
+        k: v
+        for k, v in {
+            "encoding": encoding,
+            "decimal": decimal,
+            "thousands": thousands,
+            "header_row": header_row,
+        }.items()
+        if v not in (None, "")
+    }
     try:
-        return engine.peek_source(pid, file, sheet, header_row)
+        return engine.peek_source(pid, file, sheet, header_row, data)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, str(e))
 
@@ -195,8 +319,8 @@ def list_workflows(pid: str):
 
 
 @app.post("/api/projects/{pid}/workflows")
-def create_workflow(pid: str, payload: dict = Body(...)):
-    name = (payload.get("name") or "Nouveau workflow").strip()
+def create_workflow(pid: str, payload: CreateWorkflowBody):
+    name = (payload.name or "Nouveau workflow").strip()
     return storage.create_workflow(pid, name)
 
 
@@ -209,13 +333,17 @@ def get_workflow(pid: str, wid: str):
 
 
 @app.put("/api/projects/{pid}/workflows/{wid}")
-def save_workflow(pid: str, wid: str, payload: dict = Body(...)):
-    payload["id"] = wid
+def save_workflow(pid: str, wid: str, payload: SaveWorkflowBody):
+    # On repasse au dict pour la suite : `engine.prune_orphan_edges` et
+    # `storage.save_workflow` attendent une forme JSON brute (les data des nodes
+    # sont polymorphes selon le type de bloc).
+    body = payload.model_dump(exclude_unset=False)
+    body["id"] = wid
     # Drop ghost edges (sourceHandle points to an output that no longer exists)
     # before persisting — otherwise a downstream block would still ingest the
     # stale parquet next run. Idempotent: a clean workflow saves unchanged.
-    engine.prune_orphan_edges(payload)
-    return storage.save_workflow(pid, payload)
+    engine.prune_orphan_edges(body)
+    return storage.save_workflow(pid, body)
 
 
 @app.delete("/api/projects/{pid}/workflows/{wid}")
@@ -250,8 +378,8 @@ def document_workflow(pid: str, wid: str):
     fname = f"Documentation - {name}.xlsx"
     ascii_name = fname.encode("ascii", "ignore").decode().strip() or "documentation.xlsx"
     headers = {
-        "Content-Disposition": f"attachment; filename=\"{ascii_name}\"; "
-                               f"filename*=UTF-8''{quote(fname)}"
+        "Content-Disposition": f'attachment; filename="{ascii_name}"; '
+        f"filename*=UTF-8''{quote(fname)}"
     }
     return StreamingResponse(
         BytesIO(data),
@@ -261,16 +389,25 @@ def document_workflow(pid: str, wid: str):
 
 
 @app.get("/api/projects/{pid}/workflows/{wid}/run-stream")
-def run_stream(pid: str, wid: str, only_node: str | None = Query(None),
-               force: bool = Query(False), all_exports: bool = Query(False)):
+def run_stream(
+    pid: str,
+    wid: str,
+    only_node: str | None = Query(None),
+    force: bool = Query(False),
+    all_exports: bool = Query(False),
+):
     def gen():
         for ev in engine.iter_run_workflow(pid, wid, only_node, force, all_exports):
             yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+
     return StreamingResponse(
         gen(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
-                 "Connection": "keep-alive"},
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
     )
 
 
@@ -278,10 +415,18 @@ def run_stream(pid: str, wid: str, only_node: str | None = Query(None),
 # Preview & profile
 # --------------------------------------------------------------------------- #
 @app.get("/api/projects/{pid}/workflows/{wid}/nodes/{nid}/preview")
-def preview(pid: str, wid: str, nid: str,
-            handle: str = "out", limit: int = 200, offset: int = 0,
-            sort: str | None = None, dir: str = "asc",
-            q: str | None = None, filters: str | None = None):
+def preview(
+    pid: str,
+    wid: str,
+    nid: str,
+    handle: str = "out",
+    limit: int = 200,
+    offset: int = 0,
+    sort: str | None = None,
+    dir: str = "asc",
+    q: str | None = None,
+    filters: str | None = None,
+):
     parsed = []
     if filters:
         try:
@@ -289,9 +434,18 @@ def preview(pid: str, wid: str, nid: str,
         except json.JSONDecodeError:
             parsed = []
     try:
-        return engine.preview_node(pid, wid, nid, handle=handle, limit=limit,
-                                   offset=offset, sort=sort, direction=dir,
-                                   filters=parsed, q=q)
+        return engine.preview_node(
+            pid,
+            wid,
+            nid,
+            handle=handle,
+            limit=limit,
+            offset=offset,
+            sort=sort,
+            direction=dir,
+            filters=parsed,
+            q=q,
+        )
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, str(e))
 
@@ -305,8 +459,15 @@ def profile(pid: str, wid: str, nid: str, column: str, handle: str = "out"):
 
 
 @app.get("/api/projects/{pid}/workflows/{wid}/nodes/{nid}/group")
-def keys_group(pid: str, wid: str, nid: str, key: str = "",
-               q: str | None = None, handle: str = "out", limit: int = 200):
+def keys_group(
+    pid: str,
+    wid: str,
+    nid: str,
+    key: str = "",
+    q: str | None = None,
+    handle: str = "out",
+    limit: int = 200,
+):
     key_cols = [c for c in key.split(",") if c.strip()]
     try:
         return engine.keys_group(pid, wid, nid, key_cols, q, handle=handle, limit=limit)
@@ -315,17 +476,17 @@ def keys_group(pid: str, wid: str, nid: str, key: str = "",
 
 
 @app.post("/api/projects/{pid}/workflows/{wid}/nodes/{nid}/route-preview")
-def route_preview(pid: str, wid: str, nid: str, payload: dict = Body(...)):
+def route_preview(pid: str, wid: str, nid: str, payload: FreeJsonBody):
     try:
-        return engine.route_preview(pid, wid, nid, payload)
+        return engine.route_preview(pid, wid, nid, payload.model_dump())
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, str(e))
 
 
 @app.post("/api/projects/{pid}/workflows/{wid}/nodes/{nid}/split-scan")
-def split_scan(pid: str, wid: str, nid: str, payload: dict = Body(...)):
+def split_scan(pid: str, wid: str, nid: str, payload: FreeJsonBody):
     try:
-        return engine.split_scan(pid, wid, nid, payload)
+        return engine.split_scan(pid, wid, nid, payload.model_dump())
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, str(e))
 
@@ -334,5 +495,15 @@ def split_scan(pid: str, wid: str, nid: str, payload: dict = Body(...)):
 # Validation tester
 # --------------------------------------------------------------------------- #
 @app.post("/api/validate/test")
-def validate_test(payload: dict = Body(...)):
-    return engine.validate_test(payload.get("config") or {}, payload.get("samples") or [])
+def validate_test(payload: ValidateTestBody):
+    return engine.validate_test(payload.config, payload.samples)
+
+
+# --------------------------------------------------------------------------- #
+# Frontend buildé (servi par FastAPI en prod — un seul process)
+# --------------------------------------------------------------------------- #
+# Mount monté en dernier : Starlette matche les routes dans l'ordre, donc toutes
+# les routes /api/... ci-dessus restent prioritaires sur ce mount racine.
+_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+if _DIST.exists():
+    app.mount("/", StaticFiles(directory=_DIST, html=True), name="spa")
