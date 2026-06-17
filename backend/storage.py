@@ -48,8 +48,24 @@ def list_projects() -> list[dict]:
     for d in sorted(ROOT.iterdir()) if ROOT.exists() else []:
         meta = d / "project.json"
         if d.is_dir() and meta.exists():
-            out.append(json.loads(meta.read_text(encoding="utf-8")))
-    out.sort(key=lambda p: p.get("created_at", 0), reverse=True)
+            data = json.loads(meta.read_text(encoding="utf-8"))
+            # C.6 — enrichissement : nb workflows, nb fichiers, dernière activité.
+            # Sans toucher au format on-disk (project.json reste minimal) : on
+            # dérive ces métriques à la lecture.
+            wf_dir = d / "workflows"
+            files_dir_ = d / "files"
+            data["workflow_count"] = sum(1 for _ in wf_dir.glob("*.json")) if wf_dir.exists() else 0
+            data["file_count"] = (
+                sum(1 for f in files_dir_.iterdir() if f.is_file()) if files_dir_.exists() else 0
+            )
+            # « dernière activité » = max mtime de project.json + workflows/*.json,
+            # exposée en millisecondes pour rester JS-friendly.
+            mtimes = [meta.stat().st_mtime_ns]
+            if wf_dir.exists():
+                mtimes += [p.stat().st_mtime_ns for p in wf_dir.glob("*.json")]
+            data["last_modified_ms"] = max(mtimes) // 1_000_000
+            out.append(data)
+    out.sort(key=lambda p: p.get("last_modified_ms", p.get("created_at", 0)), reverse=True)
     return out
 
 

@@ -92,19 +92,10 @@ export const VS_COLUMN_TESTS = new Set([
   'num_le',
 ])
 
-// palette for user-defined outputs + a short id generator
-export const OUTPUT_COLORS = [
-  '#4E79A7',
-  '#59A14F',
-  '#E15759',
-  '#F28E2B',
-  '#B07AA1',
-  '#76B7B2',
-  '#EDC948',
-  '#9C755F',
-  '#FF9DA7',
-  '#86BCB6',
-]
+// D.2 — la palette des sorties utilisateur est une vue (10 premières couleurs)
+// de la palette catégorielle unique (`theme.js`). On re-exporte pour conserver
+// l'API existante des modules qui importent `OUTPUT_COLORS` depuis ici.
+export { OUTPUT_COLORS } from '../theme'
 export const uid = () => 'o' + Math.random().toString(36).slice(2, 8)
 
 // "Split by value" extractor: which part of a column value becomes the grouping key.

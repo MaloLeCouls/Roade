@@ -15,6 +15,62 @@
   --radius-lg: 6px;
   --shadow: 0 1px 3px rgba(20, 30, 60, 0.1);
 
+  /* ---- D.1 : tokens systémiques (cf. audit 06) ----------------------------- */
+  /* Échelle d'espacement 4/8/12/16/24/32/48 — calée sur ce qu'utilisaient déjà
+     les padding/margin existants. Tout nouveau spacing doit passer par un
+     token : pas de `padding: 6px 10px` au hasard. */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-7: 32px;
+  --s-8: 48px;
+
+  /* Typo — 6 tailles fonctionnelles. Le code en avait 13 littérales. */
+  --fs-xs: 11px; /* méta / hints */
+  --fs-sm: 12px; /* compact UI (badges, ports) */
+  --fs-md: 14px; /* défaut (body) */
+  --fs-lg: 16px; /* titres d'éditeur */
+  --fs-xl: 20px; /* titres modaux */
+  --fs-2xl: 24px; /* titre projet, page */
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  /* Rayons — `--radius` / `--radius-lg` existaient déjà. On nomme les 2 manquants
+     pour cohérence (--radius-sm = bouton compact, --radius-pill = badge/pill). */
+  --radius-sm: 3px;
+  --radius-md: 4px; /* = --radius (alias sémantique) */
+  --radius-pill: 999px;
+
+  /* Surfaces : fonds de notice / hover. Les composants inventaient des
+     `#f4f6fa` ou `#fafbfd` au cas par cas — on en pose 5 nuances cohérentes. */
+  --surface-1: #f7f8fa; /* hover discret */
+  --surface-2: #f0f2f6; /* row alternée, panneau secondaire */
+  --surface-3: #e7ebf1; /* notice info */
+  --surface-4: #fff7e6; /* notice warning */
+  --surface-5: #fdecea; /* notice danger */
+
+  /* Z-index — l'audit recensait 8 valeurs littérales (10/20/100/1000…).
+     Ordre stable : toast > modal > overlay > menu > sticky > base. */
+  --z-base: 1;
+  --z-sticky: 10;
+  --z-menu: 50;
+  --z-overlay: 100;
+  --z-modal: 200;
+  --z-toast: 500;
+
+  /* Durées + easings — pour que les rares animations restent informatives
+     et cohérentes (cf. atouts F1-F2 de l'audit 05). */
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 320ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+
   /* per-data-type identity (ports + links) — sober, muted palette */
   --t-source: #4e79a7;
   --t-sql: #59734f;
@@ -3866,4 +3922,175 @@ table.dt th.idx {
   background: var(--danger);
   color: #fff;
   border-color: var(--danger);
+}
+
+/* ---- Toaster (C.4) ------------------------------------------------------- */
+/* Discret, en bas à droite. Anti-slop : pas d'animation flashy, pas d'icône
+   bruyante — juste une carte qui apparaît et disparaît. */
+.toaster {
+  position: fixed;
+  bottom: var(--s-4);
+  right: var(--s-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  z-index: var(--z-toast);
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  max-width: 360px;
+  padding: var(--s-3) var(--s-4);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: var(--fs-md);
+  line-height: 1.4;
+  box-shadow: var(--shadow);
+  border-left: 3px solid var(--line);
+  cursor: pointer;
+  animation: toast-in var(--dur-base) var(--ease-out);
+}
+.toast-error {
+  border-left-color: var(--danger);
+  background: var(--surface-5);
+}
+.toast-warn {
+  border-left-color: var(--warn);
+  background: var(--surface-4);
+}
+.toast-info {
+  border-left-color: var(--accent);
+  background: var(--surface-3);
+}
+.toast-ok {
+  border-left-color: var(--ok);
+}
+@keyframes toast-in {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}
+
+/* ---- Upload progress (C.5) ----------------------------------------------- */
+.upload-progress {
+  margin: var(--s-3) 0 var(--s-2);
+  padding: var(--s-3);
+  background: var(--surface-1);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md);
+}
+.upload-progress-label {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  font-size: var(--fs-sm);
+  color: var(--ink-soft);
+  margin-bottom: var(--s-2);
+}
+.upload-progress-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+  font-weight: var(--fw-medium);
+}
+.upload-progress-pct {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+}
+.upload-progress-bar {
+  height: 4px;
+  background: var(--line-soft);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+.upload-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+  transition: width var(--dur-fast) var(--ease-out);
+}
+
+/* ---- C.6 : 4 états + cartes projet enrichies ----------------------------- */
+.card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
+  font-size: var(--fs-xs);
+  color: var(--ink-soft);
+}
+.card-meta .dot {
+  color: var(--muted);
+}
+.empty p {
+  margin: 0 0 var(--s-2);
+}
+.empty .muted {
+  font-size: var(--fs-sm);
+  max-width: 60ch;
+}
+.empty-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-3);
+  background: var(--surface-5);
+  border-left: 3px solid var(--danger);
+  padding: var(--s-4);
+  border-radius: var(--radius-md);
+}
+.empty-error p {
+  margin: 0;
+  color: var(--ink);
+}
+
+/* Skeleton : trois lignes grises pulsant doucement, signal de chargement
+   non décoratif (mouvement = information). */
+.card-skeleton {
+  pointer-events: none;
+}
+.skel-line {
+  height: 10px;
+  background: var(--line-soft);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--s-2);
+  animation: skel-pulse 1.4s var(--ease-in-out) infinite;
+}
+.skel-line-title {
+  width: 60%;
+  height: 14px;
+}
+.skel-line-sub {
+  width: 40%;
+}
+.skel-line-meta {
+  width: 80%;
+}
+@keyframes skel-pulse {
+  0%,
+  100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skel-line {
+    animation: none;
+  }
 }

@@ -7,6 +7,8 @@ export default function ProjectView({ pid, onOpenWorkflow }) {
   const [files, setFiles] = useState([])
   const [workflows, setWorkflows] = useState([])
   const [wfName, setWfName] = useState('')
+  // C.5 — { name, index, total, progress: 0..1 } pendant un upload (sinon null).
+  const [uploading, setUploading] = useState(null)
   const fileInput = useRef()
 
   const reload = async () => {
@@ -20,7 +22,12 @@ export default function ProjectView({ pid, onOpenWorkflow }) {
 
   const upload = async (e) => {
     const list = Array.from(e.target.files || [])
-    for (const f of list) await api.uploadFile(pid, f)
+    for (let i = 0; i < list.length; i++) {
+      const f = list[i]
+      setUploading({ name: f.name, index: i + 1, total: list.length, progress: 0 })
+      await api.uploadFile(pid, f, (p) => setUploading((u) => u && { ...u, progress: p }))
+    }
+    setUploading(null)
     fileInput.current.value = ''
     setFiles(await api.listFiles(pid))
   }
@@ -123,6 +130,23 @@ export default function ProjectView({ pid, onOpenWorkflow }) {
               onChange={upload}
             />
           </div>
+          {uploading && (
+            <div className="upload-progress" role="status" aria-live="polite">
+              <div className="upload-progress-label">
+                {uploading.total > 1
+                  ? `Import ${uploading.index}/${uploading.total} — `
+                  : 'Import — '}
+                <span className="upload-progress-name">{uploading.name}</span>
+                <span className="upload-progress-pct">{Math.round(uploading.progress * 100)}%</span>
+              </div>
+              <div className="upload-progress-bar">
+                <div
+                  className="upload-progress-fill"
+                  style={{ width: `${Math.round(uploading.progress * 100)}%` }}
+                />
+              </div>
+            </div>
+          )}
           {files.length === 0 ? (
             <div className="empty small">Aucun fichier. Importez vos Excel/CSV.</div>
           ) : (

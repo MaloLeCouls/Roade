@@ -394,20 +394,9 @@ function ReportView({ pid, wid, node, status, onRun, onPreview }) {
   )
 }
 
-const PIE_COLORS = [
-  '#4E79A7',
-  '#59A14F',
-  '#E15759',
-  '#F28E2B',
-  '#B07AA1',
-  '#76B7B2',
-  '#EDC948',
-  '#9C755F',
-  '#FF9DA7',
-  '#86BCB6',
-  '#bab0ac',
-  '#8cd17d',
-]
+// D.2 — palette catégorielle importée depuis la source unique (était dupliquée
+// avec `OUTPUT_COLORS` de validateHelpers.js).
+import { PIE_COLORS } from '../theme'
 
 function AnalysisCardView({ a, pid, wid, nid }) {
   if (a.kind === 'keys') return <KeysAnalysisView a={a} pid={pid} wid={wid} nid={nid} />

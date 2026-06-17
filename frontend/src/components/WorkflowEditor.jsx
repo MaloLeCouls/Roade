@@ -131,33 +131,10 @@ const nodeTypes = {
 }
 const edgeTypes = { deletable: ButtonEdge }
 
-// data-type identity colours (must match CSS --t-*) for ports & links
-const TYPE_COLOR = {
-  source: '#4E79A7',
-  sql: '#59734F',
-  dedup: '#8d6ea0',
-  validate: '#5b6bb0',
-  pivot: '#b1605f',
-  clean: '#4f9a93',
-  calc: '#b05a86',
-  filter: '#3f8c8c',
-  cols: '#7a6cb0',
-  report: '#6b8e3d',
-  union: '#8a7560',
-  export: '#c08436',
-  frame: '#5b6bb0',
-  stop: '#7d8590',
-}
-// multi-output handles carry their own role colours
-const HANDLE_COLOR = {
-  kept: '#3f7a4f',
-  dups: '#c0392f',
-  uniques: '#3556a8',
-  valid: '#3f7a4f',
-  invalid: '#c0392f',
-}
-// quick palette for colouring a frame (right-click → couleur du cadre)
-const FRAME_COLORS = ['#5b6bb0', '#4E79A7', '#59A14F', '#E1A33A', '#B05A86', '#7d8590']
+// Palettes d'identité (TYPE_COLOR / HANDLE_COLOR / FRAME_COLORS) : importées
+// depuis la source unique `theme.js` (D.2) — avant elles étaient redéfinies ici
+// et dans WorkflowFlow.jsx, et finissaient par dériver entre les deux.
+import { FRAME_COLORS, HANDLE_COLOR, TYPE_COLOR } from '../theme'
 
 const DEFAULT_DATA = {
   source: { label: 'Source', file: '', sheet: '', header_row: 0, cache: true },
@@ -470,6 +447,24 @@ function Editor({ pid, wid, onBack }) {
     }, 600)
     return () => clearTimeout(saveTimer.current)
   }, [nodes, edges, wfName])
+
+  // ---- C.3 garde-fou beforeunload ----
+  // Pendant que l'autosave debounce les 600 ms (ou pendant la requête PUT), une
+  // fermeture/un F5 perdait la modif en silence. On bloque avec le prompt natif
+  // du navigateur tant que `saveState !== 'saved'`. Le browser refusera d'afficher
+  // un message custom (sécurité), il dira sa formule habituelle « les modifications
+  // ne seront peut-être pas enregistrées ». C'est exactement ce qu'on veut.
+  useEffect(() => {
+    const onBeforeUnload = (e) => {
+      if (saveState === 'saving' || saveState === 'error') {
+        e.preventDefault()
+        e.returnValue = '' // Chrome / Edge exigent un returnValue non-undefined
+        return ''
+      }
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [saveState])
 
   // ---- auto-hide the progress bar shortly after completion ----
   useEffect(() => {

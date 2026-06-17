@@ -48,11 +48,40 @@ export const api = {
 
   // ---- files ----
   listFiles: (pid) => getJSON(`/projects/${enc(pid)}/files`),
-  uploadFile: (pid, file) => {
-    const fd = new FormData()
-    fd.append('file', file)
-    return req(`/projects/${enc(pid)}/files`, { method: 'POST', body: fd })
-  },
+  // Upload via XHR plutôt que fetch : on a besoin de `xhr.upload.onprogress`
+  // pour afficher une barre côté UI (un Excel de 80 Mo figeait l'app sans
+  // aucun signal — cf. todo C.5). Le contrat reste une Promise.
+  uploadFile: (pid, file, onProgress) =>
+    new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', `${BASE}/projects/${enc(pid)}/files`)
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total)
+      }
+      xhr.onload = () => {
+        if (xhr.status < 200 || xhr.status >= 300) {
+          let detail = xhr.statusText
+          try {
+            const body = JSON.parse(xhr.responseText)
+            detail = body.detail || body.error || detail
+          } catch {
+            /* non-JSON error body */
+          }
+          reject(new Error(detail || `Erreur ${xhr.status}`))
+          return
+        }
+        try {
+          resolve(JSON.parse(xhr.responseText))
+        } catch {
+          resolve(null)
+        }
+      }
+      xhr.onerror = () => reject(new Error('Erreur réseau'))
+      xhr.onabort = () => reject(new Error('Upload annulé'))
+      const fd = new FormData()
+      fd.append('file', file)
+      xhr.send(fd)
+    }),
   deleteFile: (pid, name, subdir) =>
     req(`/projects/${enc(pid)}/files/${enc(name)}${qs({ subdir })}`, { method: 'DELETE' }),
   openFile: (pid, name, subdir) =>

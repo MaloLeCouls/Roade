@@ -21,7 +21,6 @@ from urllib.parse import quote
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
 import engine
@@ -502,8 +501,30 @@ def validate_test(payload: ValidateTestBody):
 # --------------------------------------------------------------------------- #
 # Frontend buildé (servi par FastAPI en prod — un seul process)
 # --------------------------------------------------------------------------- #
-# Mount monté en dernier : Starlette matche les routes dans l'ordre, donc toutes
-# les routes /api/... ci-dessus restent prioritaires sur ce mount racine.
+# Catch-all monté en dernier : Starlette matche les routes dans l'ordre, donc
+# toutes les routes /api/... ci-dessus restent prioritaires.
+#
+# Le routeur SPA front (C.1) utilise des URLs comme `/p/<pid>/w/<wid>` ; un
+# mount StaticFiles renverrait 404 sur ces chemins (aucun fichier sur disque).
+# On sert donc index.html pour tout ce qui n'est ni un asset existant, ni une
+# route /api. Le path est resolved+contained pour ne pas servir un fichier
+# en dehors de dist/ (cohérent avec la philo path-traversal de B.3).
 _DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 if _DIST.exists():
-    app.mount("/", StaticFiles(directory=_DIST, html=True), name="spa")
+    _DIST_INDEX = _DIST / "index.html"
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa_or_asset(full_path: str):
+        # `/api/...` est déjà matchée par les routes ci-dessus ; ce garde-fou
+        # évite juste qu'un `/api/inexistant` retombe sur index.html.
+        if full_path.startswith("api/"):
+            raise HTTPException(404)
+        if full_path:
+            candidate = (_DIST / full_path).resolve()
+            try:
+                candidate.relative_to(_DIST.resolve())
+                if candidate.is_file():
+                    return FileResponse(candidate)
+            except ValueError:
+                pass  # sortait de dist/ — on fallback à index.html
+        return FileResponse(_DIST_INDEX)
