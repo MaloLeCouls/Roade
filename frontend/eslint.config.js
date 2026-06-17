@@ -7,15 +7,20 @@ import react from 'eslint-plugin-react'
 import reactHooks from 'eslint-plugin-react-hooks'
 import jsxA11y from 'eslint-plugin-jsx-a11y'
 import reactRefresh from 'eslint-plugin-react-refresh'
+import tseslint from 'typescript-eslint'
 import prettier from 'eslint-config-prettier'
 
 export default [
   { ignores: ['dist', 'node_modules', 'package-lock.json'] },
 
   js.configs.recommended,
+  // TS recommandé (sans type-checking projet — `recommended` suffit pour les
+  // règles de base ; on évite `recommendedTypeChecked` qui exige un programme
+  // TS complet et ralentit le lint).
+  ...tseslint.configs.recommended,
 
   {
-    files: ['src/**/*.{js,jsx}'],
+    files: ['src/**/*.{js,jsx,ts,tsx}'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',
@@ -54,7 +59,10 @@ export default [
       'jsx-a11y/no-autofocus': 'off',
 
       // Tolère les variables non utilisées préfixées par _ (ex. arg ignoré volontairement).
-      'no-unused-vars': [
+      // La version JS est désactivée pour ne pas doublonner avec sa cousine TS sur les .ts/.tsx
+      // (qui voit aussi les `_` au début).
+      'no-unused-vars': 'off',
+      '@typescript-eslint/no-unused-vars': [
         'warn',
         {
           argsIgnorePattern: '^_',

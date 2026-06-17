@@ -1,0 +1,29 @@
+{
+  "// commentaire": "TS incrémental (0.9). allowJs:true intéropérabilité avec les .js existants, checkJs:false pour ne pas remonter mille warnings sur le code legacy (on ajoute @ts-check fichier par fichier quand on veut le passer au crible). Le strict s'applique aux .ts/.tsx — nouveau code typé sérieusement.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "allowJs": true,
+    "checkJs": false,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src", "vite.config.js"],
+  "exclude": ["node_modules", "dist"]
+}

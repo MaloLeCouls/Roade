@@ -58,7 +58,7 @@ export default function DataPreview({
 
   // remember where the user was (tab + column) for next time
   useEffect(() => {
-    onNav && onNav({ tab, column: activeColumn })
+    if (onNav) onNav({ tab, column: activeColumn })
   }, [tab, activeColumn]) // eslint-disable-line
 
   // Échap ferme l'aperçu

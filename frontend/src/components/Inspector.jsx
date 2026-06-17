@@ -1867,7 +1867,8 @@ function AnalysisCard({ a, cols, index, count, onChange, onMove, onDelete }) {
   const keyCols = a.key || (a.column ? [a.column] : [])
   const toggleKey = (name) => {
     const set = new Set(keyCols)
-    set.has(name) ? set.delete(name) : set.add(name)
+    if (set.has(name)) set.delete(name)
+    else set.add(name)
     onChange({ key: cols.map((c) => c.name).filter((n) => set.has(n)) }) // keep column order
   }
   const onKindChange = (v) => {

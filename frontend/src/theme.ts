@@ -11,7 +11,23 @@
 
 // ---- identités de blocs ---------------------------------------------------- //
 // Couleurs qui distinguent les types de blocs sur le canevas (ports + liens).
-export const TYPE_COLOR = {
+export type BlockType =
+  | 'source'
+  | 'sql'
+  | 'dedup'
+  | 'validate'
+  | 'pivot'
+  | 'clean'
+  | 'calc'
+  | 'filter'
+  | 'cols'
+  | 'report'
+  | 'union'
+  | 'export'
+  | 'frame'
+  | 'stop'
+
+export const TYPE_COLOR: Record<BlockType, string> = {
   source: '#4E79A7',
   sql: '#59734F',
   dedup: '#8d6ea0',
@@ -30,7 +46,9 @@ export const TYPE_COLOR = {
 
 // Les ancres « multi-sortie » (dedup → kept/dups/uniques, validate → valid/invalid)
 // portent leur propre couleur de rôle qui surcouche celle du type de bloc.
-export const HANDLE_COLOR = {
+export type HandleRole = 'kept' | 'dups' | 'uniques' | 'valid' | 'invalid'
+
+export const HANDLE_COLOR: Record<HandleRole, string> = {
   kept: '#3f7a4f',
   dups: '#c0392f',
   uniques: '#3556a8',

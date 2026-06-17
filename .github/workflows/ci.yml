@@ -58,6 +58,9 @@ jobs:
       - name: Prettier check
         run: npm run format:check
 
+      - name: TypeScript (typecheck)
+        run: npm run typecheck
+
       - name: Vitest
         run: npm test
 
