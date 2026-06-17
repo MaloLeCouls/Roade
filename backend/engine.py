@@ -13,6 +13,7 @@ Public API (consumed by main.py and the smoke tests in backend/_test_*.py):
     peek_source(pid, file, sheet, header_row)   -> {"sheets", "columns"}
     validate_test(config, samples)              -> {"ok", "results"|"error"}
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -20,20 +21,28 @@ import json
 import math
 import re
 
+import charset_normalizer
 import duckdb
 import numpy as np
 import pandas as pd
 
-import storage
 import query_builder
+import storage
+from formula import FormulaError, compile_formula
 from query_builder import q_ident
-from formula import compile_formula, FormulaError
 
 # Output handles per block type (first one is the "primary" output).
 OUTPUTS = {
-    "source": ["out"], "sql": ["out"], "pivot": ["out"], "clean": ["out"],
-    "calc": ["out"], "union": ["out"], "export": [],
-    "filter": ["out"], "cols": ["out"], "report": ["out"],
+    "source": ["out"],
+    "sql": ["out"],
+    "pivot": ["out"],
+    "clean": ["out"],
+    "calc": ["out"],
+    "union": ["out"],
+    "export": [],
+    "filter": ["out"],
+    "cols": ["out"],
+    "report": ["out"],
     "dedup": ["kept", "dups", "uniques"],
     "validate": ["valid", "invalid"],
 }
@@ -70,9 +79,23 @@ def prune_orphan_edges(wf: dict) -> list[dict]:
     wf["edges"] = kept
     return removed
 
-_NUMERIC_TYPES = ("TINYINT", "SMALLINT", "INTEGER", "BIGINT", "HUGEINT",
-                  "UTINYINT", "USMALLINT", "UINTEGER", "UBIGINT", "UHUGEINT",
-                  "FLOAT", "REAL", "DOUBLE", "DECIMAL")
+
+_NUMERIC_TYPES = (
+    "TINYINT",
+    "SMALLINT",
+    "INTEGER",
+    "BIGINT",
+    "HUGEINT",
+    "UTINYINT",
+    "USMALLINT",
+    "UINTEGER",
+    "UBIGINT",
+    "UHUGEINT",
+    "FLOAT",
+    "REAL",
+    "DOUBLE",
+    "DECIMAL",
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -105,8 +128,7 @@ def _json_safe(v):
 
 
 def _df_records(df: pd.DataFrame) -> list[dict]:
-    return [{k: _json_safe(val) for k, val in rec.items()}
-            for rec in df.to_dict("records")]
+    return [{k: _json_safe(val) for k, val in rec.items()} for rec in df.to_dict("records")]
 
 
 def _describe(con, rel: str) -> list[dict]:
@@ -124,11 +146,106 @@ def _is_numeric_type(t: str) -> bool:
 # --------------------------------------------------------------------------- #
 _EXCEL_EXT = (".xlsx", ".xls", ".xlsm")
 
+# Sniffing FR/EN numbers : « 1 234,56 » / « 12,5 » vs « 1,234.56 » / « 12.5 ».
+# Espaces classique + insécable ( ) + fine insécable ( ) — tous courants
+# côté Excel FR.
+_FR_NUM_RE = re.compile(r"^-?\d+(?:[\s  ]\d{3})*,\d+$")
+_EN_NUM_RE = re.compile(r"^-?\d+(?:,\d{3})*\.\d+$")
+
+
+def _sniff_encoding(path) -> str:
+    """Detect text-file encoding from the first ~16 KB. Falls back to utf-8.
+
+    Restreint le sniffer aux encodings plausibles dans un contexte Roade (FR-first
+    + exports Excel Windows). Sur des fichiers très courts, charset-normalizer
+    peut autrement classer une chaîne accentuée comme Big5 / Shift_JIS et faire
+    pourrir le décodage — ici on évite ça en limitant le champ.
+    """
+    with path.open("rb") as f:
+        raw = f.read(1 << 14)
+    if not raw:
+        return "utf-8"
+    plausible = ["utf-8", "utf-16", "cp1252", "iso-8859-1", "iso-8859-15"]
+    best = charset_normalizer.from_bytes(raw, cp_isolation=plausible).best()
+    return (best.encoding if best else None) or "utf-8"
+
+
+# Token isolant un nombre décimal dans une ligne brute ; les lookarounds excluent
+# les milliers (`1234,56` n'est pas pris pour FR si entouré d'autres chiffres
+# côté virgule). On regarde le texte directement, AVANT que pandas choisisse un
+# séparateur — sinon un `12,5` se ferait avaler comme deux colonnes EN.
+_FR_TOKEN_RE = re.compile(r"(?<!\d)-?\d{1,3}(?:[\s  ]\d{3})*,\d+(?!\d)")
+_EN_TOKEN_RE = re.compile(r"(?<!\d)-?\d{1,3}(?:,\d{3})*\.\d+(?!\d)")
+
+
+def _sniff_decimal(text: str) -> str | None:
+    """Look at ~50 data lines of raw text. Return ',' if FR-style decimals
+    dominate, '.' if EN-style dominate, None if ambiguous."""
+    fr = en = 0
+    for line in text.splitlines()[1:51]:  # skip header
+        fr += len(_FR_TOKEN_RE.findall(line))
+        en += len(_EN_TOKEN_RE.findall(line))
+    # Seuil bas (2 valeurs typées suffisent à signer le format), mais on exige
+    # une domination nette du camp gagnant pour ne pas trancher sur du bruit.
+    if fr >= 2 and fr > en * 2:
+        return ","
+    if en >= 2 and en > fr * 2:
+        return "."
+    return None
+
+
+def _resolve_read_options(path, data: dict) -> tuple[dict, dict]:
+    """Compute the effective `pd.read_csv` kwargs for this source + a `detected`
+    dict reporting what was sniffed (for the Source aperçu, todo A.3).
+
+    `data` keys honored:
+      - encoding  : 'auto' (default) or a Python codec name (e.g. 'cp1252')
+      - decimal   : 'auto' (default), ',' or '.'
+      - thousands : optional, any string (no sniffing — too ambiguous)
+    """
+    ext = path.suffix.lower()
+    detected: dict = {}
+    opts: dict = {}
+    if ext in _EXCEL_EXT or ext == ".parquet":
+        return opts, detected  # binary formats : nothing to sniff/choose here
+
+    user_enc = (data.get("encoding") or "auto").strip().lower()
+    if user_enc in ("", "auto"):
+        enc = _sniff_encoding(path)
+        detected["encoding"] = enc
+    else:
+        enc = user_enc
+    opts["encoding"] = enc
+
+    user_dec = (data.get("decimal") or "auto").strip().lower()
+    if user_dec in ("", "auto"):
+        try:
+            with path.open("r", encoding=opts["encoding"], errors="replace") as f:
+                head = "".join(next(f, "") for _ in range(51))
+            dec = _sniff_decimal(head)
+            if dec:
+                detected["decimal"] = dec
+        except Exception:  # noqa: BLE001 — sniffing is best-effort
+            dec = None
+    elif user_dec in (",", "."):
+        dec = user_dec
+    else:
+        dec = None
+    if dec:
+        opts["decimal"] = dec
+
+    thou = data.get("thousands")
+    if thou:
+        opts["thousands"] = str(thou)
+
+    return opts, detected
+
 
 def _source_fingerprint(pid, node) -> str | None:
-    """Identity of a source's inputs: file name + sheet + header + size + mtime.
-    Changes whenever the underlying file or its read options change, so a cached
-    output can be safely reused only while this string is unchanged."""
+    """Identity of a source's inputs: file + sheet + header + read options +
+    size + mtime. Changes whenever the underlying file or its read options
+    change, so a cached output can be safely reused only while this is identical
+    (cf. todo A.9)."""
     d = node["data"]
     f = d.get("file")
     if not f:
@@ -137,13 +254,17 @@ def _source_fingerprint(pid, node) -> str | None:
     if not p.exists():
         return None
     st = p.stat()
-    return f"{f}|{d.get('sheet') or ''}|{int(d.get('header_row') or 0)}|{st.st_size}|{st.st_mtime_ns}"
+    opts_key = "|".join(str(d.get(k) or "") for k in ("encoding", "decimal", "thousands"))
+    return (
+        f"{f}|{d.get('sheet') or ''}|{int(d.get('header_row') or 0)}|"
+        f"{opts_key}|{st.st_size}|{st.st_mtime_ns}"
+    )
 
 
 # --------------------------------------------------------------------------- #
 # Change tracking — a node's "compute signature"
 # --------------------------------------------------------------------------- #
-_SIG_DROP_KEYS = {"test_samples"}                       # UI-only, dropped at any depth
+_SIG_DROP_KEYS = {"test_samples"}  # UI-only, dropped at any depth
 _SIG_DROP_TOP = {"label", "description", "locked", "cache"}  # cosmetic / handled apart
 
 
@@ -186,8 +307,10 @@ def _signatures_for(pid, wid, nodes, edges, order) -> dict:
         for e in edges:
             if e.get("target") == nid:
                 src = e.get("source")
-                ups.append(f"{e.get('targetHandle') or 'in'}<-{src}:"
-                           f"{e.get('sourceHandle') or 'out'}#{sigs.get(src, '')}")
+                ups.append(
+                    f"{e.get('targetHandle') or 'in'}<-{src}:"
+                    f"{e.get('sourceHandle') or 'out'}#{sigs.get(src, '')}"
+                )
         sig = _node_signature(pid, node, ups)
         if node["data"].get("locked"):
             hs = _output_handles(node)
@@ -199,16 +322,17 @@ def _signatures_for(pid, wid, nodes, edges, order) -> dict:
     return sigs
 
 
-def _read_source(path, sheet, header_row: int) -> pd.DataFrame:
+def _read_source(path, sheet, header_row: int, data: dict | None = None) -> pd.DataFrame:
     ext = path.suffix.lower()
     hr = int(header_row or 0)
     if ext in _EXCEL_EXT:
         return pd.read_excel(path, sheet_name=(sheet or 0), skiprows=hr)
     if ext == ".parquet":
         return pd.read_parquet(path)
+    opts, _ = _resolve_read_options(path, data or {})
     if ext in (".tsv", ".txt"):
-        return pd.read_csv(path, sep="\t", skiprows=hr)
-    return pd.read_csv(path, sep=None, engine="python", skiprows=hr)
+        return pd.read_csv(path, sep="\t", skiprows=hr, **opts)
+    return pd.read_csv(path, sep=None, engine="python", skiprows=hr, **opts)
 
 
 def _dtype_label(dt) -> str:
@@ -224,21 +348,54 @@ def _dtype_label(dt) -> str:
     return "VARCHAR"
 
 
-def peek_source(pid: str, file: str, sheet: str | None, header_row) -> dict:
+def peek_source(
+    pid: str, file: str, sheet: str | None, header_row, data: dict | None = None
+) -> dict:
     path = storage.files_dir(pid) / file
     if not path.exists():
         raise ValueError(f"Fichier introuvable : {file}")
     sheets = None
     hr = int(header_row or 0)
+    detected: dict = {}
     if path.suffix.lower() in _EXCEL_EXT:
-        with pd.ExcelFile(path) as xl:          # context-manager closes the file handle
+        with pd.ExcelFile(path) as xl:  # context-manager closes the file handle
             sheets = list(xl.sheet_names)
             target = sheet if (sheet and sheet in sheets) else sheets[0]
             df = pd.read_excel(xl, sheet_name=target, skiprows=hr, nrows=100)
     else:
-        df = _read_source(path, sheet, hr).head(100)
+        opts, detected = _resolve_read_options(path, data or {})
+        df = _read_source(path, sheet, hr, data).head(100)
+        # Surface the effective sep too, so the aperçu can name it (A.3).
+        # pandas with sep=None+engine='python' sniffs internally — peek again
+        # with the same options to recover what it picked.
+        try:
+            with path.open("r", encoding=opts.get("encoding") or "utf-8", errors="replace") as f:
+                head = "".join([next(f, "") for _ in range(8)])
+            detected["sep"] = _guess_sep_from_head(head)
+        except Exception:  # noqa: BLE001
+            pass
     columns = [{"name": str(c), "type": _dtype_label(df[c].dtype)} for c in df.columns]
-    return {"sheets": sheets, "columns": columns}
+    return {"sheets": sheets, "columns": columns, "detected": detected}
+
+
+def _guess_sep_from_head(text: str) -> str | None:
+    """Best-effort separator guess from a few header/data lines (CSV-only)."""
+    lines = [ln for ln in text.splitlines() if ln.strip()][:8]
+    if not lines:
+        return None
+    best, best_score = None, 0
+    for sep in (";", ",", "\t", "|"):
+        counts = [ln.count(sep) for ln in lines]
+        if counts[0] == 0:
+            continue
+        # Stable count across lines = strong signal.
+        if all(c == counts[0] for c in counts):
+            score = counts[0] * 10
+        else:
+            score = counts[0]
+        if score > best_score:
+            best, best_score = sep, score
+    return best
 
 
 # --------------------------------------------------------------------------- #
@@ -324,7 +481,7 @@ def _run_source(con, pid, node, ins):
     path = storage.files_dir(pid) / file
     if not path.exists():
         raise ValueError(f"fichier introuvable : {file}")
-    df = _read_source(path, d.get("sheet"), d.get("header_row") or 0)
+    df = _read_source(path, d.get("sheet"), d.get("header_row") or 0, d)
     fp = _source_fingerprint(pid, node)
     return {"out": df}, ({"source_fingerprint": fp} if fp else {})
 
@@ -364,7 +521,8 @@ def _run_dedup(con, pid, node, ins):
     missing = [k for k in requested if k not in df.columns]
     if missing:
         raise ValueError(
-            "colonnes-clés introuvables dans l'entrée : " + ", ".join(missing)
+            "colonnes-clés introuvables dans l'entrée : "
+            + ", ".join(missing)
             + " — réexécutez le bloc amont, puis re-cochez les colonnes-clés."
         )
     keys = requested or list(df.columns)
@@ -374,7 +532,7 @@ def _run_dedup(con, pid, node, ins):
     dups_mode = d.get("dups_mode", "all")
 
     dup_any = df.duplicated(subset=keys, keep=False)
-    exemplar = ~df.duplicated(subset=keys, keep=keep)        # one row per group
+    exemplar = ~df.duplicated(subset=keys, keep=keep)  # one row per group
     kept = df[exemplar]
     uniques = df[~dup_any]
     if dups_mode == "exemplar":
@@ -388,7 +546,7 @@ def _run_dedup(con, pid, node, ins):
     try:
         dups = dups.sort_values(by=keys, kind="stable")
     except TypeError:
-        pass                                                 # unorderable mixed types
+        pass  # unorderable mixed types
     return {
         "kept": kept.reset_index(drop=True),
         "dups": dups.reset_index(drop=True),
@@ -421,16 +579,35 @@ def _run_validate(con, pid, node, ins):
 # --------------------------------------------------------------------------- #
 # Routing (neutral multi-output classification, set-algebra conditions)
 # --------------------------------------------------------------------------- #
-_VECTORIZABLE_TESTS = frozenset({
-    "equals", "not_equals", "is_empty", "not_empty",
-    "starts_with", "ends_with", "contains", "not_contains",
-    "length_eq", "length_min", "length_max",
-    "is_in", "regex", "regex_full",
-})
+_VECTORIZABLE_TESTS = frozenset(
+    {
+        "equals",
+        "not_equals",
+        "is_empty",
+        "not_empty",
+        "starts_with",
+        "ends_with",
+        "contains",
+        "not_contains",
+        "length_eq",
+        "length_min",
+        "length_max",
+        "is_in",
+        "regex",
+        "regex_full",
+    }
+)
 # String tests whose right-hand side can be either a literal or another column.
-_VS_COLUMN_STR_TESTS = frozenset({
-    "equals", "not_equals", "contains", "not_contains", "starts_with", "ends_with",
-})
+_VS_COLUMN_STR_TESTS = frozenset(
+    {
+        "equals",
+        "not_equals",
+        "contains",
+        "not_contains",
+        "starts_with",
+        "ends_with",
+    }
+)
 _NUMERIC_TESTS = frozenset({"num_eq", "num_ne", "num_gt", "num_ge", "num_lt", "num_le"})
 
 
@@ -467,8 +644,14 @@ def _rule_mask(df: pd.DataFrame, rule: dict, cs: bool, default_col: str) -> pd.S
                 m = pd.Series(False, index=df.index)
                 m = m.astype(bool)
                 return ~m if rule.get("negate") else m
-        op = {"num_eq": a.eq, "num_ne": a.ne, "num_gt": a.gt,
-              "num_ge": a.ge, "num_lt": a.lt, "num_le": a.le}[test]
+        op = {
+            "num_eq": a.eq,
+            "num_ne": a.ne,
+            "num_gt": a.gt,
+            "num_ge": a.ge,
+            "num_lt": a.lt,
+            "num_le": a.le,
+        }[test]
         m = op(b).fillna(False).astype(bool)
         return ~m if rule.get("negate") else m
 
@@ -491,7 +674,7 @@ def _rule_mask(df: pd.DataFrame, rule: dict, cs: bool, default_col: str) -> pd.S
                 m = pd.Series([a.endswith(b) for a, b in zip(ss, ss2)], index=df.index)
             elif test == "contains":
                 m = pd.Series([b in a for a, b in zip(ss, ss2)], index=df.index)
-            else:                                          # not_contains
+            else:  # not_contains
                 m = pd.Series([b not in a for a, b in zip(ss, ss2)], index=df.index)
             m = m.astype(bool)
             return ~m if rule.get("negate") else m
@@ -525,10 +708,14 @@ def _rule_mask(df: pd.DataFrame, rule: dict, cs: bool, default_col: str) -> pd.S
                 m = pd.Series(False, index=df.index)
             else:
                 lengths = s.str.len()
-                m = (lengths == n if test == "length_eq"
-                     else lengths >= n if test == "length_min"
-                     else lengths <= n)
-        else:                                              # regex / regex_full
+                m = (
+                    lengths == n
+                    if test == "length_eq"
+                    else lengths >= n
+                    if test == "length_min"
+                    else lengths <= n
+                )
+        else:  # regex / regex_full
             try:
                 if test == "regex":
                     m = s.str.contains(str(raw or ""), regex=True, na=False, case=cs)
@@ -600,13 +787,16 @@ def _apply_value_when(con, df: pd.DataFrame, group: dict) -> pd.DataFrame:
     broadcasts the result to every row of the group. A group with no matching
     row falls back to NULL or to a fixed user value."""
     g = group or {}
-    funcs = [f for f in (g.get("functions") or [])
-             if f.get("fn") == "value_when" and f.get("enabled") is not False]
+    funcs = [
+        f
+        for f in (g.get("functions") or [])
+        if f.get("fn") == "value_when" and f.get("enabled") is not False
+    ]
     if not funcs:
         return df
     keys = [c for c in (g.get("partition_by") or []) if c in df.columns]
     order_pairs = []
-    for o in (g.get("order_by") or []):
+    for o in g.get("order_by") or []:
         c = o.get("column") if isinstance(o, dict) else o
         if c and c in df.columns:
             order_pairs.append((c, bool(isinstance(o, dict) and o.get("desc"))))
@@ -633,7 +823,7 @@ def _apply_value_when(con, df: pd.DataFrame, group: dict) -> pd.DataFrame:
                 continue
             con.register("_vw_in", out)
             try:
-                values = con.execute(f'SELECT ({sql_expr}) AS _v FROM _vw_in').df()["_v"]
+                values = con.execute(f"SELECT ({sql_expr}) AS _v FROM _vw_in").df()["_v"]
             finally:
                 con.unregister("_vw_in")
             values.index = out.index
@@ -644,7 +834,7 @@ def _apply_value_when(con, df: pd.DataFrame, group: dict) -> pd.DataFrame:
             values = out[col]
 
         mask = _eval_condition(out, f.get("condition") or {}, True, None).astype(bool)
-        picked = values.where(mask)               # non-matching rows -> NaN
+        picked = values.where(mask)  # non-matching rows -> NaN
         reducer = f.get("reducer") or "first"
         if reducer not in _VALUE_WHEN_REDUCERS:
             reducer = "first"
@@ -693,8 +883,11 @@ def _group_check_core(work, df, keys, ck, cs, default_col):
         k = _int(ck.get("n"))
         if k is None:
             return None
-        sizes = (df.groupby(keys, dropna=False)[keys[0]].transform("size")
-                 if keys else pd.Series(len(df), index=df.index))
+        sizes = (
+            df.groupby(keys, dropna=False)[keys[0]].transform("size")
+            if keys
+            else pd.Series(len(df), index=df.index)
+        )
         if check == "size_eq":
             return sizes == k
         if check == "size_min":
@@ -709,20 +902,34 @@ def _group_check_core(work, df, keys, ck, cs, default_col):
 
     def _distinct():
         if keys:
-            return work.groupby(keys, dropna=False)[col].transform(lambda s: s.nunique(dropna=False))
+            return work.groupby(keys, dropna=False)[col].transform(
+                lambda s: s.nunique(dropna=False)
+            )
         return pd.Series(work[col].nunique(dropna=False), index=df.index)
 
-    if check == "no_null":                        # group OK iff col never null inside it
+    if check == "no_null":  # group OK iff col never null inside it
         if keys:
-            return work.groupby(keys, dropna=False)[col].transform(lambda s: s.notna().all()).astype(bool)
+            return (
+                work.groupby(keys, dropna=False)[col]
+                .transform(lambda s: s.notna().all())
+                .astype(bool)
+            )
         return pd.Series(bool(work[col].notna().all()), index=df.index)
-    if check == "not_all_null":                   # group OK iff col not entirely null
+    if check == "not_all_null":  # group OK iff col not entirely null
         if keys:
-            return work.groupby(keys, dropna=False)[col].transform(lambda s: s.notna().any()).astype(bool)
+            return (
+                work.groupby(keys, dropna=False)[col]
+                .transform(lambda s: s.notna().any())
+                .astype(bool)
+            )
         return pd.Series(bool(work[col].notna().any()), index=df.index)
-    if check == "all_null":                       # group OK iff col empty everywhere (inverse of no_null)
+    if check == "all_null":  # group OK iff col empty everywhere (inverse of no_null)
         if keys:
-            return work.groupby(keys, dropna=False)[col].transform(lambda s: s.isna().all()).astype(bool)
+            return (
+                work.groupby(keys, dropna=False)[col]
+                .transform(lambda s: s.isna().all())
+                .astype(bool)
+            )
         return pd.Series(bool(work[col].isna().all()), index=df.index)
     if check == "unique":
         # group-atomic: the WHOLE group is OK iff every value is distinct
@@ -791,7 +998,9 @@ def _group_check_core(work, df, keys, ck, cs, default_col):
             per_row = {"lt": a < b, "le": a <= b, "gt": a > b, "ge": a >= b}[op]
             per_row = per_row.fillna(False)
         if keys:
-            return per_row.groupby([df[k] for k in keys], dropna=False).transform("all").astype(bool)
+            return (
+                per_row.groupby([df[k] for k in keys], dropna=False).transform("all").astype(bool)
+            )
         return pd.Series(bool(per_row.all()), index=df.index)
     if check in ("distinct_cmp", "determines"):
         col2 = ck.get("column2")
@@ -799,22 +1008,38 @@ def _group_check_core(work, df, keys, ck, cs, default_col):
             return None
         if col2 not in df.columns:
             raise ValueError(f"Contrôle par groupe : colonne « {col2} » introuvable dans l'entrée.")
-        nun = (lambda c: work.groupby(keys, dropna=False)[c].transform(lambda s: s.nunique(dropna=False))) if keys \
+        nun = (
+            (
+                lambda c: work.groupby(keys, dropna=False)[c].transform(
+                    lambda s: s.nunique(dropna=False)
+                )
+            )
+            if keys
             else (lambda c: pd.Series(work[c].nunique(dropna=False), index=df.index))
-        if check == "distinct_cmp":            # nb distinct(col) <op> nb distinct(col2)
+        )
+        if check == "distinct_cmp":  # nb distinct(col) <op> nb distinct(col2)
             na, nb = nun(col), nun(col2)
             op = ck.get("op") or "eq"
-            return {"eq": na == nb, "ne": na != nb, "lt": na < nb,
-                    "le": na <= nb, "gt": na > nb, "ge": na >= nb}.get(op, na == nb)
+            return {
+                "eq": na == nb,
+                "ne": na != nb,
+                "lt": na < nb,
+                "le": na <= nb,
+                "gt": na > nb,
+                "ge": na >= nb,
+            }.get(op, na == nb)
         # determines: col → col2 is a function iff #distinct(col) == #distinct (col,col2)
         a = work[col].astype("string")
         pair = a.str.cat(work[col2].astype("string"), sep="\x1f", na_rep="\x00")
         tmp = work.assign(__a=a, __p=pair)
         if keys:
             g = tmp.groupby(keys, dropna=False)
-            return (g["__a"].transform(lambda s: s.nunique(dropna=False))
-                    == g["__p"].transform(lambda s: s.nunique(dropna=False)))
-        return pd.Series(tmp["__a"].nunique(dropna=False) == tmp["__p"].nunique(dropna=False), index=df.index)
+            return g["__a"].transform(lambda s: s.nunique(dropna=False)) == g["__p"].transform(
+                lambda s: s.nunique(dropna=False)
+            )
+        return pd.Series(
+            tmp["__a"].nunique(dropna=False) == tmp["__p"].nunique(dropna=False), index=df.index
+        )
     return None
 
 
@@ -841,8 +1066,10 @@ def _broadcast_group_verdict(df, keys, sub_verdict):
     if not keys:
         return pd.Series(bool(sub.all()) if len(sub) else True, index=df.index)
     gv = df.loc[sub.index, keys].assign(__ok=sub.to_numpy()).drop_duplicates(keys)
-    ok = df[keys].merge(gv, on=keys, how="left")["__ok"]              # unique right keys -> left order kept;
-    return pd.Series(ok.astype("boolean").fillna(True).to_numpy(dtype=bool), index=df.index)  # NaN (no match) -> True
+    ok = df[keys].merge(gv, on=keys, how="left")["__ok"]  # unique right keys -> left order kept;
+    return pd.Series(
+        ok.astype("boolean").fillna(True).to_numpy(dtype=bool), index=df.index
+    )  # NaN (no match) -> True
 
 
 def _group_one_check_mask(work, df, keys, ck, cs, default_col):
@@ -870,9 +1097,9 @@ def _group_one_check_mask(work, df, keys, ck, cs, default_col):
         bad = viol.groupby([df[k] for k in keys], dropna=False).transform("any").astype(bool)
         return ~bad
 
-    if pm is None:                                # no premise -> existing fast path
+    if pm is None:  # no premise -> existing fast path
         return _group_check_core(work, df, keys, ck, cs, default_col)
-    if not pm.any():                              # premise never triggers -> all conforme
+    if not pm.any():  # premise never triggers -> all conforme
         return pd.Series(True, index=df.index)
     core = _group_check_core(work[pm], df[pm], keys, ck, cs, default_col)
     if core is None:
@@ -890,9 +1117,15 @@ def _group_condition_mask(df: pd.DataFrame, cond: dict, cs: bool, default_col: s
     check (cond['check']/['column']/['n']/['value']) are supported transparently."""
     keys = [c for c in (cond.get("group_by") or []) if c in df.columns]
     checks = cond.get("checks")
-    if not checks:                                # legacy single-check shape
-        checks = [{"check": cond.get("check"), "column": cond.get("column"),
-                   "n": cond.get("n"), "value": cond.get("value")}]
+    if not checks:  # legacy single-check shape
+        checks = [
+            {
+                "check": cond.get("check"),
+                "column": cond.get("column"),
+                "n": cond.get("n"),
+                "value": cond.get("value"),
+            }
+        ]
 
     # case-fold once over the keys and every checked column (for ci comparisons)
     cols_used = list(keys)
@@ -915,8 +1148,10 @@ def _group_condition_mask(df: pd.DataFrame, cond: dict, cs: bool, default_col: s
             mask &= m.astype(bool)
             applied += 1
     if not applied:
-        raise ValueError(f"Contrôle par groupe « {cond.get('name') or '?'} » : "
-                         "configurez au moins un contrôle (colonne / valeur / N).")
+        raise ValueError(
+            f"Contrôle par groupe « {cond.get('name') or '?'} » : "
+            "configurez au moins un contrôle (colonne / valeur / N)."
+        )
     return mask
 
 
@@ -935,15 +1170,18 @@ def _condition_mask(df: pd.DataFrame, cond: dict, cs: bool, default_col: str) ->
             return pd.Series(False, index=df.index)
         pat = _mask_pattern(cond.get("segments") or [], cs)
         flags = 0 if cs else re.IGNORECASE
+
         def _m(v):
             s = "" if _is_null(v) else str(v)
             return bool(re.fullmatch(pat, s, flags)) if pat else (s == "")
+
         return df[col].map(_m).astype(bool)
     return _eval_condition(df, {"groups": cond.get("groups") or []}, cs, col)
 
 
-def _output_mask(df: pd.DataFrame, o: dict, conds: dict, cs: bool, default_col: str,
-                 cache: dict | None = None) -> pd.Series:
+def _output_mask(
+    df: pd.DataFrame, o: dict, conds: dict, cs: bool, default_col: str, cache: dict | None = None
+) -> pd.Series:
     """Row mask for one output. New shape: o['match'] = {conditionId, negate} points
     at a named condition. Legacy shape (kept working): an inline o['condition'] DNF.
     `cache` memoizes the (positive) per-condition mask across outputs — a group
@@ -958,7 +1196,7 @@ def _output_mask(df: pd.DataFrame, o: dict, conds: dict, cs: bool, default_col: 
             if cache is not None:
                 cache[cid] = m
         return ~m if match.get("negate") else m
-    if o.get("condition") is not None:        # legacy inline DNF (pre-named-conditions)
+    if o.get("condition") is not None:  # legacy inline DNF (pre-named-conditions)
         return _eval_condition(df, o.get("condition"), cs, default_col)
     return pd.Series(False, index=df.index)
 
@@ -972,8 +1210,8 @@ def _augment_diagnostics(d: dict, df: pd.DataFrame, cs: bool, default_col: str) 
     if not conds:
         return df
     cond = conds[0]
-    if cond.get("kind") == "group":               # group checks route rows, they
-        return df                                 # don't annotate a per-row column
+    if cond.get("kind") == "group":  # group checks route rows, they
+        return df  # don't annotate a per-row column
     col = cond.get("column") or default_col
     if not col or col not in df.columns:
         return df
@@ -1000,7 +1238,7 @@ def _extract_key(series: pd.Series, extractor: dict, cs: bool) -> pd.Series:
         sep = ex.get("sep", ".")
         if sep:
             has = s.str.contains(re.escape(sep), regex=True)
-            key = s.str.rpartition(sep)[2].where(has, "")   # part after last sep; none → ''
+            key = s.str.rpartition(sep)[2].where(has, "")  # part after last sep; none → ''
         else:
             key = s
     elif kind == "before_first":
@@ -1013,9 +1251,11 @@ def _extract_key(series: pd.Series, extractor: dict, cs: bool) -> pd.Series:
         sep = ex.get("sep") or "\\"
         idx = int(ex.get("index") or 1)
         i = idx - 1 if idx > 0 else idx
+
         def _seg(v):
             parts = str(v).split(sep)
             return parts[i] if -len(parts) <= i < len(parts) else ""
+
         key = s.apply(_seg) if sep else s
     elif kind == "substring":
         start = max(1, int(ex.get("start") or 1)) - 1
@@ -1070,13 +1310,13 @@ def _run_route(d: dict, df: pd.DataFrame, diagnostics: bool = True):
     conds = {c.get("id"): c for c in (d.get("conditions") or []) if c.get("id")}
     result = {}
     assigned = pd.Series(False, index=df.index)
-    cmask_cache: dict = {}                    # share each named condition across outputs
+    cmask_cache: dict = {}  # share each named condition across outputs
     for o in d.get("outputs") or []:
         oid = o.get("id")
         if not oid:
             continue
         m = _output_mask(df, o, conds, cs, default_col, cache=cmask_cache)
-        if routing == "first":          # partition: each row to the first matching output
+        if routing == "first":  # partition: each row to the first matching output
             m = m & ~assigned
         assigned |= m
         result[oid] = df[m].reset_index(drop=True)
@@ -1134,8 +1374,13 @@ def split_scan(pid, wid, node_id, config: dict) -> dict:
         samples.append({"raw": r[:160], "key": str(key.iloc[i])})
         if len(samples) >= 5:
             break
-    return {"total": int(len(df)), "values": values, "samples": samples,
-            "distinct": int(counts.size), "truncated": bool(counts.size > cap)}
+    return {
+        "total": int(len(df)),
+        "values": values,
+        "samples": samples,
+        "distinct": int(counts.size),
+        "truncated": bool(counts.size > cap),
+    }
 
 
 def _run_pivot(con, pid, node, ins):
@@ -1148,8 +1393,7 @@ def _run_pivot(con, pid, node, ins):
         name_col = d.get("name_column") or "variable"
         val_col = d.get("value_column") or "valeur"
         id_vars = [c for c in df.columns if c not in vcs]
-        out = df.melt(id_vars=id_vars, value_vars=vcs,
-                      var_name=name_col, value_name=val_col)
+        out = df.melt(id_vars=id_vars, value_vars=vcs, var_name=name_col, value_name=val_col)
         return {"out": out}, {}
     # pivot
     idx = [c for c in (d.get("index_columns") or []) if c in df.columns]
@@ -1157,8 +1401,16 @@ def _run_pivot(con, pid, node, ins):
     vc = d.get("value_column")
     if not idx or not pc or not vc:
         raise ValueError("renseignez lignes, colonne à éclater et valeurs")
-    aggmap = {"SUM": "sum", "AVG": "mean", "MIN": "min", "MAX": "max",
-              "COUNT": "count", "MEDIAN": "median", "FIRST": "first", "LAST": "last"}
+    aggmap = {
+        "SUM": "sum",
+        "AVG": "mean",
+        "MIN": "min",
+        "MAX": "max",
+        "COUNT": "count",
+        "MEDIAN": "median",
+        "FIRST": "first",
+        "LAST": "last",
+    }
     fn = aggmap.get((d.get("agg") or "SUM").upper(), "sum")
     pt = pd.pivot_table(df, index=idx, columns=pc, values=vc, aggfunc=fn)
     pt = pt.reset_index()
@@ -1167,11 +1419,17 @@ def _run_pivot(con, pid, node, ins):
 
 
 _CLEAN_LABELS = {
-    "trim": "Supprimer les espaces", "upper": "MAJUSCULES", "lower": "minuscules",
-    "capitalize": "Capitaliser", "replace": "Rechercher / remplacer",
-    "fillna": "Remplir les vides", "to_number": "Convertir en nombre",
-    "to_integer": "Convertir en entier", "to_date": "Convertir en date",
-    "round": "Arrondir", "abs": "Valeur absolue",
+    "trim": "Supprimer les espaces",
+    "upper": "MAJUSCULES",
+    "lower": "minuscules",
+    "capitalize": "Capitaliser",
+    "replace": "Rechercher / remplacer",
+    "fillna": "Remplir les vides",
+    "to_number": "Convertir en nombre",
+    "to_integer": "Convertir en entier",
+    "to_date": "Convertir en date",
+    "round": "Arrondir",
+    "abs": "Valeur absolue",
 }
 
 
@@ -1195,11 +1453,17 @@ def _run_clean(con, pid, node, ins):
         for i in df.index[changed_mask][:5]:
             samples.append({"old": _json_safe(before.loc[i]), "new": _json_safe(new.loc[i])})
         df[col] = new
-        report.append({
-            "op": op, "op_label": _CLEAN_LABELS.get(op, op), "column": col,
-            "changed": changed, "failed": int(failed), "was_null": was_null,
-            "samples": samples,
-        })
+        report.append(
+            {
+                "op": op,
+                "op_label": _CLEAN_LABELS.get(op, op),
+                "column": col,
+                "changed": changed,
+                "failed": int(failed),
+                "was_null": was_null,
+                "samples": samples,
+            }
+        )
     return {"out": df}, {"clean_report": report}
 
 
@@ -1229,6 +1493,7 @@ def _apply_clean(op, s: pd.Series, o: dict):
             if not isinstance(x, str):
                 return x
             return re.sub(find, repl, x) if use_re else x.replace(find, repl)
+
         return s.map(rep), 0
     if op == "fillna":
         val = o.get("value", "")
@@ -1240,8 +1505,8 @@ def _apply_clean(op, s: pd.Series, o: dict):
         return s.where(s.notna(), val), 0
     if op in ("to_number", "to_integer"):
         coerced = pd.to_numeric(
-            s.map(lambda x: str(x).replace(",", ".") if isinstance(x, str) else x),
-            errors="coerce")
+            s.map(lambda x: str(x).replace(",", ".") if isinstance(x, str) else x), errors="coerce"
+        )
         failed = int((coerced.isna() & s.notna()).sum())
         if op == "to_integer":
             coerced = coerced.round().astype("Int64")
@@ -1262,8 +1527,21 @@ def _apply_clean(op, s: pd.Series, o: dict):
 
 
 # Group/window functions: name -> whether it operates on a chosen target column.
-_GROUP_NEEDS_COL = {"count_distinct", "is_duplicate", "sum", "avg", "min", "max",
-                    "median", "share", "first", "last", "prev", "next", "concat"}
+_GROUP_NEEDS_COL = {
+    "count_distinct",
+    "is_duplicate",
+    "sum",
+    "avg",
+    "min",
+    "max",
+    "median",
+    "share",
+    "first",
+    "last",
+    "prev",
+    "next",
+    "concat",
+}
 
 
 def _group_funcs_sql(group, df_cols) -> list[tuple[str, str]]:
@@ -1278,13 +1556,16 @@ def _group_funcs_sql(group, df_cols) -> list[tuple[str, str]]:
         return []
     part = [c for c in (group.get("partition_by") or []) if c in df_cols]
     order = []
-    for o in (group.get("order_by") or []):
+    for o in group.get("order_by") or []:
         c = o.get("column") if isinstance(o, dict) else o
         if c and c in df_cols:
             order.append((c, bool(isinstance(o, dict) and o.get("desc"))))
     P = "PARTITION BY " + ", ".join(q_ident(c) for c in part) if part else ""
-    O = "ORDER BY " + ", ".join(q_ident(c) + (" DESC" if dsc else "")
-                                for c, dsc in order) if order else ""
+    O = (
+        "ORDER BY " + ", ".join(q_ident(c) + (" DESC" if dsc else "") for c, dsc in order)
+        if order
+        else ""
+    )
 
     def over(*clauses):
         return "OVER (" + " ".join(c for c in clauses if c) + ")"
@@ -1300,7 +1581,7 @@ def _group_funcs_sql(group, df_cols) -> list[tuple[str, str]]:
             continue
         if fn in _GROUP_NEEDS_COL and (not col or col not in df_cols):
             continue
-        if fn == "value_when":                    # pandas-side (see _apply_value_when)
+        if fn == "value_when":  # pandas-side (see _apply_value_when)
             continue
         Y = q_ident(col) if col else None
         if fn == "occurrence":
@@ -1313,8 +1594,7 @@ def _group_funcs_sql(group, df_cols) -> list[tuple[str, str]]:
             pxy = "PARTITION BY " + ", ".join(q_ident(c) for c in (part + [col]))
             expr = f"CASE WHEN COUNT(*) {over(pxy)} > 1 THEN 'oui' ELSE 'non' END"
         elif fn in ("sum", "avg", "min", "max", "median"):
-            agg = {"sum": "SUM", "avg": "AVG", "min": "MIN",
-                   "max": "MAX", "median": "MEDIAN"}[fn]
+            agg = {"sum": "SUM", "avg": "AVG", "min": "MIN", "max": "MAX", "median": "MEDIAN"}[fn]
             expr = f"{agg}({Y}) {over(P)}"
         elif fn == "share":
             expr = f"({Y} / NULLIF(SUM({Y}) {over(P)}, 0))"
@@ -1365,8 +1645,10 @@ def _run_calc(con, pid, node, ins):
         # step produced, apply the pandas transforms, then re-register so the
         # formula columns below see the new columns just like the SQL ones.
         group = d.get("group") or {}
-        if any(f.get("fn") == "value_when" and f.get("enabled") is not False
-               for f in (group.get("functions") or [])):
+        if any(
+            f.get("fn") == "value_when" and f.get("enabled") is not False
+            for f in (group.get("functions") or [])
+        ):
             mat = _apply_value_when(con, con.execute(sql).df(), group)
             con.unregister("_calc_in")
             con.register("_calc_in", mat)
@@ -1383,9 +1665,9 @@ def _run_calc(con, pid, node, ins):
             sql_expr = compile_formula(expr)
             qname = q_ident(name)
             if name in known:
-                sql = f'SELECT * REPLACE (({sql_expr}) AS {qname}) FROM ({sql}) q'
+                sql = f"SELECT * REPLACE (({sql_expr}) AS {qname}) FROM ({sql}) q"
             else:
-                sql = f'SELECT *, ({sql_expr}) AS {qname} FROM ({sql}) q'
+                sql = f"SELECT *, ({sql_expr}) AS {qname} FROM ({sql}) q"
                 known.add(name)
         out = con.execute(sql).df()
     finally:
@@ -1404,7 +1686,9 @@ def _run_filter(con, pid, node, ins):
     if main is None:
         raise ValueError("entrée principale « données » non connectée")
     if ref is None:
-        raise ValueError("entrée de référence « réf » non connectée — branchez le tableau dont on lit les valeurs")
+        raise ValueError(
+            "entrée de référence « réf » non connectée — branchez le tableau dont on lit les valeurs"
+        )
     # New multi-pair model (`pairs: [{column, ref_column}, ...]`) with a fallback
     # to the legacy single-pair fields so old workflows keep running.
     pairs = [p for p in (d.get("pairs") or []) if p.get("column") and p.get("ref_column")]
@@ -1423,7 +1707,7 @@ def _run_filter(con, pid, node, ins):
 
     ci = bool(d.get("case_insensitive"))
 
-    def _row_keys(df: pd.DataFrame, cols: list[str]) -> "pd.Series":
+    def _row_keys(df: pd.DataFrame, cols: list[str]) -> pd.Series:
         # one tuple per row, NaN → ''. With CI on, lowercase each component so
         # the comparison ignores case across the whole composite key.
         parts = [df[c].astype("string").fillna("") for c in cols]
@@ -1446,7 +1730,7 @@ def _run_filter(con, pid, node, ins):
     main_keys = _row_keys(main, main_cols)
     present = main_keep_mask & main_keys.isin(rset)
 
-    keep = d.get("mode", "keep") != "exclude"      # keep = semi-join, exclude = anti-join
+    keep = d.get("mode", "keep") != "exclude"  # keep = semi-join, exclude = anti-join
     out = main[present if keep else ~present].reset_index(drop=True)
     return {"out": out}, {}
 
@@ -1459,7 +1743,7 @@ def _run_cols(con, pid, node, ins):
     d = node["data"]
     df = _single(ins)
     items = d.get("columns") or []
-    pairs, seen = [], set()                         # (source_name, output_name)
+    pairs, seen = [], set()  # (source_name, output_name)
     for it in items:
         name = it.get("name")
         if not name or name not in df.columns or name in seen:
@@ -1468,7 +1752,7 @@ def _run_cols(con, pid, node, ins):
         if it.get("keep") is False:
             continue
         pairs.append((name, (it.get("rename") or "").strip() or name))
-    for c in df.columns:                            # columns added upstream since: keep as-is
+    for c in df.columns:  # columns added upstream since: keep as-is
         if c not in seen:
             pairs.append((c, c))
     if not pairs:
@@ -1485,9 +1769,12 @@ def _run_cols(con, pid, node, ins):
 # Analyse block — configurable breakdowns of a column, inspired by the Validation
 # filters. Each analysis derives a *category key* per row, then counts occurrences.
 _ANALYSIS_TITLE = {
-    "values": "Valeurs de {col}", "prefix": "Préfixes de {col}",
-    "suffix": "Suffixes de {col}", "length": "Longueurs de {col}",
-    "rule": "Respect d'une règle — {col}", "mask": "Respect d'un format — {col}",
+    "values": "Valeurs de {col}",
+    "prefix": "Préfixes de {col}",
+    "suffix": "Suffixes de {col}",
+    "length": "Longueurs de {col}",
+    "rule": "Respect d'une règle — {col}",
+    "mask": "Respect d'un format — {col}",
 }
 
 
@@ -1518,6 +1805,7 @@ def _analysis_keys(s: pd.Series, spec: dict, kind: str) -> pd.Series:
             if not sep:
                 return t
             return t.split(sep, 1)[0] if kind == "prefix" else t.rsplit(sep, 1)[-1]
+
         return s.map(key)
     if kind in ("rule", "mask"):
         if kind == "mask":
@@ -1526,9 +1814,9 @@ def _analysis_keys(s: pd.Series, spec: dict, kind: str) -> pd.Series:
             ok = (lambda t: bool(re.fullmatch(pat, t, flags))) if pat else (lambda t: t == "")
         else:
             rule = spec.get("rule") or {}
-            ok = lambda t: _rule_ok(t, rule, cs)               # noqa: E731
+            ok = lambda t: _rule_ok(t, rule, cs)  # noqa: E731
         return s.map(lambda v: "Respecté" if ok("" if _is_null(v) else str(v)) else "Non respecté")
-    return s.where(s.notna(), None)                            # values
+    return s.where(s.notna(), None)  # values
 
 
 def _compute_analysis(df: pd.DataFrame, spec: dict, col: str, type_str: str, total: int) -> dict:
@@ -1544,10 +1832,17 @@ def _compute_analysis(df: pd.DataFrame, spec: dict, col: str, type_str: str, tot
     other = max(0, int(len(s) - nulls) - shown)
     title = (spec.get("title") or "").strip() or _ANALYSIS_TITLE.get(kind, "{col}").format(col=col)
     return {
-        "title": title, "column": col, "type": type_str, "kind": kind,
-        "chart": spec.get("chart") or "bar", "total": int(total),
-        "nulls": nulls, "null_pct": round(nulls / total * 100, 1) if total else 0.0,
-        "distinct": int(keys.dropna().nunique()), "buckets": buckets, "other": other,
+        "title": title,
+        "column": col,
+        "type": type_str,
+        "kind": kind,
+        "chart": spec.get("chart") or "bar",
+        "total": int(total),
+        "nulls": nulls,
+        "null_pct": round(nulls / total * 100, 1) if total else 0.0,
+        "distinct": int(keys.dropna().nunique()),
+        "buckets": buckets,
+        "other": other,
     }
 
 
@@ -1575,8 +1870,13 @@ def _compute_keys_analysis(df: pd.DataFrame, spec: dict, types: dict, total: int
         key_cols = [spec["column"]]
     title = (spec.get("title") or "").strip() or ("Clés multiples — " + ", ".join(key_cols))
     if not key_cols:
-        return {"kind": "keys", "title": title, "key": [], "total": int(total),
-                "error": "Aucune colonne clé valide — choisissez au moins une colonne."}
+        return {
+            "kind": "keys",
+            "title": title,
+            "key": [],
+            "total": int(total),
+            "error": "Aucune colonne clé valide — choisissez au moins une colonne.",
+        }
 
     top = max(1, int(spec.get("top") or 12))
     sample_rows = 20
@@ -1591,21 +1891,28 @@ def _compute_keys_analysis(df: pd.DataFrame, spec: dict, types: dict, total: int
 
     # group frames keyed by a normalized tuple (pandas yields scalar keys for a
     # single grouper, tuples for several — normalize so lookups are uniform).
-    _astuple = lambda k: k if isinstance(k, tuple) else (k,)   # noqa: E731
+    _astuple = lambda k: k if isinstance(k, tuple) else (k,)  # noqa: E731
     frames = {_astuple(name): sub for name, sub in g}
 
     counts: dict[str, int] = {}
     for n in sz:
         b = _keys_size_bucket(int(n))
         counts[b] = counts.get(b, 0) + 1
-    distribution = [{"key": b, "count": int(counts[b])} for b in _KEYS_BUCKET_ORDER if counts.get(b)]
+    distribution = [
+        {"key": b, "count": int(counts[b])} for b in _KEYS_BUCKET_ORDER if counts.get(b)
+    ]
 
     def _groups_from(sorted_sizes):
         out = []
         for kv, n in sorted_sizes.items():
             kvt = _astuple(kv)
-            out.append({"key": {c: _json_safe(v) for c, v in zip(key_cols, kvt)},
-                        "size": int(n), "rows": _df_records(frames[kvt].head(sample_rows))})
+            out.append(
+                {
+                    "key": {c: _json_safe(v) for c, v in zip(key_cols, kvt)},
+                    "size": int(n),
+                    "rows": _df_records(frames[kvt].head(sample_rows)),
+                }
+            )
         return out
 
     top_groups = _groups_from(sizes.sort_values(ascending=False, kind="stable").head(top))
@@ -1627,17 +1934,25 @@ def _compute_keys_analysis(df: pd.DataFrame, spec: dict, types: dict, total: int
     consistency.sort(key=lambda e: (e["constant"], -e["varying_groups"]))
 
     return {
-        "kind": "keys", "title": title, "key": key_cols, "total": int(total),
-        "distinct_keys": distinct_keys, "dup_keys": dup_keys,
-        "singletons": int((sizes == 1).sum()), "rows_in_dups": rows_in_dups,
-        "null_keys": null_keys, "unique": bool(distinct_keys == total and total > 0),
+        "kind": "keys",
+        "title": title,
+        "key": key_cols,
+        "total": int(total),
+        "distinct_keys": distinct_keys,
+        "dup_keys": dup_keys,
+        "singletons": int((sizes == 1).sum()),
+        "rows_in_dups": rows_in_dups,
+        "null_keys": null_keys,
+        "unique": bool(distinct_keys == total and total > 0),
         "uniqueness_pct": round(distinct_keys / total * 100, 1) if total else 0.0,
         "group_min": int(sz.min()) if len(sz) else 0,
         "group_max": int(sz.max()) if len(sz) else 0,
         "group_avg": round(float(sz.mean()), 2) if len(sz) else 0.0,
         "group_median": float(np.median(sz)) if len(sz) else 0.0,
-        "distribution": distribution, "top_groups": top_groups,
-        "small_groups": small_groups, "consistency": consistency,
+        "distribution": distribution,
+        "top_groups": top_groups,
+        "small_groups": small_groups,
+        "consistency": consistency,
     }
 
 
@@ -1655,9 +1970,12 @@ def _run_report(con, pid, node, ins):
     finally:
         con.unregister("_rep_in")
     specs = d.get("analyses")
-    if not specs:                          # back-compat: one 'values' analysis per chosen column
-        specs = [{"column": c, "kind": "values", "chart": "bar"}
-                 for c in (d.get("columns") or list(types)) if c in types]
+    if not specs:  # back-compat: one 'values' analysis per chosen column
+        specs = [
+            {"column": c, "kind": "values", "chart": "bar"}
+            for c in (d.get("columns") or list(types))
+            if c in types
+        ]
     analyses = []
     for spec in specs:
         if (spec.get("kind") or "values") == "keys":
@@ -1705,14 +2023,15 @@ def _sanitize_sheet_name(name: str) -> str:
     return s[:31] or "Feuille"
 
 
-def _run_export(con, pid, node, ins, export_sink=None, workflow_name=None,
-                force_enabled=False, produced=None):
+def _run_export(
+    con, pid, node, ins, export_sink=None, workflow_name=None, force_enabled=False, produced=None
+):
     d = node["data"]
-    if d.get("enabled") is False and not force_enabled:   # disabled export: don't touch the file
+    if d.get("enabled") is False and not force_enabled:  # disabled export: don't touch the file
         return {}, {"skipped": True, "row_count": 0}
     df = _single(ins)
     n = int(len(df))
-    if n == 0:                                    # empty result: write nothing at all
+    if n == 0:  # empty result: write nothing at all
         return {}, {"skipped_empty": True, "row_count": 0}
     fn = _sanitize_filename(d.get("filename"), "resultat")
     out_dir = storage.workflow_export_dir(pid, workflow_name or "Workflow")
@@ -1733,13 +2052,59 @@ def _run_export(con, pid, node, ins, export_sink=None, workflow_name=None,
     fmt = (d.get("format") or "xlsx").lower()
     if fmt == "csv":
         out_path = out_dir / f"{fn}.csv"
-        df.to_csv(out_path, index=False)
+        _write_csv(df, out_path, d.get("csv") or {})
     else:
         out_path = out_dir / f"{fn}.xlsx"
+        _check_excel_limits(df)  # garde-fou A.7 : on échoue AVANT d'écrire
         df.to_excel(out_path, index=False)
     if produced is not None:
         produced.add(out_path.name)
     return {}, {"exported": out_path.name, "row_count": n}
+
+
+# Limites « hard » d'Excel — un export qui les dépasse échoue *après* tout le calcul.
+# Il vaut mieux le détecter avant l'écriture, avec une suggestion (cf. todo A.7).
+EXCEL_MAX_ROWS = 1_048_576  # 2**20
+EXCEL_MAX_COLS = 16_384  # 2**14
+
+
+def _check_excel_limits(df: pd.DataFrame) -> None:
+    n = len(df)
+    # +1 pour la ligne d'en-tête
+    if n + 1 > EXCEL_MAX_ROWS:
+        raise ValueError(
+            f"Excel limite à {EXCEL_MAX_ROWS:,} lignes (vous en auriez {n:,}). "
+            "Suggestion : exportez en CSV (format paramétrable), ou découpez en "
+            "plusieurs feuilles / fichiers."
+        )
+    nc = len(df.columns)
+    if nc > EXCEL_MAX_COLS:
+        raise ValueError(
+            f"Excel limite à {EXCEL_MAX_COLS:,} colonnes (vous en auriez {nc:,}). "
+            "Suggestion : utilisez le bloc Colonnes pour réduire, ou transposez."
+        )
+
+
+def _write_csv(df: pd.DataFrame, path, opts: dict) -> None:
+    """Export CSV paramétrable (cf. todo A.4).
+
+    Preset par défaut : « Excel FR » — séparateur `;`, décimale `,`, encodage
+    UTF-8 BOM (`utf-8-sig`), fin de ligne `\\r\\n`. Excel FR autodétecte alors
+    correctement les accents et le format des nombres.
+    """
+    sep = opts.get("sep") or ";"
+    decimal = opts.get("decimal") or ","
+    bom = opts.get("bom", True)
+    eol = opts.get("eol") or "\r\n"
+    encoding = "utf-8-sig" if bom else "utf-8"
+    df.to_csv(
+        path,
+        index=False,
+        sep=sep,
+        decimal=decimal,
+        encoding=encoding,
+        lineterminator=eol,
+    )
 
 
 def _write_workbook(path, sheets, fresh=True):
@@ -1748,8 +2113,9 @@ def _write_workbook(path, sheets, fresh=True):
     replaces only its own sheets, leaving the others intact. Duplicate sheet
     names are disambiguated (Excel forbids them)."""
     import pathlib
+
     sheets = [(s, df) for s, df in sheets if df is not None and len(df)]
-    if not sheets:                                # nothing to write -> no empty file
+    if not sheets:  # nothing to write -> no empty file
         return
     seen, final = set(), []
     for name, df in sheets:
@@ -1757,10 +2123,14 @@ def _write_workbook(path, sheets, fresh=True):
         nm, k = base, 2
         while nm.lower() in seen:
             sfx = f"_{k}"
-            nm = base[:31 - len(sfx)] + sfx
+            nm = base[: 31 - len(sfx)] + sfx
             k += 1
         seen.add(nm.lower())
         final.append((nm, df))
+    # Garde-fou A.7 sur chaque feuille AVANT d'ouvrir le writer (sinon on
+    # écrit partiellement puis on plante openpyxl, laissant un fichier corrompu).
+    for _, df in final:
+        _check_excel_limits(df)
     p = pathlib.Path(path)
     if fresh or not p.exists():
         writer = pd.ExcelWriter(p, engine="openpyxl", mode="w")
@@ -1777,18 +2147,32 @@ def _write_workbook(path, sheets, fresh=True):
 
 
 _RUNNERS = {
-    "source": _run_source, "sql": _run_sql, "dedup": _run_dedup,
-    "validate": _run_validate, "pivot": _run_pivot, "clean": _run_clean,
-    "calc": _run_calc, "union": _run_union, "export": _run_export,
-    "filter": _run_filter, "cols": _run_cols, "report": _run_report,
+    "source": _run_source,
+    "sql": _run_sql,
+    "dedup": _run_dedup,
+    "validate": _run_validate,
+    "pivot": _run_pivot,
+    "clean": _run_clean,
+    "calc": _run_calc,
+    "union": _run_union,
+    "export": _run_export,
+    "filter": _run_filter,
+    "cols": _run_cols,
+    "report": _run_report,
 }
 
 
 # --------------------------------------------------------------------------- #
 # Validation logic (also used by the live tester endpoint)
 # --------------------------------------------------------------------------- #
-_CLASS_RE = {"letter": "[A-Za-z]", "upper": "[A-Z]", "lower": "[a-z]",
-             "digit": "[0-9]", "alnum": "[A-Za-z0-9]", "any": "."}
+_CLASS_RE = {
+    "letter": "[A-Za-z]",
+    "upper": "[A-Z]",
+    "lower": "[a-z]",
+    "digit": "[0-9]",
+    "alnum": "[A-Za-z0-9]",
+    "any": ".",
+}
 
 
 def _seg_pattern(seg) -> str:
@@ -1798,11 +2182,15 @@ def _seg_pattern(seg) -> str:
         return re.escape(seg.get("value") or "")
     base = "[" + re.escape(seg.get("value") or "") + "]" if t == "set" else _CLASS_RE.get(t, ".")
     ln, lo, hi = seg.get("length"), seg.get("min"), seg.get("max")
+    # % format lisible pour des quantifieurs regex `{n}` / `{a,b}` ; en f-string,
+    # les `{{` / `}}` rendent l'intention illisible.
     if ln not in (None, ""):
-        return base + "{%d}" % int(ln)
+        return base + "{%d}" % int(ln)  # noqa: UP031
     if lo not in (None, "") or hi not in (None, ""):
-        return base + "{%s,%s}" % (int(lo) if lo not in (None, "") else 0,
-                                   int(hi) if hi not in (None, "") else "")
+        return base + "{%s,%s}" % (  # noqa: UP031
+            int(lo) if lo not in (None, "") else 0,
+            int(hi) if hi not in (None, "") else "",
+        )
     return base + "{1}"
 
 
@@ -1814,8 +2202,15 @@ def _segment_label(seg) -> str:
     t = seg.get("type") or "any"
     if t == "literal":
         return f"« {seg.get('value') or ''} »"
-    names = {"letter": "lettres", "upper": "MAJ", "lower": "min", "digit": "chiffres",
-             "alnum": "alphanum.", "set": f"[{seg.get('value') or ''}]", "any": "tout"}
+    names = {
+        "letter": "lettres",
+        "upper": "MAJ",
+        "lower": "min",
+        "digit": "chiffres",
+        "alnum": "alphanum.",
+        "set": f"[{seg.get('value') or ''}]",
+        "any": "tout",
+    }
     base = names.get(t, t)
     ln, lo, hi = seg.get("length"), seg.get("min"), seg.get("max")
     if ln not in (None, ""):
@@ -1838,12 +2233,16 @@ def _mask_steps(s: str, segments: list, cs: bool) -> list[dict]:
         return []
     blocker = n
     for k in range(n):
-        if not re.match("".join(pats[:k + 1]), s, flags):
+        if not re.match("".join(pats[: k + 1]), s, flags):
             blocker = k
             break
-    steps = [{"label": labels[i],
-              "status": "ok" if i < blocker else ("fail" if i == blocker else "skip")}
-             for i in range(n)]
+    steps = [
+        {
+            "label": labels[i],
+            "status": "ok" if i < blocker else ("fail" if i == blocker else "skip"),
+        }
+        for i in range(n)
+    ]
     if blocker == n and not re.fullmatch("".join(pats), s, flags):
         steps.append({"label": "caractères en trop", "status": "fail"})
     return steps
@@ -1853,8 +2252,11 @@ def _char_in_class(ch: str, cls: str, cs: bool) -> bool:
     if not cs and cls in ("upper", "lower"):
         return ch.isalpha()
     return {
-        "letter": ch.isalpha(), "upper": ch.isupper(), "lower": ch.islower(),
-        "digit": ch.isdigit(), "alnum": ch.isalnum(),
+        "letter": ch.isalpha(),
+        "upper": ch.isupper(),
+        "lower": ch.islower(),
+        "digit": ch.isdigit(),
+        "alnum": ch.isalnum(),
     }.get(cls, True)
 
 
@@ -1880,7 +2282,8 @@ def _rule_label(r: dict) -> str:
         "substr_equals": f"les caractères {r.get('start', 1)}… doivent être « {v} »",
         "substr_class": f"les caractères {r.get('start', 1)}… sont invalides",
         "is_in": "valeur hors liste autorisée",
-        "is_empty": "doit être vide", "not_empty": "ne doit pas être vide",
+        "is_empty": "doit être vide",
+        "not_empty": "ne doit pas être vide",
         "is_numeric": "doit être numérique",
     }
     return labels.get(test, test or "règle non respectée")
@@ -1890,9 +2293,12 @@ def _rule_label(r: dict) -> str:
 # instead of an unreadable double negative ("NON ne doit pas contenir" -> "doit
 # contenir").
 _RULE_OPPOSITE = {
-    "contains": "not_contains", "not_contains": "contains",
-    "equals": "not_equals", "not_equals": "equals",
-    "is_empty": "not_empty", "not_empty": "is_empty",
+    "contains": "not_contains",
+    "not_contains": "contains",
+    "equals": "not_equals",
+    "not_equals": "equals",
+    "is_empty": "not_empty",
+    "not_empty": "is_empty",
 }
 
 
@@ -1904,7 +2310,7 @@ def _signed_label(r: dict) -> str:
     opp = _RULE_OPPOSITE.get(r.get("test"))
     if opp:
         return _rule_label({**r, "test": opp})
-    base = _rule_label(r)                      # no clean opposite: « doit … » -> « ne doit pas … »
+    base = _rule_label(r)  # no clean opposite: « doit … » -> « ne doit pas … »
     if "doit " in base:
         return base.replace("doit ", "ne doit pas ", 1)
     return "NON — " + base
@@ -1952,12 +2358,14 @@ def _rule_ok(s: str, r: dict, cs: bool) -> bool:
         if test == "substr_equals":
             st = int(r.get("start") or 1)
             ln = int(r.get("length") or 1)
-            return norm(s[st - 1:st - 1 + ln]) == vv
+            return norm(s[st - 1 : st - 1 + ln]) == vv
         if test == "substr_class":
             st = int(r.get("start") or 1)
             ln = int(r.get("length") or 1)
-            seg = s[st - 1:st - 1 + ln]
-            return len(seg) == ln and all(_char_in_class(c, r.get("charclass", "letter"), cs) for c in seg)
+            seg = s[st - 1 : st - 1 + ln]
+            return len(seg) == ln and all(
+                _char_in_class(c, r.get("charclass", "letter"), cs) for c in seg
+            )
         if test == "is_in":
             items = [norm(x.strip()) for x in str(v).split(",") if x.strip() != ""]
             return ss in items
@@ -1976,8 +2384,14 @@ def _rule_ok(s: str, r: dict, cs: bool) -> bool:
                 return True
             a = float(str(s).replace(",", "."))
             b = float(str(v).replace(",", "."))
-            return {"num_eq": a == b, "num_ne": a != b, "num_gt": a > b,
-                    "num_ge": a >= b, "num_lt": a < b, "num_le": a <= b}[test]
+            return {
+                "num_eq": a == b,
+                "num_ne": a != b,
+                "num_gt": a > b,
+                "num_ge": a >= b,
+                "num_lt": a < b,
+                "num_le": a <= b,
+            }[test]
     except (ValueError, TypeError):
         return False
     return True
@@ -2040,24 +2454,32 @@ def validate_test(config: dict, samples: list) -> dict:
     cs = bool(cfg.get("case_sensitive"))
     try:
         results = []
-        if cfg.get("kind") in ("rules", "mask"):          # new: a single named condition
+        if cfg.get("kind") in ("rules", "mask"):  # new: a single named condition
             for x in samples or []:
                 s = "" if _is_null(x) else str(x)
                 ok, motif, steps = _condition_eval_str(s, cfg, cs)
-                results.append({"valid": ok, "motif": "OK" if ok else (motif or "non conforme"),
-                                "steps": steps})
+                results.append(
+                    {
+                        "valid": ok,
+                        "motif": "OK" if ok else (motif or "non conforme"),
+                        "steps": steps,
+                    }
+                )
             return {"ok": True, "results": results}
-        is_mask = cfg.get("mode") == "mask"               # legacy: rules/mask conformity block
+        is_mask = cfg.get("mode") == "mask"  # legacy: rules/mask conformity block
         for x in samples or []:
             s = "" if _is_null(x) else str(x)
             ok, motif = _validate_one(x, cfg)
             if is_mask:
                 steps = _mask_steps(s, cfg.get("segments") or [], cs)
             else:
-                steps = [{"label": _rule_label(r), "status": "ok" if _rule_ok(s, r, cs) else "fail"}
-                         for r in (cfg.get("rules") or [])]
-            results.append({"valid": ok, "motif": "OK" if ok else (motif or "non conforme"),
-                            "steps": steps})
+                steps = [
+                    {"label": _rule_label(r), "status": "ok" if _rule_ok(s, r, cs) else "fail"}
+                    for r in (cfg.get("rules") or [])
+                ]
+            results.append(
+                {"valid": ok, "motif": "OK" if ok else (motif or "non conforme"), "steps": steps}
+            )
         return {"ok": True, "results": results}
     except Exception as e:  # noqa: BLE001 - surfaced to the UI tester
         return {"ok": False, "error": str(e)}
@@ -2073,6 +2495,7 @@ def _empty_parquet_rows(path):
     for such a file, else None (a normal parquet -> keep the DuckDB path)."""
     try:
         import pyarrow.parquet as pq
+
         md = pq.read_metadata(path)
         if md.num_columns == 0:
             return int(md.num_rows)
@@ -2083,7 +2506,7 @@ def _empty_parquet_rows(path):
 
 def _meta_from_parquet(path) -> dict:
     n = _empty_parquet_rows(path)
-    if n is not None:                       # 0-column 'empty' output: skip DuckDB
+    if n is not None:  # 0-column 'empty' output: skip DuckDB
         return {"columns": [], "row_count": n, "sample": [], "stats": []}
     con = duckdb.connect()
     try:
@@ -2095,8 +2518,7 @@ def _meta_from_parquet(path) -> dict:
             stats = _df_records(con.execute(f"SUMMARIZE SELECT * FROM {rel}").df())
         except Exception:
             stats = []
-        return {"columns": columns, "row_count": int(row_count),
-                "sample": sample, "stats": stats}
+        return {"columns": columns, "row_count": int(row_count), "sample": sample, "stats": stats}
     finally:
         con.close()
 
@@ -2123,18 +2545,37 @@ def _reuse_result(pid, wid, node, handles, ntype, locked, signature) -> dict:
             for k in ("compiled_sql", "clean_report", "report"):
                 if k in m:
                     extra[k] = m[k]
-    return {"type": ntype, "locked": locked, "cached": True, "signature": signature,
-            "outputs": outputs, "row_count": outputs.get(handles[0], 0),
-            "columns": columns, **extra}
+    return {
+        "type": ntype,
+        "locked": locked,
+        "cached": True,
+        "signature": signature,
+        "outputs": outputs,
+        "row_count": outputs.get(handles[0], 0),
+        "columns": columns,
+        **extra,
+    }
 
 
-def _execute_node(con, pid, wid, node, edges, bypass_cache=False, bypass_lock=False,
-                  export_sink=None, wf_name=None, signature=None, all_exports=False,
-                  produced=None) -> dict:
+def _execute_node(
+    con,
+    pid,
+    wid,
+    node,
+    edges,
+    bypass_cache=False,
+    bypass_lock=False,
+    export_sink=None,
+    wf_name=None,
+    signature=None,
+    all_exports=False,
+    produced=None,
+) -> dict:
     ntype = node["type"]
     handles = _output_handles(node)
     have_outputs = bool(handles) and all(
-        storage.node_parquet(pid, wid, node["id"], h).exists() for h in handles)
+        storage.node_parquet(pid, wid, node["id"], h).exists() for h in handles
+    )
 
     # locked: reuse the frozen result without recomputing, whatever changed.
     # A bulk "force recompute all" busts the incremental cache (bypass_cache) but
@@ -2145,17 +2586,28 @@ def _execute_node(con, pid, wid, node, edges, bypass_cache=False, bypass_lock=Fa
     # incremental cache: reuse when the node's signature is unchanged since the
     # last run (its config and every upstream block are identical). This is what
     # makes a full run recompute only the new/changed blocks and their dependents.
-    if (signature and not bypass_cache and have_outputs
-            and node["data"].get("cache", True) is not False):
+    if (
+        signature
+        and not bypass_cache
+        and have_outputs
+        and node["data"].get("cache", True) is not False
+    ):
         m0 = storage.read_node_meta(pid, wid, node["id"], handles[0]) or {}
         if m0.get("node_signature") == signature:
             return _reuse_result(pid, wid, node, handles, ntype, False, signature)
 
     ins = _node_inputs(pid, wid, node, edges)
     if ntype == "export":
-        out_dfs, extra = _run_export(con, pid, node, ins, export_sink=export_sink,
-                                     workflow_name=wf_name, force_enabled=all_exports,
-                                     produced=produced)
+        out_dfs, extra = _run_export(
+            con,
+            pid,
+            node,
+            ins,
+            export_sink=export_sink,
+            workflow_name=wf_name,
+            force_enabled=all_exports,
+            produced=produced,
+        )
     else:
         runner = _RUNNERS.get(ntype)
         if runner is None:
@@ -2163,8 +2615,16 @@ def _execute_node(con, pid, wid, node, edges, bypass_cache=False, bypass_lock=Fa
         out_dfs, extra = runner(con, pid, node, ins)
 
     if not handles:  # export (always runs; nothing to cache)
-        return {"type": ntype, "locked": False, "cached": False, "signature": signature,
-                "row_count": extra.get("row_count", 0), "outputs": {}, "columns": [], **extra}
+        return {
+            "type": ntype,
+            "locked": False,
+            "cached": False,
+            "signature": signature,
+            "row_count": extra.get("row_count", 0),
+            "outputs": {},
+            "columns": [],
+            **extra,
+        }
 
     outputs, columns = {}, []
     for i, h in enumerate(handles):
@@ -2172,7 +2632,7 @@ def _execute_node(con, pid, wid, node, edges, bypass_cache=False, bypass_lock=Fa
         if df is None:
             df = pd.DataFrame()
         ex = dict(extra) if i == 0 else {}
-        if i == 0 and signature:                  # stamp the signature for next-run reuse
+        if i == 0 and signature:  # stamp the signature for next-run reuse
             ex["node_signature"] = signature
         meta = _write_output(pid, wid, node, h, df, ex)
         outputs[h] = meta["row_count"]
@@ -2184,8 +2644,15 @@ def _execute_node(con, pid, wid, node, edges, bypass_cache=False, bypass_lock=Fa
     # that still references the old handle would silently keep ingesting the
     # ghost file at the next downstream run.
     storage.prune_node_outputs(pid, wid, node["id"], handles)
-    result = {"type": ntype, "locked": False, "cached": False, "signature": signature,
-              "outputs": outputs, "row_count": outputs.get(handles[0], 0), "columns": columns}
+    result = {
+        "type": ntype,
+        "locked": False,
+        "cached": False,
+        "signature": signature,
+        "outputs": outputs,
+        "row_count": outputs.get(handles[0], 0),
+        "columns": columns,
+    }
     for k in ("compiled_sql", "clean_report", "report"):
         if k in extra:
             result[k] = extra[k]
@@ -2210,7 +2677,11 @@ def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False):
         run_set = set(nodes)
     # visual-only nodes never execute: frames (legacy name "group") and "stop"
     # caps (mark an output as closed on purpose; they consume but produce nothing)
-    run_ids = [nid for nid in order if nid in run_set and nodes[nid]["type"] not in ("frame", "group", "stop")]
+    run_ids = [
+        nid
+        for nid in order
+        if nid in run_set and nodes[nid]["type"] not in ("frame", "group", "stop")
+    ]
 
     # Announce the run before the (cheap) signature pass so the UI clears its
     # "préparation…" label immediately and starts naming blocks as they run.
@@ -2230,23 +2701,39 @@ def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False):
             old_dir.rename(target_dir)
 
     con = duckdb.connect()
-    export_sink = {}                              # workbook_path -> [(sheet, df), …]
-    produced = set()                              # filenames written by this run
+    export_sink = {}  # workbook_path -> [(sheet, df), …]
+    produced = set()  # filenames written by this run
     try:
         for nid in run_ids:
             node = nodes[nid]
-            yield {"event": "node_start", "node_id": nid,
-                   "label": node["data"].get("label", nid), "type": node["type"]}
+            yield {
+                "event": "node_start",
+                "node_id": nid,
+                "label": node["data"].get("label", nid),
+                "type": node["type"],
+            }
             single_force = force and only_node is not None and nid == only_node
             try:
-                result = _execute_node(con, pid, wid, node, edges,
-                                       bypass_cache=(single_force or (force and only_node is None)),
-                                       bypass_lock=single_force, all_exports=all_exports,
-                                       export_sink=export_sink, wf_name=wf_name,
-                                       signature=sig_by_node.get(nid), produced=produced)
+                result = _execute_node(
+                    con,
+                    pid,
+                    wid,
+                    node,
+                    edges,
+                    bypass_cache=(single_force or (force and only_node is None)),
+                    bypass_lock=single_force,
+                    all_exports=all_exports,
+                    export_sink=export_sink,
+                    wf_name=wf_name,
+                    signature=sig_by_node.get(nid),
+                    produced=produced,
+                )
             except Exception as e:  # noqa: BLE001 - reported to the client
-                yield {"event": "error", "node_id": nid,
-                       "message": f"{node['data'].get('label', nid)} : {e}"}
+                yield {
+                    "event": "error",
+                    "node_id": nid,
+                    "message": f"{node['data'].get('label', nid)} : {e}",
+                }
                 return
             yield {"event": "node_done", "node_id": nid, "result": result}
         # write the multi-sheet workbooks once every sheet has been gathered
@@ -2300,14 +2787,16 @@ def _build_where(columns, filters, q) -> str:
         ident = q_ident(col)
         if op == "is_null":
             clauses.append(f"{ident} IS NULL")
-        elif op == "equals":                       # exact match (top-value click)
+        elif op == "equals":  # exact match (top-value click)
             if isinstance(val, bool):
                 clauses.append(f"{ident} = {'TRUE' if val else 'FALSE'}")
             elif isinstance(val, (int, float)):
                 clauses.append(f"{ident} = {val}")
             elif val not in (None, ""):
-                clauses.append(f"CAST({ident} AS VARCHAR) = '{str(val).replace(chr(39), chr(39) * 2)}'")
-        elif val not in (None, ""):                # contains (text filter input)
+                clauses.append(
+                    f"CAST({ident} AS VARCHAR) = '{str(val).replace(chr(39), chr(39) * 2)}'"
+                )
+        elif val not in (None, ""):  # contains (text filter input)
             clauses.append(f"CAST({ident} AS VARCHAR) ILIKE {_slike(val)}")
     if q:
         ors = [f"CAST({q_ident(c)} AS VARCHAR) ILIKE {_slike(q)}" for c in names]
@@ -2330,24 +2819,42 @@ def _passthrough_source(pid, wid, node_id, handle):
     node = next((n for n in wf.get("nodes", []) if n["id"] == node_id), None)
     if not node or node.get("type") != "export":
         return node_id, handle
-    for e in wf.get("edges", []):                       # the export's single input edge
+    for e in wf.get("edges", []):  # the export's single input edge
         if e.get("target") == node_id:
             return e.get("source"), e.get("sourceHandle") or "out"
     return node_id, handle
 
 
-def preview_node(pid, wid, node_id, handle="out", limit=200, offset=0,
-                 sort=None, direction="asc", filters=None, q=None) -> dict:
+def preview_node(
+    pid,
+    wid,
+    node_id,
+    handle="out",
+    limit=200,
+    offset=0,
+    sort=None,
+    direction="asc",
+    filters=None,
+    q=None,
+) -> dict:
     node_id, handle = _passthrough_source(pid, wid, node_id, handle)
     path = storage.node_parquet(pid, wid, node_id, handle)
     if not path.exists():
         return {"available": False}
     n = _empty_parquet_rows(path)
-    if n is not None:                       # 0-column 'empty' output: nothing to show
+    if n is not None:  # 0-column 'empty' output: nothing to show
         meta = storage.read_node_meta(pid, wid, node_id, handle) or {}
-        return {"available": True, "columns": [], "rows": [], "row_count": n, "total_count": n,
-                "compiled_sql": meta.get("compiled_sql"), "clean_report": meta.get("clean_report"),
-                "report": meta.get("report"), "stats": meta.get("stats")}
+        return {
+            "available": True,
+            "columns": [],
+            "rows": [],
+            "row_count": n,
+            "total_count": n,
+            "compiled_sql": meta.get("compiled_sql"),
+            "clean_report": meta.get("clean_report"),
+            "report": meta.get("report"),
+            "stats": meta.get("stats"),
+        }
     con = duckdb.connect()
     try:
         rel = f"read_parquet({_lit(path)})"
@@ -2368,8 +2875,11 @@ def preview_node(pid, wid, node_id, handle="out", limit=200, offset=0,
         rows = _df_records(con.execute(sql).df())
         meta = storage.read_node_meta(pid, wid, node_id, handle) or {}
         return {
-            "available": True, "columns": columns, "rows": rows,
-            "row_count": int(row_count), "total_count": int(total),
+            "available": True,
+            "columns": columns,
+            "rows": rows,
+            "row_count": int(row_count),
+            "total_count": int(total),
             "compiled_sql": meta.get("compiled_sql"),
             "clean_report": meta.get("clean_report"),
             "report": meta.get("report"),
@@ -2384,7 +2894,7 @@ def column_profile(pid, wid, node_id, column, handle="out") -> dict:
     path = storage.node_parquet(pid, wid, node_id, handle)
     if not path.exists():
         return {"available": False}
-    if _empty_parquet_rows(path) is not None:        # 0-column output: no column to profile
+    if _empty_parquet_rows(path) is not None:  # 0-column output: no column to profile
         return {"available": False}
     con = duckdb.connect()
     try:
@@ -2399,10 +2909,18 @@ def column_profile(pid, wid, node_id, column, handle="out") -> dict:
         distinct = con.execute(f"SELECT count(DISTINCT {ident}) FROM {rel}").fetchone()[0]
         numeric = _is_numeric_type(match["type"])
         null_pct = round(nulls / total * 100, 1) if total else 0.0
-        res = {"available": True, "type": match["type"], "total": int(total),
-               "nulls": int(nulls), "null_pct": null_pct, "distinct": int(distinct),
-               "numeric": numeric, "numeric_stats": None, "histogram": [],
-               "top_values": []}
+        res = {
+            "available": True,
+            "type": match["type"],
+            "total": int(total),
+            "nulls": int(nulls),
+            "null_pct": null_pct,
+            "distinct": int(distinct),
+            "numeric": numeric,
+            "numeric_stats": None,
+            "histogram": [],
+            "top_values": [],
+        }
 
         if numeric and (total - nulls) > 0:
             sub = f"(SELECT {ident} AS c FROM {rel} WHERE {ident} IS NOT NULL)"
@@ -2410,8 +2928,11 @@ def column_profile(pid, wid, node_id, column, handle="out") -> dict:
                 f"SELECT min(c), max(c), avg(c), median(c), stddev_samp(c) FROM {sub}"
             ).fetchone()
             res["numeric_stats"] = {
-                "min": _json_safe(mn), "max": _json_safe(mx), "avg": _json_safe(avg),
-                "median": _json_safe(med), "stddev": _json_safe(sd),
+                "min": _json_safe(mn),
+                "max": _json_safe(mx),
+                "avg": _json_safe(avg),
+                "median": _json_safe(med),
+                "stddev": _json_safe(sd),
             }
             mnf, mxf = float(mn), float(mx)
             if mxf > mnf:
@@ -2429,8 +2950,7 @@ def column_profile(pid, wid, node_id, column, handle="out") -> dict:
                 res["histogram"] = [{"lo": mnf, "hi": mxf, "count": int(total - nulls)}]
 
         top = con.execute(
-            f"SELECT {ident} AS v, count(*) AS c FROM {rel} "
-            f"GROUP BY v ORDER BY c DESC LIMIT 10"
+            f"SELECT {ident} AS v, count(*) AS c FROM {rel} GROUP BY v ORDER BY c DESC LIMIT 10"
         ).fetchall()
         res["top_values"] = [{"value": _json_safe(r[0]), "count": int(r[1])} for r in top]
         return res
@@ -2446,7 +2966,7 @@ def keys_group(pid, wid, node_id, key_cols, q, handle="out", limit=200) -> dict:
     path = storage.node_parquet(pid, wid, node_id, handle)
     if not path.exists():
         return {"available": False}
-    if _empty_parquet_rows(path) is not None:        # 0-column output: no keys to explore
+    if _empty_parquet_rows(path) is not None:  # 0-column output: no keys to explore
         return {"available": False}
     key_cols = [c for c in (key_cols or []) if c]
     con = duckdb.connect()
@@ -2466,7 +2986,12 @@ def keys_group(pid, wid, node_id, key_cols, q, handle="out", limit=200) -> dict:
         sql += " ORDER BY " + ", ".join(q_ident(c) for c in valid)
         sql += f" LIMIT {int(limit)}"
         rows = _df_records(con.execute(sql).df())
-        return {"available": True, "columns": columns, "key": valid,
-                "rows": rows, "row_count": int(row_count)}
+        return {
+            "available": True,
+            "columns": columns,
+            "key": valid,
+            "rows": rows,
+            "row_count": int(row_count),
+        }
     finally:
         con.close()

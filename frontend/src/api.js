@@ -11,7 +11,9 @@ async function req(path, options = {}) {
     try {
       const body = await res.json()
       detail = body.detail || body.error || detail
-    } catch { /* non-JSON error body */ }
+    } catch {
+      /* non-JSON error body */
+    }
     throw new Error(detail || `Erreur ${res.status}`)
   }
   if (res.status === 204) return null
@@ -59,17 +61,24 @@ export const api = {
     sendJSON(`/projects/${enc(pid)}/files/open-folder${qs({ subdir })}`, 'POST'),
   downloadUrl: (pid, name, subdir) =>
     `${BASE}/projects/${enc(pid)}/files/${enc(name)}${qs({ subdir })}`,
-  peek: (pid, file, sheet, headerRow) =>
-    getJSON(`/projects/${enc(pid)}/peek${qs({ file, sheet, header_row: headerRow })}`),
+  peek: (pid, file, sheet, headerRow, opts = {}) =>
+    getJSON(
+      `/projects/${enc(pid)}/peek${qs({
+        file,
+        sheet,
+        header_row: headerRow,
+        encoding: opts.encoding,
+        decimal: opts.decimal,
+        thousands: opts.thousands,
+      })}`,
+    ),
 
   // ---- workflows ----
   listWorkflows: (pid) => getJSON(`/projects/${enc(pid)}/workflows`),
-  createWorkflow: (pid, name) =>
-    sendJSON(`/projects/${enc(pid)}/workflows`, 'POST', { name }),
+  createWorkflow: (pid, name) => sendJSON(`/projects/${enc(pid)}/workflows`, 'POST', { name }),
   getWorkflow: (pid, wid) => getJSON(`/projects/${enc(pid)}/workflows/${enc(wid)}`),
   documentUrl: (pid, wid) => `${BASE}/projects/${enc(pid)}/workflows/${enc(wid)}/document`,
-  saveWorkflow: (pid, wf) =>
-    sendJSON(`/projects/${enc(pid)}/workflows/${enc(wf.id)}`, 'PUT', wf),
+  saveWorkflow: (pid, wf) => sendJSON(`/projects/${enc(pid)}/workflows/${enc(wf.id)}`, 'PUT', wf),
   deleteWorkflow: (pid, wid) =>
     req(`/projects/${enc(pid)}/workflows/${enc(wid)}`, { method: 'DELETE' }),
 
@@ -77,40 +86,62 @@ export const api = {
   preview: (pid, wid, nodeId, opts = {}) => {
     const { limit, offset, handle, sort, dir, q, filters } = opts
     const params = {
-      limit, offset, handle, sort, dir, q,
+      limit,
+      offset,
+      handle,
+      sort,
+      dir,
+      q,
       filters: filters && filters.length ? JSON.stringify(filters) : undefined,
     }
     return getJSON(
-      `/projects/${enc(pid)}/workflows/${enc(wid)}/nodes/${enc(nodeId)}/preview${qs(params)}`)
+      `/projects/${enc(pid)}/workflows/${enc(wid)}/nodes/${enc(nodeId)}/preview${qs(params)}`,
+    )
   },
   profile: (pid, wid, nodeId, column, handle = 'out') =>
     getJSON(
-      `/projects/${enc(pid)}/workflows/${enc(wid)}/nodes/${enc(nodeId)}/profile${qs({ column, handle })}`),
+      `/projects/${enc(pid)}/workflows/${enc(wid)}/nodes/${enc(nodeId)}/profile${qs({ column, handle })}`,
+    ),
   // ---- « Clés multiples » group drill-down ----
   keysGroup: (pid, wid, nodeId, key, q, handle = 'out') =>
     getJSON(
-      `/projects/${enc(pid)}/workflows/${enc(wid)}/nodes/${enc(nodeId)}/group${qs({ key: (key || []).join(','), q, handle })}`),
+      `/projects/${enc(pid)}/workflows/${enc(wid)}/nodes/${enc(nodeId)}/group${qs({ key: (key || []).join(','), q, handle })}`,
+    ),
 
   // ---- validation tester ----
-  validateTest: (config, samples) =>
-    sendJSON('/validate/test', 'POST', { config, samples }),
+  validateTest: (config, samples) => sendJSON('/validate/test', 'POST', { config, samples }),
 
   // ---- routing: live distribution preview (no materialization) ----
   routePreview: (pid, wid, nodeId, config) =>
-    sendJSON(`/projects/${enc(pid)}/workflows/${enc(wid)}/nodes/${enc(nodeId)}/route-preview`, 'POST', config),
+    sendJSON(
+      `/projects/${enc(pid)}/workflows/${enc(wid)}/nodes/${enc(nodeId)}/route-preview`,
+      'POST',
+      config,
+    ),
   // ---- split by value: discover distinct extracted values ----
   splitScan: (pid, wid, nodeId, config) =>
-    sendJSON(`/projects/${enc(pid)}/workflows/${enc(wid)}/nodes/${enc(nodeId)}/split-scan`, 'POST', config),
+    sendJSON(
+      `/projects/${enc(pid)}/workflows/${enc(wid)}/nodes/${enc(nodeId)}/split-scan`,
+      'POST',
+      config,
+    ),
 
   // ---- streaming run (Server-Sent Events) ----
   runStream: (pid, wid, onlyNode, onEvent, force = false, allExports = false) => {
     const url = `${BASE}/projects/${enc(pid)}/workflows/${enc(wid)}/run-stream${qs({ only_node: onlyNode, force: force ? 1 : undefined, all_exports: allExports ? 1 : undefined })}`
     const es = new EventSource(url)
     let finished = false
-    const stop = () => { finished = true; es.close() }
+    const stop = () => {
+      finished = true
+      es.close()
+    }
     es.onmessage = (e) => {
       let ev
-      try { ev = JSON.parse(e.data) } catch { return }
+      try {
+        ev = JSON.parse(e.data)
+      } catch {
+        return
+      }
       onEvent(ev)
       if (ev.event === 'done' || ev.event === 'error') stop()
     }
