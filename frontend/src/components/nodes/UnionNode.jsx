@@ -20,7 +20,14 @@ export default function UnionNode({ id, data, selected }) {
       </div>
       <div className="node-body">
         <div className="node-sub">Empile toutes les entrées connectées</div>
-        <div className="node-sub">
+        <div
+          className="node-sub"
+          title={
+            data.by_name === false
+              ? 'Alignement par position : la 1ʳᵉ colonne avec la 1ʳᵉ. Les noms du premier bloc gagnent.'
+              : 'Alignement par nom : colonnes rapprochées par leur nom. Les manquantes deviennent NULL.'
+          }
+        >
           {data.by_name === false ? 'par position' : 'par nom de colonne'}
           {data.distinct ? ' · sans doublons' : ''}
         </div>

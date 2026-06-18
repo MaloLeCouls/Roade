@@ -85,7 +85,7 @@ Quand un manque est rattaché à un todo de la roadmap, l'ID est mentionné.
 | **Calcul**     | ✅ | ✅ | ✅ | ✅ | ➖ (formule vide → skip silencieux) | ✅ | ✅ | ✅ (`CALC_EXAMPLES`) |
 | **Filtre**     | ✅ | ✅ (paires Data/Ref typées — D.7) | ✅ | ✅ | ✅ `filter_empty`/`filter_mismatch` | ✅ | ✅ | ❌ (F.4) |
 | **Cols**       | ✅ | ✅ | ✅ | ✅ | ✅ `cols_all_dropped` (tout décoché) | ✅ | ✅ | ➖ |
-| **Union**      | ✅ | ➖ | ✅ | ✅ | ⚠ (input manquant détecté, alignement des schémas pas remonté ; F.1) | ✅ | ⚠ (à enrichir ; F.1) | ➖ |
+| **Union**      | ✅ | ➖ | ✅ | ✅ | ⚠ (input manquant détecté ; alignement des schémas remonté hors preflight via l'aperçu de F.1) | ✅ | ✅ (depuis F.1 — explique nom vs position ; aperçu des orphelines) | ➖ |
 | **Analyse**    | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ➖ |
 | **Export**     | ✅ | ➖ | ➖ | ➖ | ❌ (filename vide non détecté) | ✅ | ✅ | ➖ |
 
@@ -109,9 +109,12 @@ d'erreur.
 
 ### Mapping F.x → manques du contrat
 
-- **F.1 Union au socle** → preflight (alignement des schémas) + info-bulle qui
-  prévient sur la stratégie `union_by_name` vs par position + aperçu des colonnes
-  orphelines.
+- **F.1 Union au socle** → ~~preflight (alignement des schémas)~~ aperçu
+  d'alignement sous la config (live, pas une erreur — `UnionSchemaPreview` dans
+  `Inspector.jsx`) + ~~info-bulle qui prévient sur la stratégie `union_by_name`
+  vs par position~~ (faite, bulle large avec puces) + ~~aperçu des colonnes
+  orphelines~~ (présentes/manquantes par entrée, tronqué à 20). En mode « par
+  position », un avertissement signale les nombres de colonnes incohérents.
 - **F.2 Pivot au socle** → pickers typés (item 2) + preflight (item 5) + bulle
   enrichie (déjà partiellement faite).
 - **F.3 Filtre typé** → ~~pickers typés sur `mainCols`/`refCols`~~ (fait avec

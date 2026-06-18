@@ -4695,6 +4695,78 @@ table.dt th.idx {
     opacity: 0.6;
   }
 }
+
+/* F.1 — Aperçu d'alignement Union, sous la config. Tonalité informative
+   (surface-3 = notice info), pas alarmante : ce n'est pas une erreur,
+   c'est un repère de conception. */
+.union-preview {
+  margin-top: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  background: var(--surface-3);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-sm);
+}
+.union-preview-h {
+  font-weight: var(--fw-semibold);
+  margin-bottom: var(--s-2);
+  color: var(--ink-soft);
+}
+.union-preview-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  margin-bottom: var(--s-1);
+}
+.union-preview-tiles > span {
+  white-space: nowrap;
+}
+.union-preview-tiles .warn {
+  color: var(--warn);
+}
+.union-orphan-list,
+.union-pos-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.union-orphan-list li,
+.union-pos-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s-2);
+  font-size: var(--fs-sm);
+}
+.union-orphan-list code {
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  background: var(--panel);
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+}
+.union-orphan-src {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+/* Listes à puces dans les InfoBubble — un seul style partagé pour rester
+   cohérent avec les autres bulles. La bulle elle-même (`.info-pop`) reçoit
+   les enfants ; le trigger `.info-bubble` ne contient pas le texte. */
+.info-pop .bullets {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.info-pop .bullets > li {
+  margin-bottom: 4px;
+}
+/* Une bulle plus large quand son contenu est dense (explication + 2-3 puces).
+   On ne touche pas à la taille par défaut (250px) — règle taille fixe : on
+   préfère opter explicitement à l'usage plutôt que de tout élargir. */
+.info-pop.wide {
+  width: 320px;
+}
 .legend-badge {
   font-size: var(--fs-xs);
   padding: 1px 6px;

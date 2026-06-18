@@ -1553,13 +1553,26 @@ function CalcConfig({ node, inputs, set }) {
 
 function UnionConfig({ node, inputs, set }) {
   const d = node.data
+  const byName = d.by_name !== false
   return (
     <div className="insp-body">
       <div className="ports-head">
         <span className="ports-title">Union (empilement)</span>
-        <InfoBubble>
-          Empile (concatène) les lignes de <b>toutes</b> les entrées reliées à l'ancre <b>in</b>.
-          Reliez-y plusieurs blocs.
+        <InfoBubble wide>
+          <b>Union</b> empile les lignes de toutes les entrées reliées à l'ancre <b>in</b> (comme
+          coller des feuilles l'une sous l'autre). Deux stratégies d'alignement, à choisir selon la
+          forme des entrées :
+          <ul className="bullets">
+            <li>
+              <b>Par nom</b> — les colonnes sont rapprochées par leur nom ; les colonnes manquantes
+              d'un côté deviennent <i>vides</i> (NULL). Robuste si les en-têtes coïncident.
+            </li>
+            <li>
+              <b>Par position</b> — la 1ʳᵉ colonne avec la 1ʳᵉ, la 2ᵉ avec la 2ᵉ… Les noms du{' '}
+              <b>premier</b> bloc gagnent. À n'utiliser que si vous savez que l'ordre est identique
+              partout — sinon vous mélangez des colonnes différentes sans le voir.
+            </li>
+          </ul>
         </InfoBubble>
       </div>
       <div className="fld">
@@ -1568,7 +1581,7 @@ function UnionConfig({ node, inputs, set }) {
       <label className="fld">
         <span>Alignement des colonnes</span>
         <select
-          value={d.by_name === false ? 'pos' : 'name'}
+          value={byName ? 'name' : 'pos'}
           onChange={(e) => set({ by_name: e.target.value === 'name' })}
         >
           <option value="name">Par nom de colonne (tolère l'ordre / colonnes manquantes)</option>
@@ -1583,6 +1596,127 @@ function UnionConfig({ node, inputs, set }) {
         />
         Supprimer les lignes en double après empilement
       </label>
+      <UnionSchemaPreview inputs={inputs} byName={byName} />
+    </div>
+  )
+}
+
+// F.1 — Aperçu de l'alignement, juste sous la config Union. Pas un dry-run :
+// on lit les schémas déjà connus côté front (récupérés au mount via /schema)
+// pour montrer, *avant* d'exécuter, où sont les orphelines et les écarts.
+//
+// Deux modes, deux écueils différents :
+//   - Par nom  : « si un nom diffère même d'une lettre, la colonne devient
+//                 NULL d'un côté ». On liste les orphelines avec leur source.
+//   - Par position : « la 1ʳᵉ avec la 1ʳᵉ ». On lève le drapeau si les
+//                    longueurs diffèrent — c'est l'erreur silencieuse classique.
+function UnionSchemaPreview({ inputs, byName }) {
+  if (!inputs || inputs.length === 0) {
+    return (
+      <div className="qb-hint" style={{ marginTop: 8 }}>
+        Reliez au moins deux blocs à l'ancre <b>in</b> pour voir l'aperçu de l'alignement.
+      </div>
+    )
+  }
+  const hasSchemas = inputs.every((i) => (i.columns || []).length > 0)
+  if (!hasSchemas) {
+    return (
+      <div className="qb-hint" style={{ marginTop: 8 }}>
+        Exécutez les blocs amont pour voir comment leurs colonnes vont s'aligner.
+      </div>
+    )
+  }
+  if (inputs.length === 1) {
+    return (
+      <div className="qb-hint" style={{ marginTop: 8 }}>
+        Une seule entrée — l'union reproduira simplement le bloc amont (
+        {inputs[0].columns.length} colonnes).
+      </div>
+    )
+  }
+  // ---- mode « par nom » : carte des présences ----
+  if (byName) {
+    const presence = new Map() // name → Set<inputIndex>
+    inputs.forEach((inp, i) =>
+      (inp.columns || []).forEach((c) => {
+        if (!presence.has(c.name)) presence.set(c.name, new Set())
+        presence.get(c.name).add(i)
+      }),
+    )
+    const total = presence.size
+    const common = [...presence.values()].filter((s) => s.size === inputs.length).length
+    const orphans = [...presence.entries()]
+      .filter(([, s]) => s.size < inputs.length)
+      .map(([name, s]) => ({ name, sources: [...s] }))
+    return (
+      <div className="union-preview">
+        <div className="union-preview-h">Aperçu de l'alignement</div>
+        <div className="union-preview-tiles">
+          <span>
+            <b>{total}</b> colonnes au total
+          </span>
+          <span>
+            <b>{common}</b> communes à toutes les entrées
+          </span>
+          <span className={orphans.length ? 'warn' : ''}>
+            <b>{orphans.length}</b> orphelines
+          </span>
+        </div>
+        {orphans.length > 0 && (
+          <>
+            <div className="qb-hint" style={{ marginTop: 6 }}>
+              Ces colonnes n'existent que dans certaines entrées — elles seront <b>vides</b> (NULL)
+              ailleurs :
+            </div>
+            <ul className="union-orphan-list">
+              {orphans.slice(0, 20).map((o) => {
+                const presentLabels = o.sources.map((i) => inputs[i].label || `#${i + 1}`)
+                const missingLabels = inputs
+                  .map((inp, i) => (o.sources.includes(i) ? null : inp.label || `#${i + 1}`))
+                  .filter(Boolean)
+                // Choix de phrasing : on dit ce qui est le plus court (présents
+                // si peu, manquants si peu). Évite « présente dans 12 / manque 1 ».
+                const showMissing = missingLabels.length <= presentLabels.length
+                return (
+                  <li key={o.name}>
+                    <code>{o.name}</code>
+                    <span className="union-orphan-src">
+                      {showMissing
+                        ? `manque dans : ${missingLabels.join(', ')}`
+                        : `présente dans : ${presentLabels.join(', ')}`}
+                    </span>
+                  </li>
+                )
+              })}
+              {orphans.length > 20 && (
+                <li className="muted">… et {orphans.length - 20} autres</li>
+              )}
+            </ul>
+          </>
+        )}
+      </div>
+    )
+  }
+  // ---- mode « par position » : on flag les nombres de colonnes différents ----
+  const sizes = inputs.map((inp) => (inp.columns || []).length)
+  const allSame = sizes.every((n) => n === sizes[0])
+  return (
+    <div className="union-preview">
+      <div className="union-preview-h">Aperçu de l'alignement</div>
+      {!allSame && (
+        <div className="qb-warn" style={{ marginBottom: 6 }}>
+          ⚠ Les entrées n'ont pas le même nombre de colonnes — l'union « par position » va
+          probablement empiler des colonnes différentes. Vérifiez ou repassez « par nom ».
+        </div>
+      )}
+      <ul className="union-pos-list">
+        {inputs.map((inp, i) => (
+          <li key={i}>
+            <b>{inp.label || `Entrée ${i + 1}`}</b> — {sizes[i]} colonne(s)
+            {i === 0 && <span className="muted"> (impose les noms)</span>}
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
@@ -2373,11 +2507,11 @@ function SourceConfig({ pid, node, files, set, onSchema }) {
   )
 }
 
-function InfoBubble({ children }) {
+function InfoBubble({ children, wide }) {
   return (
     <span className="info-bubble" tabIndex={0}>
       <Icon name="info" size={14} />
-      <span className="info-pop" role="tooltip">
+      <span className={`info-pop${wide ? ' wide' : ''}`} role="tooltip">
         {children}
       </span>
     </span>
