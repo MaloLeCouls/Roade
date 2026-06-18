@@ -11,6 +11,17 @@
   --danger: #c0392f;
   --ok: #3f7a4f;
   --warn: #9a6b16;
+
+  /* ---- Pastilles d'état des blocs (coin du nœud) -------------------------- */
+  /* Une couleur = un sens, jamais réutilisée d'une pastille à l'autre :
+       stale  (ambre)   → modifié depuis le dernier run, sera recalculé
+       error  (rouge)   → erreur de configuration (preflight)
+       loss   (violet)  → données perdues / lignes non redistribuées
+     Toute nouvelle pastille doit prendre une teinte libre, pas l'une de ces 3. */
+  --dot-stale: #e0a73a;
+  --dot-error: var(--danger);
+  --dot-loss: #b97bff;
+
   --radius: 4px;
   --radius-lg: 6px;
   --shadow: 0 1px 3px rgba(20, 30, 60, 0.1);
@@ -1879,19 +1890,36 @@ code {
   pointer-events: auto;
 }
 
-.node-dirty {
+/* ---- Pastilles d'état (stack uniforme en haut à droite du nœud) ---------- */
+/* Toutes les pastilles d'un bloc vivent dans ce conteneur, même taille, même
+   place, empilées de droite à gauche par priorité. La couleur (et elle seule)
+   porte le sens — cf. les tokens --dot-* dans :root. */
+.node-dots {
   position: absolute;
-  top: -4px;
-  right: -4px;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: #e0a73a;
-  box-shadow:
-    0 0 0 2px #fff,
-    0 0 4px rgba(224, 167, 58, 0.7);
+  top: -5px;
+  right: -5px;
+  display: flex;
+  flex-direction: row-reverse;
+  gap: 3px;
   z-index: 6;
   pointer-events: none;
+}
+.node-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px #fff;
+  cursor: help;
+  pointer-events: auto;
+}
+.node-dot-stale {
+  background: var(--dot-stale);
+}
+.node-dot-error {
+  background: var(--dot-error);
+}
+.node-dot-loss {
+  background: var(--dot-loss);
 }
 
 /* Empty-value split output: italic + muted so the "(vide)" label is read as a
@@ -3453,6 +3481,16 @@ table.dt th.idx {
   padding-right: 13px;
   box-shadow: none;
 }
+.run-split .btn-stop {
+  border: none;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-weight: 600;
+  box-shadow: none;
+}
+.run-split .btn-stop:hover {
+  filter: brightness(0.92);
+}
 .run-split .run-caret {
   border-radius: 0 8px 8px 0;
   padding: 7px 9px;
@@ -4367,16 +4405,14 @@ table.dt th.idx {
   color: var(--ink-soft);
   box-shadow: var(--shadow);
   max-width: 480px;
-}
-.canvas-legend > summary {
   cursor: pointer;
-  list-style: none;
   user-select: none;
 }
-.canvas-legend > summary::-webkit-details-marker {
-  display: none;
+.canvas-legend > .legend-summary {
+  display: block;
+  font-weight: var(--fw-semibold);
 }
-.canvas-legend[open] {
+.canvas-legend.open {
   padding-bottom: var(--s-2);
 }
 .canvas-legend ul {
@@ -4403,8 +4439,12 @@ table.dt th.idx {
   flex-shrink: 0;
 }
 .legend-dot-dirty {
-  background: #e0a73a;
+  background: var(--dot-stale);
   box-shadow: 0 0 0 2px rgba(224, 167, 58, 0.25);
+}
+.legend-dot-loss {
+  background: var(--dot-loss);
+  box-shadow: 0 0 0 2px rgba(185, 123, 255, 0.25);
 }
 .legend-badge {
   font-size: var(--fs-xs);
@@ -4463,30 +4503,9 @@ table.dt th.idx {
   border-left-color: var(--ok);
 }
 
-/* ---- Preflight badge (E.3) ----------------------------------------------- */
-.node-preflight {
-  position: absolute;
-  top: -8px;
-  left: -8px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--danger);
-  color: #fff;
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-bold);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 0 0 2px var(--panel);
-  z-index: var(--z-sticky);
-  cursor: help;
-}
-
 /* ---- Stop button (E.2) --------------------------------------------------- */
 .btn-stop {
   background: var(--danger);
-  border: 1px solid var(--danger);
   color: #fff;
   border-radius: var(--radius-md);
   padding: var(--s-2) var(--s-3);

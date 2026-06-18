@@ -32,9 +32,6 @@ export default function ValidateNode({ id, data, selected }) {
         { handle: 'invalid', label: 'Non conformes', color: '#E15759' },
       ]
 
-  const nConds = (data.conditions || []).length
-  const help = `${nConds} condition(s) → ${(data.outputs || []).length} sortie(s) sur « ${data.target_column || '?'} »`
-
   return (
     <div className={`node node-validate ${selected ? 'sel' : ''}`}>
       <Handle
@@ -46,9 +43,6 @@ export default function ValidateNode({ id, data, selected }) {
       />
       <div className="node-head">
         <span className="node-title">{data.label || 'Validation'}</span>
-        <span className="node-help" title={help}>
-          ?
-        </span>
         <LockBadge locked={data.locked} />
       </div>
       <div className="node-body">

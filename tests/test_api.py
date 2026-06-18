@@ -162,6 +162,12 @@ def test_api_run_stream(project_with_csv_workflow):
     kinds = {e.get("event") for e in events}
     # Le runner émet `start`, `node_start` / `node_done` par bloc, puis un terminal `done`.
     assert kinds >= {"start", "node_start", "node_done", "done"}, kinds
+    # Le node source émet une progression lignes lues / total pendant la lecture.
+    assert "node_progress" in kinds, kinds
+    prog = [e for e in events if e.get("event") == "node_progress" and e.get("node_id") == "s"]
+    assert prog, events
+    last = prog[-1]
+    assert last["rows_read"] == last["total_rows"] == 3
     # Le node source a bien tourné
     node_done = [e for e in events if e.get("event") == "node_done"]
     assert any(e.get("node_id") == "s" or e.get("id") == "s" for e in node_done), node_done

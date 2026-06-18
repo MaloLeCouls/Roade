@@ -4,9 +4,10 @@ import { LockBadge } from './SourceNode'
 import Icon from '../Icon'
 
 export default function ExportNode({ id, data, selected }) {
-  const { status, onRunNode, running } = useEditor()
+  const { status, onRunNode, running, onOpenExportFolder } = useEditor()
   const st = status[id] || {}
   const off = data.enabled === false
+  const hasFile = st.ran && !st.skippedEmpty && !st.error
   return (
     <div className={`node node-export ${selected ? 'sel' : ''} ${off ? 'node-off' : ''}`}>
       <Handle
@@ -58,6 +59,18 @@ export default function ExportNode({ id, data, selected }) {
           <span className="badge idle">non exécuté</span>
         )}
         <div className="node-actions">
+          {hasFile && (
+            <button
+              className="mini"
+              onClick={(e) => {
+                e.stopPropagation()
+                onOpenExportFolder?.()
+              }}
+              title="Ouvrir le dossier contenant le fichier exporté"
+            >
+              <Icon name="folder" />
+            </button>
+          )}
           <button
             className="mini"
             onClick={(e) => {

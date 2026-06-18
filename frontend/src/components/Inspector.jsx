@@ -2282,6 +2282,9 @@ function SourceConfig({ pid, node, files, set, onSchema }) {
         colCount != null && `${colCount} colonnes`,
       ].filter(Boolean)
     : null
+  // Fichiers uploadés uniquement — `listFiles` inclut aussi les exports (même
+  // nom dans plusieurs workflows) ; les sources ne lisent que `files/`.
+  const sourceFiles = files.filter((f) => f.origin !== 'export')
 
   return (
     <div className="insp-body">
@@ -2296,7 +2299,7 @@ function SourceConfig({ pid, node, files, set, onSchema }) {
           }}
         >
           <option value="">— choisir —</option>
-          {files.map((f) => (
+          {sourceFiles.map((f) => (
             <option key={f.name} value={f.name}>
               {f.name}
             </option>

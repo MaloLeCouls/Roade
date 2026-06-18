@@ -3,8 +3,15 @@ import { useEditor } from '../editorContext'
 import Icon from '../Icon'
 
 export default function SourceNode({ id, data, selected }) {
-  const { status, onPreview, onRunNode, running } = useEditor()
+  const { status, onPreview, onRunNode, running, sourceProgress } = useEditor()
   const st = status[id] || {}
+  const prog =
+    running === id && sourceProgress?.nodeId === id && sourceProgress.totalRows > 0
+      ? sourceProgress
+      : null
+  const runningLabel = prog
+    ? `${prog.rowsRead.toLocaleString('fr-FR')} / ${prog.totalRows.toLocaleString('fr-FR')} lignes`
+    : 'lecture…'
   return (
     <div className={`node node-source ${selected ? 'sel' : ''}`}>
       <div className="node-head">
@@ -26,6 +33,7 @@ export default function SourceNode({ id, data, selected }) {
       <NodeFooter
         st={st}
         running={running === id}
+        runningLabel={runningLabel}
         onPreview={() => onPreview(id)}
         onRun={() => onRunNode(id)}
         onReload={() => onRunNode(id, true)}
@@ -61,10 +69,10 @@ export function StatusBadge({ st, running, runningLabel = 'exécution…' }) {
   return <span className="badge idle">non exécuté</span>
 }
 
-export function NodeFooter({ st, running, onPreview, onRun, onReload }) {
+export function NodeFooter({ st, running, runningLabel, onPreview, onRun, onReload }) {
   return (
     <div className="node-foot">
-      <StatusBadge st={st} running={running} />
+      <StatusBadge st={st} running={running} runningLabel={runningLabel} />
       <div className="node-actions">
         <button
           className="mini"

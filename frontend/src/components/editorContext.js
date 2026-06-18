@@ -5,12 +5,14 @@ import { createContext, useContext } from 'react'
 export const EditorContext = createContext({
   status: {}, // nodeId -> { rows, error, ran }
   running: null, // nodeId currently running
+  sourceProgress: null, // { nodeId, rowsRead, totalRows } during source read
   onPreview: () => {},
   onRunNode: () => {},
   onDeleteEdge: () => {},
   // E.5 — async confirm fourni par WorkflowEditor pour les actions destructives
   // déclenchées depuis le canevas (ex : suppression de lien depuis ButtonEdge).
   confirmDelete: null,
+  onOpenExportFolder: () => {},
 })
 
 export const useEditor = () => useContext(EditorContext)

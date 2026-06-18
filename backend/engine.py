@@ -19,7 +19,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import queue
 import re
+import threading
 
 import charset_normalizer
 import duckdb
@@ -388,14 +390,124 @@ def _signatures_for(pid, wid, nodes, edges, order) -> dict:
     return sigs
 
 
-def _read_source(path, sheet, header_row: int, data: dict | None = None) -> pd.DataFrame:
+def _count_source_data_rows(path, sheet, header_row: int, data: dict | None = None) -> int:
+    """Nombre de lignes de données attendues (hors lignes d'en-tête ignorées)."""
     ext = path.suffix.lower()
     hr = int(header_row or 0)
     if ext in _EXCEL_EXT:
+        try:
+            import openpyxl
+
+            wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+            try:
+                names = wb.sheetnames
+                target = sheet if (sheet and sheet in names) else names[0]
+                ws = wb[target]
+                max_row = ws.max_row or 0
+                # skiprows=hr : on saute hr lignes, la suivante est l'en-tête pandas.
+                return max(0, max_row - hr - 1)
+            finally:
+                wb.close()
+        except Exception:  # noqa: BLE001
+            return 0
+    if ext == ".parquet":
+        try:
+            import pyarrow.parquet as pq
+
+            return int(pq.read_metadata(path).num_rows)
+        except Exception:  # noqa: BLE001
+            return 0
+    try:
+        opts, _ = _resolve_read_options(path, data or {})
+        enc = opts.get("encoding") or "utf-8"
+        lines = 0
+        with path.open("r", encoding=enc, errors="replace") as f:
+            for _ in f:
+                lines += 1
+        return max(0, lines - hr - 1)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def _read_csv_with_progress(path, hr, opts, ext, total, on_progress):
+    kwargs = dict(skiprows=hr, **opts)
+    if ext in (".tsv", ".txt"):
+        kwargs["sep"] = "\t"
+    else:
+        kwargs["sep"] = None
+        kwargs["engine"] = "python"
+    chunk_size = max(1000, min(10000, total // 50 or 1000))
+    chunks, rows_read = [], 0
+    for chunk in pd.read_csv(path, chunksize=chunk_size, **kwargs):
+        chunks.append(chunk)
+        rows_read += len(chunk)
+        on_progress(min(rows_read, total), total)
+    if not chunks:
+        on_progress(0, total)
+        return pd.DataFrame()
+    df = pd.concat(chunks, ignore_index=True)
+    on_progress(min(len(df), total), total)
+    return df
+
+
+def _read_excel_with_progress(path, sheet, hr, total, on_progress):
+    import openpyxl
+
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        names = wb.sheetnames
+        target = sheet if (sheet and sheet in names) else names[0]
+        ws = wb[target]
+        header_vals = next(ws.iter_rows(min_row=hr + 1, max_row=hr + 1, values_only=True), None)
+        if header_vals is None:
+            on_progress(0, total or 1)
+            return pd.DataFrame()
+        columns = [str(c) if c is not None else f"col_{i}" for i, c in enumerate(header_vals)]
+        rows, rows_read = [], 0
+        emit_every = max(500, (total or 1) // 50)
+        for row in ws.iter_rows(min_row=hr + 2, values_only=True):
+            rows.append(row)
+            rows_read += 1
+            if rows_read % emit_every == 0:
+                on_progress(min(rows_read, total), total)
+        # `pd.read_excel` drops trailing all-empty rows; `openpyxl.iter_rows`
+        # keeps them. Mirror pandas so downstream blocks see the same shape.
+        while rows and all(v is None or (isinstance(v, str) and v == "") for v in rows[-1]):
+            rows.pop()
+        on_progress(min(len(rows), total or len(rows) or 1), total or len(rows) or 1)
+        return pd.DataFrame(rows, columns=columns)
+    finally:
+        wb.close()
+
+
+def _read_source(
+    path,
+    sheet,
+    header_row: int,
+    data: dict | None = None,
+    *,
+    on_progress=None,
+) -> pd.DataFrame:
+    ext = path.suffix.lower()
+    hr = int(header_row or 0)
+    total = _count_source_data_rows(path, sheet, hr, data) if on_progress else 0
+
+    if on_progress:
+        on_progress(0, total or 1)
+
+    if ext in _EXCEL_EXT:
+        if on_progress and total > 0:
+            return _read_excel_with_progress(path, sheet, hr, total, on_progress)
         return pd.read_excel(path, sheet_name=(sheet or 0), skiprows=hr)
     if ext == ".parquet":
-        return pd.read_parquet(path)
+        df = pd.read_parquet(path)
+        if on_progress:
+            n = len(df)
+            on_progress(n, n or 1)
+        return df
     opts, _ = _resolve_read_options(path, data or {})
+    if on_progress and total > 0:
+        return _read_csv_with_progress(path, hr, opts, ext, total, on_progress)
     if ext in (".tsv", ".txt"):
         return pd.read_csv(path, sep="\t", skiprows=hr, **opts)
     return pd.read_csv(path, sep=None, engine="python", skiprows=hr, **opts)
@@ -579,7 +691,7 @@ def _single(ins):
 # --------------------------------------------------------------------------- #
 # Block runners  ->  (outputs: {handle: DataFrame}, extra_meta: dict)
 # --------------------------------------------------------------------------- #
-def _run_source(con, pid, node, ins):
+def _run_source(con, pid, node, ins, *, on_progress=None):
     d = node["data"]
     file = d.get("file")
     if not file:
@@ -587,7 +699,9 @@ def _run_source(con, pid, node, ins):
     path = storage.files_dir(pid) / file
     if not path.exists():
         raise ValueError(f"fichier introuvable : {file}")
-    df = _read_source(path, d.get("sheet"), d.get("header_row") or 0, d)
+    df = _read_source(
+        path, d.get("sheet"), d.get("header_row") or 0, d, on_progress=on_progress
+    )
     # A.5 — casts utilisateur explicites (number / date / text / boolean) AVANT
     # matérialisation, pour ne pas forcer un détour par un bloc Nettoyage.
     df, casts_report = _apply_casts(df, d.get("casts"), d.get("decimal") or "", d.get("thousands"))
@@ -684,10 +798,14 @@ def _run_validate(con, pid, node, ins):
     if d.get("add_flag"):
         out["valide"] = ["oui" if f else "non" for f in flags]
     mask = pd.Series(flags, index=out.index)
+    valid_df = out[mask].reset_index(drop=True)
+    invalid_df = out[~mask].reset_index(drop=True)
+    n_in = len(df)
+    n_out = len(valid_df) + len(invalid_df)
     return {
-        "valid": out[mask].reset_index(drop=True),
-        "invalid": out[~mask].reset_index(drop=True),
-    }, {}
+        "valid": valid_df,
+        "invalid": invalid_df,
+    }, {"input_rows": n_in, "unrouted_rows": max(0, n_in - n_out)}
 
 
 # --------------------------------------------------------------------------- #
@@ -1410,7 +1528,9 @@ def _run_split(d: dict, df: pd.DataFrame):
         result[oid] = df[m].reset_index(drop=True)
     if d.get("else_enabled", True):
         result["else"] = df[~assigned].reset_index(drop=True)
-    return result, {}
+    n_in = len(df)
+    n_out = sum(len(v) for v in result.values())
+    return result, {"input_rows": n_in, "unrouted_rows": max(0, n_in - n_out)}
 
 
 def _run_route(d: dict, df: pd.DataFrame, diagnostics: bool = True):
@@ -1436,7 +1556,9 @@ def _run_route(d: dict, df: pd.DataFrame, diagnostics: bool = True):
         result[oid] = df[m].reset_index(drop=True)
     if d.get("else_enabled", True):
         result["else"] = df[~assigned].reset_index(drop=True)
-    return result, {}
+    n_in = len(df)
+    n_out = sum(len(v) for v in result.values())
+    return result, {"input_rows": n_in, "unrouted_rows": max(0, n_in - n_out)}
 
 
 def route_preview(pid, wid, node_id, config: dict) -> dict:
@@ -2659,6 +2781,9 @@ def _reuse_result(pid, wid, node, handles, ntype, locked, signature) -> dict:
             for k in ("compiled_sql", "clean_report", "report", "casts_report"):
                 if k in m:
                     extra[k] = m[k]
+            for k in ("input_rows", "unrouted_rows"):
+                if k in m:
+                    extra[k] = m[k]
     return {
         "type": ntype,
         "locked": locked,
@@ -2684,6 +2809,7 @@ def _execute_node(
     signature=None,
     all_exports=False,
     produced=None,
+    on_progress=None,
 ) -> dict:
     ntype = node["type"]
     handles = _output_handles(node)
@@ -2723,10 +2849,13 @@ def _execute_node(
             produced=produced,
         )
     else:
-        runner = _RUNNERS.get(ntype)
-        if runner is None:
-            raise ValueError(f"type de bloc inconnu : {ntype}")
-        out_dfs, extra = runner(con, pid, node, ins)
+        if ntype == "source":
+            out_dfs, extra = _run_source(con, pid, node, ins, on_progress=on_progress)
+        else:
+            runner = _RUNNERS.get(ntype)
+            if runner is None:
+                raise ValueError(f"type de bloc inconnu : {ntype}")
+            out_dfs, extra = runner(con, pid, node, ins)
 
     if not handles:  # export (always runs; nothing to cache)
         return {
@@ -2767,15 +2896,12 @@ def _execute_node(
         "row_count": outputs.get(handles[0], 0),
         "columns": columns,
     }
-    for k in ("compiled_sql", "clean_report", "report", "casts_report"):
+    for k in ("compiled_sql", "clean_report", "report", "casts_report", "input_rows", "unrouted_rows"):
         if k in extra:
             result[k] = extra[k]
     return result
 
 
-# --------------------------------------------------------------------------- #
-# Run
-# --------------------------------------------------------------------------- #
 # E.2 — drapeaux d'annulation. Un POST sur `/cancel` ajoute (pid, wid) ici, et
 # `iter_run_workflow` regarde entre chaque bloc. Simple set en mémoire : pas de
 # besoin de DB tant que le runner est mono-process (cf. graine 3 cloud — quand
@@ -2788,6 +2914,46 @@ def request_cancel(pid: str, wid: str) -> None:
     entre 2 blocs (granularité : un bloc en cours d'exécution ne s'arrête
     pas en plein milieu — il termine, puis le run s'arrête)."""
     _cancel_requested.add((pid, wid))
+
+
+def _execute_node_with_progress(con, pid, wid, nid, node, edges, **kwargs):
+    """Exécute un bloc. Pour les sources, émet des events `node_progress` via yield."""
+    if node["type"] != "source":
+        yield {"_kind": "result", "result": _execute_node(con, pid, wid, node, edges, **kwargs)}
+        return
+
+    q: queue.Queue = queue.Queue()
+
+    def on_progress(rows_read, total_rows):
+        q.put(
+            {
+                "event": "node_progress",
+                "node_id": nid,
+                "rows_read": int(rows_read),
+                "total_rows": int(total_rows),
+            }
+        )
+
+    def worker():
+        try:
+            res = _execute_node(
+                con, pid, wid, node, edges, on_progress=on_progress, **kwargs
+            )
+            q.put({"_kind": "result", "result": res})
+        except Exception as exc:  # noqa: BLE001
+            q.put({"_kind": "error", "exc": exc})
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    while True:
+        item = q.get()
+        if item.get("_kind") == "result":
+            yield item
+            break
+        if item.get("_kind") == "error":
+            raise item["exc"]
+        yield item
+    thread.join()
 
 
 def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False):
@@ -2869,12 +3035,8 @@ def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False):
             single_force = force and only_node is not None and nid == only_node
             node_started = _time.time()
             try:
-                result = _execute_node(
-                    con,
-                    pid,
-                    wid,
-                    node,
-                    edges,
+                result = None
+                exec_kwargs = dict(
                     bypass_cache=(single_force or (force and only_node is None)),
                     bypass_lock=single_force,
                     all_exports=all_exports,
@@ -2883,6 +3045,13 @@ def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False):
                     signature=sig_by_node.get(nid),
                     produced=produced,
                 )
+                for item in _execute_node_with_progress(
+                    con, pid, wid, nid, node, edges, **exec_kwargs
+                ):
+                    if item.get("_kind") == "result":
+                        result = item["result"]
+                    else:
+                        yield item
             except Exception as e:  # noqa: BLE001 - reported to the client
                 label = node["data"].get("label", nid)
                 run_record["errors"].append({"node_id": nid, "label": label, "message": str(e)})
@@ -3033,6 +3202,8 @@ def preview_node(
             "clean_report": meta.get("clean_report"),
             "report": meta.get("report"),
             "stats": meta.get("stats"),
+            "input_rows": meta.get("input_rows"),
+            "unrouted_rows": meta.get("unrouted_rows"),
         }
     con = duckdb.connect()
     try:
@@ -3063,6 +3234,8 @@ def preview_node(
             "clean_report": meta.get("clean_report"),
             "report": meta.get("report"),
             "stats": meta.get("stats"),
+            "input_rows": meta.get("input_rows"),
+            "unrouted_rows": meta.get("unrouted_rows"),
         }
     finally:
         con.close()

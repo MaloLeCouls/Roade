@@ -17,6 +17,7 @@ import '@xyflow/react/dist/style.css'
 import { api } from '../api'
 import { hasBlockingIssues, preflightWorkflow } from '../lib/preflight'
 import { notify } from '../toast'
+import { exportSubdir } from '../lib/paths'
 import { EditorContext } from './editorContext'
 import CommandPalette from './ui/CommandPalette'
 import { useConfirm } from './ui/ConfirmDialog'
@@ -98,30 +99,52 @@ function removedRouteHandles(node, patch) {
 }
 
 // Render the block's free-text comment (data.description) as a sticky note above
-// the node — lets the user document the workflow at a glance. One wrapper instead
-// of editing all nine node components. Also shows a discreet "modified since last
-// run" dot (data.__dirty, injected by the editor) and — for E.3 — a static
-// error badge when the block has preflight issues (entrée non branchée, etc.).
+// the node. One wrapper instead of editing all nine node components. It also
+// renders the unified stack of status pastilles in the node's top-right corner:
+// every block-level indicator (error, data loss, stale) is a same-sized dot in
+// the same place, coloured by the normalized --dot-* tokens. Flags are injected
+// by the editor onto node.data (__preflight / __lost / __dirty).
 function withComment(Comp) {
   return function Commented(props) {
     const note = props.data?.description
     const issues = props.data?.__preflight
+    const lost = props.data?.__lost || 0
+    // Order = priority (most severe first); they stack leftward from the corner.
+    const dots = []
+    if (issues && issues.length > 0) {
+      dots.push({
+        kind: 'error',
+        title: issues.map((i) => `• ${i.message}`).join('\n'),
+        label: `${issues.length} erreur(s) de configuration`,
+      })
+    }
+    if (lost > 0) {
+      dots.push({
+        kind: 'loss',
+        title: `${lost.toLocaleString('fr-FR')} ligne(s) ne correspondent à aucune sortie (non redistribuées)`,
+        label: `${lost} ligne(s) non redistribuées`,
+      })
+    }
+    if (props.data?.__dirty) {
+      dots.push({
+        kind: 'stale',
+        title: 'Modifié depuis la dernière exécution — sera recalculé',
+        label: 'Modifié depuis la dernière exécution',
+      })
+    }
     return (
       <>
         {note ? <div className="node-comment">{note}</div> : null}
-        {props.data?.__dirty ? (
-          <span
-            className="node-dirty"
-            title="Modifié depuis la dernière exécution — sera recalculé"
-          />
-        ) : null}
-        {issues && issues.length > 0 ? (
-          <span
-            className="node-preflight"
-            title={issues.map((i) => `• ${i.message}`).join('\n')}
-            aria-label={`${issues.length} erreur(s) de configuration`}
-          >
-            !
+        {dots.length > 0 ? (
+          <span className="node-dots">
+            {dots.map((d) => (
+              <span
+                key={d.kind}
+                className={`node-dot node-dot-${d.kind}`}
+                title={d.title}
+                aria-label={d.label}
+              />
+            ))}
           </span>
         ) : null}
         <Comp {...props} />
@@ -347,7 +370,8 @@ function Editor({ pid, wid, onBack }) {
     currentId: null,
     currentLabel: '',
   })
-  const [nodeFrac, setNodeFrac] = useState(0) // animated sub-progress of the running node
+  const [nodeFrac, setNodeFrac] = useState(0) // sub-progress of the running node (real for sources)
+  const [sourceProgress, setSourceProgress] = useState(null) // { nodeId, rowsRead, totalRows }
   const [, setElapsedTick] = useState(0) // 1 Hz re-render so the run timer stays live
   const [previewNode, setPreviewNode] = useState(null)
   const [editorNode, setEditorNode] = useState(null) // nodeId of the full-screen block editor
@@ -356,6 +380,7 @@ function Editor({ pid, wid, onBack }) {
   const [runMenu, setRunMenu] = useState(false) // run-button dropdown (force recompute)
   const [addMenu, setAddMenu] = useState(false) // "add a block" palette dropdown
   const [selectMode, setSelectMode] = useState(false) // box-selection mode (select many blocks → bulk delete)
+  const [legendOpen, setLegendOpen] = useState(false) // canvas legend expanded?
   const [previewPrefs, setPreviewPrefs] = useState({ tab: 'rows', column: null })
   const [banner, setBanner] = useState(null)
   const [saveState, setSaveState] = useState('saved')
@@ -432,6 +457,8 @@ function Editor({ pid, wid, onBack }) {
                     outputs: outs,
                     rows: idx === 0 ? p.row_count : cur.rows,
                     cleanReport: p.clean_report || cur.cleanReport,
+                    inputRows: p.input_rows ?? cur.inputRows,
+                    unrouted: p.unrouted_rows ?? cur.unrouted ?? 0,
                   },
                 }
               })
@@ -503,6 +530,35 @@ function Editor({ pid, wid, onBack }) {
     }))
     setNodes((nds) => [...nds.map((n) => ({ ...n, selected: false })), ...newNodes])
   }, [rf, setNodes])
+
+  // E.1 (minimal) — pile d'« undo de suppression » (50 entrées max). On capture
+  // les nodes supprimés ET les arêtes qui les bordaient, parce que React Flow
+  // efface les arêtes adjacentes en silence — sans elles, un Ctrl+Z restaurerait
+  // un bloc déconnecté du graphe. Déclaré ici (avant raccourcis Ctrl+Z / palette)
+  // pour éviter la TDZ sur undoDeletion.
+  const undoStackRef = useRef([])
+  const pushDeletion = useCallback((deletedNodes, deletedEdges) => {
+    const entry = {
+      nodes: deletedNodes.map((n) => ({ ...n, selected: false })),
+      edges: deletedEdges.map((e) => ({ ...e })),
+    }
+    undoStackRef.current = [...undoStackRef.current.slice(-49), entry]
+  }, [])
+  const undoDeletion = useCallback(() => {
+    const stack = undoStackRef.current
+    if (stack.length === 0) {
+      notify('Rien à annuler.', 'warn')
+      return
+    }
+    const last = stack[stack.length - 1]
+    undoStackRef.current = stack.slice(0, -1)
+    if (last.nodes.length) setNodes((nds) => [...nds, ...last.nodes])
+    if (last.edges.length) setEdges((eds) => [...eds, ...last.edges])
+    const parts = []
+    if (last.nodes.length) parts.push(`${last.nodes.length} bloc(s)`)
+    if (last.edges.length) parts.push(`${last.edges.length} lien(s)`)
+    notify(`Restauré : ${parts.join(' + ')}`, 'ok')
+  }, [setNodes, setEdges])
 
   // E.6 — raccourcis globaux. On évite de tirer dessus quand le focus est dans
   // un input/textarea/contenteditable (laisse le navigateur faire son job).
@@ -852,19 +908,7 @@ function Editor({ pid, wid, onBack }) {
   const removeByIds = (ids) => forgetNodes(new Set(ids))
   const deleteNode = (id) => removeByIds([id])
   const deleteSelection = () => removeByIds(nodes.filter((n) => n.selected).map((n) => n.id))
-  // E.1 (minimal) — pile d'« undo de suppression » (50 entrées max). On capture
-  // les nodes supprimés ET les arêtes qui les bordaient, parce que React Flow
-  // efface les arêtes adjacentes en silence — sans elles, un Ctrl+Z restaurerait
-  // un bloc déconnecté du graphe. Le vrai undo général (zustand + commands)
-  // viendra dans une seconde passe (cf. roadmap §6 #2).
-  const undoStackRef = useRef([])
-  const pushDeletion = useCallback((deletedNodes, deletedEdges) => {
-    const entry = {
-      nodes: deletedNodes.map((n) => ({ ...n, selected: false })),
-      edges: deletedEdges.map((e) => ({ ...e })),
-    }
-    undoStackRef.current = [...undoStackRef.current.slice(-49), entry]
-  }, [])
+  // onNodesDelete / onEdgesDelete alimentent pushDeletion (déclaré plus haut).
   const onNodesDelete = useCallback(
     (deleted) => {
       const ids = new Set(deleted.map((n) => n.id))
@@ -880,21 +924,6 @@ function Editor({ pid, wid, onBack }) {
     },
     [pushDeletion],
   )
-  const undoDeletion = useCallback(() => {
-    const stack = undoStackRef.current
-    if (stack.length === 0) {
-      notify('Rien à annuler.', 'warn')
-      return
-    }
-    const last = stack[stack.length - 1]
-    undoStackRef.current = stack.slice(0, -1)
-    if (last.nodes.length) setNodes((nds) => [...nds, ...last.nodes])
-    if (last.edges.length) setEdges((eds) => [...eds, ...last.edges])
-    const parts = []
-    if (last.nodes.length) parts.push(`${last.nodes.length} bloc(s)`)
-    if (last.edges.length) parts.push(`${last.edges.length} lien(s)`)
-    notify(`Restauré : ${parts.join(' + ')}`, 'ok')
-  }, [setNodes, setEdges])
 
   // ---- ComfyUI-style frames: dragging a group carries the blocks inside it ----
   const nodeBox = (n) => {
@@ -1015,15 +1044,15 @@ function Editor({ pid, wid, onBack }) {
     setSaveState('saved')
   }
 
-  // Open the project's files folder (where exports land) in the OS file explorer.
-  const openExportsFolder = async () => {
+  // Ouvre le dossier `exports/<workflow>/` où les blocs Export écrivent leurs fichiers.
+  const openWorkflowExportFolder = useCallback(async () => {
     setBanner(null)
     try {
-      await api.openFilesFolder(pid)
+      await api.openFilesFolder(pid, exportSubdir(wfName))
     } catch (e) {
       setBanner({ type: 'error', text: `Impossible d'ouvrir le dossier : ${e.message || e}` })
     }
-  }
+  }, [pid, wfName])
 
   // Download the human-readable Excel documentation. The doc is built from the
   // *stored* workflow, so we flush any pending edits first.
@@ -1058,16 +1087,16 @@ function Editor({ pid, wid, onBack }) {
         exported: r.exported,
         sheet: r.sheet,
         skippedEmpty: r.skipped_empty,
+        inputRows: r.input_rows,
+        unrouted: r.unrouted_rows ?? 0,
       },
     }))
     if (r.columns) setSchemas((prev) => ({ ...prev, [nid]: r.columns }))
   }
 
-  // ---- artificial, smooth per-node progress -----------------------------
-  // Reading a big Excel file gives no real progress signal, so we animate an
-  // estimated bar: duration is guessed from the file size using a rate learned
-  // (and stored) from real runs, and the fill eases asymptotically toward ~97%
-  // so it slows near the end and never "completes" before the node actually does.
+  // ---- per-node progress (non-source blocks) ------------------------------
+  // Sources use real `node_progress` (rows_read / total_rows). Other blocks
+  // still use a smooth estimated bar when no finer signal exists.
   const getRate = () => {
     const v = parseFloat(localStorage.getItem('roade.srcRateMsPerByte'))
     return Number.isFinite(v) && v > 0 ? v : 0.004 // default ≈ 4 s / Mo
@@ -1176,11 +1205,34 @@ function Editor({ pid, wid, onBack }) {
           // fires, so reused blocks no longer flash as if they were recomputed.
           clearStartTimer()
           const node = nodes.find((n) => n.id === ev.node_id)
-          startTimer.current = setTimeout(() => {
-            startTimer.current = null
-            setProgress((p) => ({ ...p, currentId: ev.node_id, currentLabel: ev.label || ev.type }))
-            startNodeAnim(node)
-          }, 150)
+          if (node?.type === 'source') {
+            // Sources : affichage immédiat pour que la progression lignes/lignes
+            // totales soit visible dès les premiers events `node_progress`.
+            stopAnim()
+            setNodeFrac(0)
+            setSourceProgress({ nodeId: ev.node_id, rowsRead: 0, totalRows: 0 })
+            setProgress((p) => ({
+              ...p,
+              currentId: ev.node_id,
+              currentLabel: ev.label || ev.type,
+            }))
+          } else {
+            startTimer.current = setTimeout(() => {
+              startTimer.current = null
+              setProgress((p) => ({ ...p, currentId: ev.node_id, currentLabel: ev.label || ev.type }))
+              setSourceProgress(null)
+              startNodeAnim(node)
+            }, 150)
+          }
+        } else if (ev.event === 'node_progress') {
+          const total = ev.total_rows || 1
+          const read = ev.rows_read || 0
+          setNodeFrac(Math.min(0.999, read / total))
+          setSourceProgress({
+            nodeId: ev.node_id,
+            rowsRead: read,
+            totalRows: ev.total_rows || 0,
+          })
         } else if (ev.event === 'node_done') {
           const dn = nodes.find((n) => n.id === ev.node_id)
           if (startTimer.current)
@@ -1191,11 +1243,13 @@ function Editor({ pid, wid, onBack }) {
           else recomputed++
           // this block is now up to date — remember the config it ran with
           if (dn) setRunStamps((s) => ({ ...s, [ev.node_id]: nodeDataSig(dn.data) }))
+          setSourceProgress((sp) => (sp?.nodeId === ev.node_id ? null : sp))
           setProgress((p) => ({ ...p, done: p.done + 1, currentId: null }))
         } else if (ev.event === 'done') {
           clearStartTimer()
           stopAnim()
           setNodeFrac(0)
+          setSourceProgress(null)
           setBusy(false)
           setProgress((p) => ({ ...p, active: false, currentId: null, done: p.total }))
           api.listFiles(pid).then(setFiles)
@@ -1207,6 +1261,7 @@ function Editor({ pid, wid, onBack }) {
           clearStartTimer()
           stopAnim()
           setNodeFrac(0)
+          setSourceProgress(null)
           setBusy(false)
           setProgress((p) => ({ ...p, active: false, currentId: null }))
           if (ev.node_id)
@@ -1223,6 +1278,7 @@ function Editor({ pid, wid, onBack }) {
           clearStartTimer()
           stopAnim()
           setNodeFrac(0)
+          setSourceProgress(null)
           setBusy(false)
           setProgress((p) => ({ ...p, active: false, currentId: null }))
           setBanner({ type: 'info', text: 'Run interrompu.' })
@@ -1283,22 +1339,26 @@ function Editor({ pid, wid, onBack }) {
     () => ({
       status,
       running: progress.active ? progress.currentId : null,
+      sourceProgress,
       onPreview: (id, tab) => setPreviewNode({ id, tab }),
       onRunNode: (id, force) => doRun(id, force),
       onDeleteEdge,
       onNodeDataChange: updateNodeData,
       confirmDelete: askConfirm,
+      onOpenExportFolder: openWorkflowExportFolder,
     }),
     [
       status,
       progress.active,
       progress.currentId,
+      sourceProgress,
       nodes,
       edges,
       wfName,
       onDeleteEdge,
       updateNodeData,
       askConfirm,
+      openWorkflowExportFolder,
     ],
   )
 
@@ -1359,17 +1419,20 @@ function Editor({ pid, wid, onBack }) {
         const active = progress.currentId === n.id
         const dirty = dirtyMap[n.id]
         const issues = preflight[n.id]
-        if (!active && !dirty && !issues) return n
+        const stt = status[n.id]
+        const lost = stt?.ran ? stt.unrouted ?? 0 : 0
+        if (!active && !dirty && !issues && !lost) return n
         const newData = { ...n.data }
         if (dirty) newData.__dirty = true
         if (issues) newData.__preflight = issues
+        if (lost > 0) newData.__lost = lost
         return {
           ...n,
           className: active ? 'rf-active' : undefined,
           data: newData,
         }
       }),
-    [nodes, progress.currentId, dirtyMap, preflight],
+    [nodes, progress.currentId, dirtyMap, preflight, status],
   )
 
   // colour links by the data type leaving the source port; make them deletable
@@ -1448,7 +1511,7 @@ function Editor({ pid, wid, onBack }) {
             </span>
             <button
               className="ghost icon-only"
-              onClick={openExportsFolder}
+              onClick={openWorkflowExportFolder}
               title="Ouvrir le dossier des exports"
             >
               <Icon name="folder" />
@@ -1491,17 +1554,18 @@ function Editor({ pid, wid, onBack }) {
                   Exécuter le workflow
                 </button>
               )}
-              <button
-                className="primary run-caret"
-                disabled={busy}
-                title="Options d'exécution"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setRunMenu((v) => !v)
-                }}
-              >
-                <Icon name="down" size={12} />
-              </button>
+              {!busy && (
+                <button
+                  className="primary run-caret"
+                  title="Options d'exécution"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setRunMenu((v) => !v)
+                  }}
+                >
+                  <Icon name="down" size={12} />
+                </button>
+              )}
               {runMenu && (
                 <div className="ctx-menu run-menu" onClick={(e) => e.stopPropagation()}>
                   <div className="run-menu-row">
@@ -1541,7 +1605,12 @@ function Editor({ pid, wid, onBack }) {
         <div className="editor-main">
           {/* overlays float above the canvas so nothing shifts when they appear */}
           <div className="overlays">
-            <ProgressBar progress={progress} frac={nodeFrac} onGo={goToNode} />
+            <ProgressBar
+              progress={progress}
+              frac={nodeFrac}
+              sourceProgress={sourceProgress}
+              onGo={goToNode}
+            />
             {banner && (
               <div className={`banner ${banner.type}`}>
                 {banner.text}
@@ -1606,26 +1675,48 @@ function Editor({ pid, wid, onBack }) {
             {/* E.9 — légende discrète des deux signaux qui se ressemblent (point
                 jaune « modifié depuis le dernier run » vs badge « non exécuté »).
                 Au survol seul, ne mange pas de pixels en permanence. */}
-            <details className="canvas-legend">
-              <summary aria-label="Légende des indicateurs de bloc">Légende</summary>
-              <ul>
-                <li>
-                  <span className="legend-dot legend-dot-dirty" aria-hidden="true" />
-                  <span>
-                    <b>Périmé</b> — la config a changé depuis le dernier run, le bloc sera
-                    recalculé.
-                  </span>
-                </li>
-                <li>
-                  <span className="legend-badge" aria-hidden="true">
-                    non exécuté
-                  </span>
-                  <span>
-                    <b>Jamais exécuté</b> — aucun résultat n'a été matérialisé pour ce bloc.
-                  </span>
-                </li>
-              </ul>
-            </details>
+            <div
+              className={`canvas-legend ${legendOpen ? 'open' : ''}`}
+              role="button"
+              tabIndex={0}
+              aria-expanded={legendOpen}
+              aria-label={legendOpen ? 'Replier la légende' : 'Déplier la légende'}
+              onClick={() => setLegendOpen((v) => !v)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  setLegendOpen((v) => !v)
+                }
+              }}
+            >
+              <span className="legend-summary">Légende</span>
+              {legendOpen && (
+                <ul>
+                  <li>
+                    <span className="legend-dot legend-dot-dirty" aria-hidden="true" />
+                    <span>
+                      <b>Périmé</b> — la config a changé depuis le dernier run, le bloc sera
+                      recalculé.
+                    </span>
+                  </li>
+                  <li>
+                    <span className="legend-dot legend-dot-loss" aria-hidden="true" />
+                    <span>
+                      <b>Données perdues</b> — des lignes ne correspondent à aucune sortie (non
+                      redistribuées).
+                    </span>
+                  </li>
+                  <li>
+                    <span className="legend-badge" aria-hidden="true">
+                      non exécuté
+                    </span>
+                    <span>
+                      <b>Jamais exécuté</b> — aucun résultat n'a été matérialisé pour ce bloc.
+                    </span>
+                  </li>
+                </ul>
+              )}
+            </div>
             {nodes.length === 0 && (
               <div className="canvas-hint">
                 Ajoutez un bloc <b>📥 Source</b> pour commencer, puis reliez-le à un bloc{' '}
@@ -1801,13 +1892,17 @@ function fmtElapsed(ms) {
   return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s`
 }
 
-function ProgressBar({ progress, frac = 0, onGo }) {
+function ProgressBar({ progress, frac = 0, sourceProgress = null, onGo }) {
   if (!progress.active && progress.done === 0) return null
   const within = progress.active ? Math.min(0.999, frac) : 0
   const pct = progress.total
     ? Math.min(100, Math.round(((progress.done + within) / progress.total) * 100))
     : 0
   const elapsed = progress.startedAt ? Date.now() - progress.startedAt : 0
+  const srcRows =
+    sourceProgress?.nodeId === progress.currentId && sourceProgress.totalRows > 0
+      ? sourceProgress
+      : null
   return (
     <div className={`progress-wrap ${progress.active ? 'on' : 'off'}`}>
       <div className={`progress-track ${progress.active ? 'busy' : ''}`}>
@@ -1841,6 +1936,13 @@ function ProgressBar({ progress, frac = 0, onGo }) {
               <span className="pmeta">
                 {' '}
                 · {progress.done}/{progress.total} · {pct}%
+              </span>
+            )}
+            {srcRows && (
+              <span className="pmeta">
+                {' '}
+                · {srcRows.rowsRead.toLocaleString('fr-FR')}/
+                {srcRows.totalRows.toLocaleString('fr-FR')} lignes
               </span>
             )}
             {elapsed > 1500 && <span className="pmeta"> · {fmtElapsed(elapsed)}</span>}
