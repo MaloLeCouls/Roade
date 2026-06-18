@@ -131,20 +131,26 @@ export default function DataPreview({
         ) : (
           <>
             <div className="modal-bar">
-              <div className="tabs">
+              <div className="tabs" role="tablist" aria-label="Vues de l'aperçu">
                 <button
+                  role="tab"
+                  aria-selected={tab === 'rows'}
                   className={tab === 'rows' ? 'tab on' : 'tab'}
                   onClick={() => setTab('rows')}
                 >
                   Données
                 </button>
                 <button
+                  role="tab"
+                  aria-selected={tab === 'cols'}
                   className={tab === 'cols' ? 'tab on' : 'tab'}
                   onClick={() => setTab('cols')}
                 >
                   Colonnes ({data.columns.length})
                 </button>
                 <button
+                  role="tab"
+                  aria-selected={tab === 'stats'}
                   className={tab === 'stats' ? 'tab on' : 'tab'}
                   onClick={() => setTab('stats')}
                 >
@@ -152,6 +158,8 @@ export default function DataPreview({
                 </button>
                 {data.clean_report && (
                   <button
+                    role="tab"
+                    aria-selected={tab === 'clean'}
                     className={tab === 'clean' ? 'tab on' : 'tab'}
                     onClick={() => setTab('clean')}
                   >

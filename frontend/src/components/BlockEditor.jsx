@@ -167,11 +167,21 @@ function ValidateView({ pid, wid, node, status, onChange, onRun, onPreview }) {
   const [handle, setHandle] = useState(null)
   return (
     <div className="be-tabwrap">
-      <div className="be-tabbar">
-        <button className={tab === 'settings' ? 'on' : ''} onClick={() => setTab('settings')}>
+      <div className="be-tabbar" role="tablist" aria-label="Vues du bloc Validation">
+        <button
+          role="tab"
+          aria-selected={tab === 'settings'}
+          className={tab === 'settings' ? 'on' : ''}
+          onClick={() => setTab('settings')}
+        >
           Sorties
         </button>
-        <button className={tab === 'preview' ? 'on' : ''} onClick={() => setTab('preview')}>
+        <button
+          role="tab"
+          aria-selected={tab === 'preview'}
+          className={tab === 'preview' ? 'on' : ''}
+          onClick={() => setTab('preview')}
+        >
           <Icon name="eye" size={13} /> Visualisation
         </button>
       </div>

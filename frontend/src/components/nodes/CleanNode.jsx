@@ -56,6 +56,7 @@ export default function CleanNode({ id, data, selected }) {
               onRunNode(id)
             }}
             title="Exécuter jusqu'ici"
+            aria-label="Exécuter jusqu'ici"
           >
             <Icon name="play" />
           </button>
@@ -67,6 +68,7 @@ export default function CleanNode({ id, data, selected }) {
               onPreview(id, 'clean')
             }}
             title="Voir le rapport de nettoyage"
+            aria-label="Voir le rapport de nettoyage"
           >
             <Icon name="list" />
           </button>
@@ -78,6 +80,7 @@ export default function CleanNode({ id, data, selected }) {
               onPreview(id)
             }}
             title="Aperçu des données"
+            aria-label="Aperçu des données"
           >
             <Icon name="eye" />
           </button>

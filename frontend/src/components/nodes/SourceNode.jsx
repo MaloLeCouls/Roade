@@ -81,6 +81,7 @@ export function NodeFooter({ st, running, runningLabel, onPreview, onRun, onRelo
             onRun()
           }}
           title="Exécuter jusqu'ici"
+          aria-label="Exécuter jusqu'ici"
         >
           <Icon name="play" />
         </button>
@@ -92,6 +93,7 @@ export function NodeFooter({ st, running, runningLabel, onPreview, onRun, onRelo
               onReload()
             }}
             title="Recharger le fichier (ignorer le cache)"
+            aria-label="Recharger le fichier (ignorer le cache)"
           >
             <Icon name="refresh" />
           </button>
@@ -104,6 +106,7 @@ export function NodeFooter({ st, running, runningLabel, onPreview, onRun, onRelo
             onPreview()
           }}
           title="Aperçu des données"
+          aria-label="Aperçu des données"
         >
           <Icon name="eye" />
         </button>

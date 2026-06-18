@@ -67,6 +67,7 @@ export default function ExportNode({ id, data, selected }) {
                 onOpenExportFolder?.()
               }}
               title="Ouvrir le dossier contenant le fichier exporté"
+              aria-label="Ouvrir le dossier contenant le fichier exporté"
             >
               <Icon name="folder" />
             </button>
@@ -78,6 +79,7 @@ export default function ExportNode({ id, data, selected }) {
               onRunNode(id)
             }}
             title="Générer l'export"
+            aria-label="Générer l'export"
           >
             <Icon name="play" />
           </button>

@@ -1513,6 +1513,7 @@ function Editor({ pid, wid, onBack }) {
               className="ghost icon-only"
               onClick={openWorkflowExportFolder}
               title="Ouvrir le dossier des exports"
+              aria-label="Ouvrir le dossier des exports"
             >
               <Icon name="folder" />
             </button>
@@ -1558,6 +1559,9 @@ function Editor({ pid, wid, onBack }) {
                 <button
                   className="primary run-caret"
                   title="Options d'exécution"
+                  aria-label="Options d'exécution"
+                  aria-haspopup="menu"
+                  aria-expanded={runMenu}
                   onClick={(e) => {
                     e.stopPropagation()
                     setRunMenu((v) => !v)
@@ -1567,9 +1571,16 @@ function Editor({ pid, wid, onBack }) {
                 </button>
               )}
               {runMenu && (
-                <div className="ctx-menu run-menu" onClick={(e) => e.stopPropagation()}>
+                <div
+                  className="ctx-menu run-menu"
+                  role="menu"
+                  aria-label="Options d'exécution"
+                  tabIndex={-1}
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <div className="run-menu-row">
                     <button
+                      role="menuitem"
                       onClick={() => {
                         setRunMenu(false)
                         doRun(null, true)
@@ -1584,6 +1595,7 @@ function Editor({ pid, wid, onBack }) {
                   <div className="run-menu-sep" />
                   <div className="run-menu-row">
                     <button
+                      role="menuitem"
                       onClick={() => {
                         setRunMenu(false)
                         doRun(null, true, true)
@@ -1612,7 +1624,11 @@ function Editor({ pid, wid, onBack }) {
               onGo={goToNode}
             />
             {banner && (
-              <div className={`banner ${banner.type}`}>
+              <div
+                className={`banner ${banner.type}`}
+                role={banner.type === 'error' ? 'alert' : 'status'}
+                aria-live={banner.type === 'error' ? 'assertive' : 'polite'}
+              >
                 {banner.text}
                 <button className="ghost small" onClick={() => setBanner(null)}>
                   <Icon name="x" />
@@ -1790,25 +1806,32 @@ function Editor({ pid, wid, onBack }) {
             return (
               <div
                 className="ctx-menu"
+                role="menu"
+                aria-label="Actions sur le bloc"
+                tabIndex={-1}
                 style={{ left: menu.x, top: menu.y }}
                 onClick={(e) => e.stopPropagation()}
               >
                 {!bulk && mn?.type === 'frame' && (
                   <div className="ctx-color">
                     <span className="ctx-color-lbl">Couleur du cadre</span>
-                    <div className="ctx-swatches">
+                    <div className="ctx-swatches" role="radiogroup" aria-label="Couleur du cadre">
                       {FRAME_COLORS.map((c) => (
                         <button
                           key={c}
                           className={`ctx-swatch ${(mn.data.color || '#5b6bb0') === c ? 'on' : ''}`}
                           style={{ background: c }}
                           title={c}
+                          aria-label={`Couleur ${c}`}
+                          role="radio"
+                          aria-checked={(mn.data.color || '#5b6bb0') === c}
                           onClick={() => updateNodeData(menu.id, { color: c })}
                         />
                       ))}
                       <label className="ctx-swatch custom" title="Couleur personnalisée">
                         <input
                           type="color"
+                          aria-label="Couleur personnalisée"
                           value={mn.data.color || '#5b6bb0'}
                           onChange={(e) => updateNodeData(menu.id, { color: e.target.value })}
                         />
@@ -1819,6 +1842,7 @@ function Editor({ pid, wid, onBack }) {
                 {bulk ? (
                   <button
                     className="danger"
+                    role="menuitem"
                     onClick={() => {
                       deleteSelection()
                       setMenu(null)
@@ -1830,6 +1854,7 @@ function Editor({ pid, wid, onBack }) {
                   <>
                     {mn?.type === 'stop' && mn.data?.attachedTo && (
                       <button
+                        role="menuitem"
                         onClick={() => {
                           detachStop(menu.id)
                           setMenu(null)
@@ -1840,6 +1865,7 @@ function Editor({ pid, wid, onBack }) {
                     )}
                     {mn?.type !== 'stop' && (
                       <button
+                        role="menuitem"
                         onClick={() => {
                           duplicateNode(menu.id)
                           setMenu(null)
@@ -1850,6 +1876,7 @@ function Editor({ pid, wid, onBack }) {
                     )}
                     <button
                       className="danger"
+                      role="menuitem"
                       onClick={() => {
                         deleteNode(menu.id)
                         setMenu(null)
@@ -1904,8 +1931,25 @@ function ProgressBar({ progress, frac = 0, sourceProgress = null, onGo }) {
       ? sourceProgress
       : null
   return (
-    <div className={`progress-wrap ${progress.active ? 'on' : 'off'}`}>
-      <div className={`progress-track ${progress.active ? 'busy' : ''}`}>
+    <div
+      className={`progress-wrap ${progress.active ? 'on' : 'off'}`}
+      role="status"
+      aria-live="polite"
+      aria-atomic="false"
+      aria-busy={progress.active}
+    >
+      <div
+        className={`progress-track ${progress.active ? 'busy' : ''}`}
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={pct}
+        aria-label={
+          progress.active
+            ? `Exécution${progress.currentLabel ? ` : ${progress.currentLabel}` : ''}`
+            : 'Exécution terminée'
+        }
+      >
         <div className="progress-fill" style={{ width: `${pct}%` }} />
       </div>
       <div className="progress-text">

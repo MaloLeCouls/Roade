@@ -71,6 +71,7 @@ export default function DedupNode({ id, data, selected }) {
               onRunNode(id)
             }}
             title="Exécuter jusqu'ici"
+            aria-label="Exécuter jusqu'ici"
           >
             <Icon name="play" />
           </button>
@@ -82,6 +83,7 @@ export default function DedupNode({ id, data, selected }) {
               onPreview(id)
             }}
             title="Aperçu des sorties"
+            aria-label="Aperçu des sorties"
           >
             <Icon name="eye" />
           </button>
