@@ -184,4 +184,12 @@ export const api = {
 
   // E.2 — annule un run en cours côté serveur (le runner check entre 2 blocs).
   cancelRun: (pid, wid) => sendJSON(`/projects/${enc(pid)}/workflows/${enc(wid)}/cancel`, 'POST'),
+
+  // ---- Inventaire (« backpack ») — groupes de blocs réutilisables ----
+  listBackpack: (pid) => getJSON(`/projects/${enc(pid)}/backpack`),
+  addBackpack: (pid, item) => sendJSON(`/projects/${enc(pid)}/backpack`, 'POST', item),
+  renameBackpack: (pid, iid, name) =>
+    sendJSON(`/projects/${enc(pid)}/backpack/${enc(iid)}`, 'PATCH', { name }),
+  deleteBackpack: (pid, iid) =>
+    req(`/projects/${enc(pid)}/backpack/${enc(iid)}`, { method: 'DELETE' }),
 }

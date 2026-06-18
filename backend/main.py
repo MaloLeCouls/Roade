@@ -86,6 +86,20 @@ class ValidateTestBody(BaseModel):
     samples: list[Any] = Field(default_factory=list)
 
 
+class BackpackAddBody(BaseModel):
+    """POST /api/projects/{pid}/backpack — créer un item d'inventaire."""
+
+    name: str = Field(default="", max_length=120)
+    nodes: list[dict[str, Any]] = Field(default_factory=list)
+    edges: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class BackpackPatchBody(BaseModel):
+    """PATCH /api/projects/{pid}/backpack/{iid} — renommer."""
+
+    name: str = Field(..., min_length=1, max_length=120)
+
+
 class FreeJsonBody(BaseModel):
     """Bodies très libres (route-preview / split-scan) : on accepte un objet,
     on refuse tout sauf ça (liste, str, null) — c'est déjà mieux que rien."""
@@ -128,6 +142,55 @@ def get_project(pid: str):
 def delete_project(pid: str):
     storage.delete_project(pid)
     return {"ok": True}
+
+
+# --------------------------------------------------------------------------- #
+# Inventaire (« backpack » — groupes de blocs réutilisables, échelle projet)
+# --------------------------------------------------------------------------- #
+@app.get("/api/projects/{pid}/backpack")
+def list_backpack(pid: str):
+    if not storage.get_project(pid):
+        raise HTTPException(404, "Projet introuvable")
+    return storage.read_backpack(pid)
+
+
+@app.post("/api/projects/{pid}/backpack")
+def add_backpack(pid: str, payload: BackpackAddBody):
+    if not storage.get_project(pid):
+        raise HTTPException(404, "Projet introuvable")
+    if not payload.nodes:
+        raise HTTPException(400, "Sélection vide — au moins un bloc requis")
+    name = payload.name.strip() or _auto_name_backpack(payload.nodes)
+    return storage.add_backpack_item(
+        pid, {"name": name, "nodes": payload.nodes, "edges": payload.edges}
+    )
+
+
+@app.patch("/api/projects/{pid}/backpack/{iid}")
+def rename_backpack(pid: str, iid: str, payload: BackpackPatchBody):
+    updated = storage.update_backpack_item(pid, iid, {"name": payload.name.strip()})
+    if not updated:
+        raise HTTPException(404, "Item introuvable")
+    return updated
+
+
+@app.delete("/api/projects/{pid}/backpack/{iid}")
+def delete_backpack(pid: str, iid: str):
+    if not storage.delete_backpack_item(pid, iid):
+        raise HTTPException(404, "Item introuvable")
+    return {"ok": True}
+
+
+def _auto_name_backpack(nodes: list[dict[str, Any]]) -> str:
+    """Composé à partir des labels (data.label) ou types ; tronqué à 60 car."""
+    parts = []
+    for n in nodes:
+        d = n.get("data") or {}
+        parts.append(str(d.get("label") or n.get("type") or "Bloc"))
+    name = " + ".join(parts[:3])
+    if len(parts) > 3:
+        name += f" + {len(parts) - 3}"
+    return name[:60] if name else "Sans titre"
 
 
 # --------------------------------------------------------------------------- #

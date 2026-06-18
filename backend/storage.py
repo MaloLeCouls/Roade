@@ -254,6 +254,71 @@ def list_runs(project_id: str, workflow_id: str, limit: int = 50) -> list[dict]:
     return out
 
 
+# --------------------------------------------------------------------------- #
+# Inventaire ("backpack") — groupes de blocs réutilisables (échelle projet)
+# --------------------------------------------------------------------------- #
+# Inspiré du backpack de MIT App Inventor : on enregistre des sous-graphes
+# (n nodes + leurs arêtes internes) qu'on peut redéposer dans n'importe quel
+# workflow du même projet. Stockage : un seul JSON par projet — pas besoin
+# d'un fichier par item, le volume est très petit.
+
+
+def backpack_path(project_id: str) -> Path:
+    return project_dir(project_id) / "backpack.json"
+
+
+def read_backpack(project_id: str) -> list[dict]:
+    p = backpack_path(project_id)
+    if not p.exists():
+        return []
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        items = data.get("items") if isinstance(data, dict) else data
+        return items if isinstance(items, list) else []
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def write_backpack(project_id: str, items: list[dict]) -> None:
+    p = backpack_path(project_id)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(
+        json.dumps({"items": items}, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def add_backpack_item(project_id: str, item: dict) -> dict:
+    items = read_backpack(project_id)
+    item = dict(item)
+    item.setdefault("id", uuid.uuid4().hex[:8])
+    item.setdefault("created_at", _now())
+    items.append(item)
+    write_backpack(project_id, items)
+    return item
+
+
+def delete_backpack_item(project_id: str, item_id: str) -> bool:
+    items = read_backpack(project_id)
+    kept = [i for i in items if i.get("id") != item_id]
+    if len(kept) == len(items):
+        return False
+    write_backpack(project_id, kept)
+    return True
+
+
+def update_backpack_item(project_id: str, item_id: str, patch: dict) -> dict | None:
+    items = read_backpack(project_id)
+    for it in items:
+        if it.get("id") == item_id:
+            # On accepte uniquement le renommage par le client — les nodes/edges
+            # restent figés pour qu'éditer le nom n'efface pas le sous-graphe.
+            if "name" in patch:
+                it["name"] = str(patch["name"])[:120]
+            write_backpack(project_id, items)
+            return it
+    return None
+
+
 def prune_node_outputs(project_id: str, workflow_id: str, node_id: str, keep_handles) -> list[str]:
     # Delete any .parquet/.meta.json on disk for this node whose handle isn't
     # in `keep_handles`. Called right after a node re-materializes so a config

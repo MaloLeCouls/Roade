@@ -4378,6 +4378,137 @@ table.dt th.idx {
   gap: var(--s-2);
 }
 
+/* ---- Backpack / Inventaire (App Inventor-style) ------------------------- */
+/* Panneau fixé à droite du canevas. Toggle = bouton vertical étiqueté avec le
+   compteur ; corps = liste des items draggables vers la canevas. */
+.backpack {
+  position: absolute;
+  top: var(--s-3);
+  right: var(--s-3);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  z-index: 5;
+  pointer-events: none; /* children re-enable */
+}
+.backpack.drop-active {
+  outline: 2px dashed var(--accent);
+  outline-offset: 4px;
+  border-radius: var(--radius-md);
+}
+.backpack-toggle {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: var(--s-2) var(--s-2);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  color: var(--ink);
+  font-weight: var(--fw-semibold);
+}
+.backpack-toggle:hover {
+  background: var(--surface-1);
+}
+.backpack-count {
+  min-width: 18px;
+  text-align: center;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 9999px;
+  padding: 0 var(--s-2);
+  font-size: var(--fs-xs);
+}
+.backpack-body {
+  pointer-events: auto;
+  width: 280px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+  max-height: calc(100vh - 240px);
+  overflow: auto;
+}
+.backpack-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--s-2) var(--s-3);
+  border-bottom: 1px solid var(--line-soft);
+}
+.backpack-title {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-variant: small-caps;
+  color: var(--ink-soft);
+}
+.backpack-empty {
+  margin: 0;
+  padding: var(--s-3);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+.backpack-list {
+  list-style: none;
+  margin: 0;
+  padding: var(--s-1);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.backpack-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  padding: var(--s-1);
+  border-radius: var(--radius-sm);
+  cursor: grab;
+}
+.backpack-item:hover {
+  background: var(--surface-1);
+}
+.backpack-item:active {
+  cursor: grabbing;
+}
+.backpack-name {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  padding: var(--s-1) var(--s-2);
+  border-radius: var(--radius-sm);
+}
+.backpack-name:hover {
+  background: var(--surface-2);
+}
+.backpack-name-text {
+  font-size: var(--fs-sm);
+  color: var(--ink);
+}
+.backpack-meta {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.backpack-name-input {
+  flex: 1;
+  font: inherit;
+  padding: var(--s-1) var(--s-2);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+}
+.backpack-del {
+  flex: 0 0 auto;
+}
+
 /* ---- ConnectDialog (E.7, alternative clavier au drag) ------------------- */
 .connect-form {
   display: flex;

@@ -211,3 +211,77 @@ def test_api_runs_history(project_with_csv_workflow):
     assert r_latest["status"] == "ok"
     assert r_latest["ran"] == []
     assert [e["node_id"] for e in r_latest["cached"]] == ["s"]
+
+
+def test_api_backpack_crud():
+    """Inventaire projet : POST → GET → PATCH (rename) → DELETE.
+
+    Le backpack est à l'échelle du projet (pas du workflow), persistant à
+    travers les sessions. Les nodes/edges figurent tels quels au stockage et
+    sont restitués au front sans transformation."""
+    pid = client.post("/api/projects", json={"name": "BackpackTest"}).json()["id"]
+
+    # Démarre vide.
+    assert client.get(f"/api/projects/{pid}/backpack").json() == []
+
+    # Ajout d'un groupe (2 nodes + 1 edge interne).
+    payload = {
+        "name": "",  # vide → auto-nommage côté backend
+        "nodes": [
+            {
+                "id": "s1",
+                "type": "source",
+                "position": {"x": 0, "y": 0},
+                "data": {"label": "Ma Source"},
+            },
+            {
+                "id": "c1",
+                "type": "clean",
+                "position": {"x": 200, "y": 0},
+                "data": {"label": "Nettoyage"},
+            },
+        ],
+        "edges": [
+            {"id": "e", "source": "s1", "target": "c1", "sourceHandle": "out", "targetHandle": "in"}
+        ],
+    }
+    r = client.post(f"/api/projects/{pid}/backpack", json=payload)
+    assert r.status_code == 200, r.text
+    item = r.json()
+    assert item["id"]
+    assert item["name"] == "Ma Source + Nettoyage"  # auto-nommé
+    assert len(item["nodes"]) == 2
+    assert len(item["edges"]) == 1
+
+    # La sélection vide est refusée.
+    bad = client.post(f"/api/projects/{pid}/backpack", json={"nodes": [], "edges": []})
+    assert bad.status_code == 400
+
+    # Le GET retourne maintenant l'item.
+    listed = client.get(f"/api/projects/{pid}/backpack").json()
+    assert len(listed) == 1 and listed[0]["id"] == item["id"]
+
+    # PATCH : renommage.
+    r = client.patch(
+        f"/api/projects/{pid}/backpack/{item['id']}", json={"name": "Pipeline d'import"}
+    )
+    assert r.status_code == 200
+    assert r.json()["name"] == "Pipeline d'import"
+    # PATCH sur ID inconnu → 404
+    assert client.patch(f"/api/projects/{pid}/backpack/zzz", json={"name": "x"}).status_code == 404
+
+    # DELETE.
+    r = client.delete(f"/api/projects/{pid}/backpack/{item['id']}")
+    assert r.status_code == 200
+    assert client.get(f"/api/projects/{pid}/backpack").json() == []
+    assert client.delete(f"/api/projects/{pid}/backpack/{item['id']}").status_code == 404
+
+
+def test_api_backpack_project_404():
+    """Un projet inexistant renvoie 404 sur list et add (cohérent avec le reste)."""
+    assert client.get("/api/projects/nope/backpack").status_code == 404
+    r = client.post(
+        "/api/projects/nope/backpack",
+        json={"nodes": [{"id": "x", "type": "source", "position": {}, "data": {}}], "edges": []},
+    )
+    assert r.status_code == 404

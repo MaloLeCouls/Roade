@@ -19,6 +19,7 @@ import { hasBlockingIssues, preflightWorkflow } from '../lib/preflight'
 import { notify } from '../toast'
 import { exportSubdir } from '../lib/paths'
 import { EditorContext } from './editorContext'
+import Backpack, { BACKPACK_MIME, isOverBackpack, notifyStored } from './Backpack'
 import CommandPalette from './ui/CommandPalette'
 import { useConfirm } from './ui/ConfirmDialog'
 import ConnectDialog from './ui/ConnectDialog'
@@ -414,6 +415,9 @@ function Editor({ pid, wid, onBack }) {
   const [selectMode, setSelectMode] = useState(false) // box-selection mode (select many blocks → bulk delete)
   const [legendOpen, setLegendOpen] = useState(false) // canvas legend expanded?
   const [connectFor, setConnectFor] = useState(null) // sourceNodeId pour ConnectDialog (E.7)
+  const [backpack, setBackpack] = useState([]) // inventaire projet (App Inventor-style)
+  const [backpackOpen, setBackpackOpen] = useState(false)
+  const [selectionDragActive, setSelectionDragActive] = useState(false)
   const [previewPrefs, setPreviewPrefs] = useState({ tab: 'rows', column: null })
   const [banner, setBanner] = useState(null)
   const [saveState, setSaveState] = useState('saved')
@@ -423,6 +427,10 @@ function Editor({ pid, wid, onBack }) {
   const startTimer = useRef(null) // deferred "running" indication
   const canvasRef = useRef(null)
   const groupDrag = useRef(null) // snapshot while dragging a frame
+  // Backpack : positions snapshot pour pouvoir restaurer un déplacement quand
+  // l'utilisateur drague la sélection ON le panneau (geste = « ranger », pas
+  // « déplacer »).
+  const dragStartPositions = useRef(null)
   const rf = useReactFlow()
   const updateNodeInternals = useUpdateNodeInternals()
 
@@ -608,6 +616,200 @@ function Editor({ pid, wid, onBack }) {
     }
     setConnectFor(sel.id)
   }, [nodes])
+
+  // ---------------------------------------------------------------------- //
+  // Inventaire (backpack) — App Inventor-style                             //
+  // ---------------------------------------------------------------------- //
+  // Charge l'inventaire à l'ouverture du projet ; ré-update à chaque
+  // ajout/suppression/renommage en relisant tout (l'API renvoie la liste
+  // entière, pas de fusion locale à gérer).
+  const reloadBackpack = useCallback(() => {
+    api.listBackpack(pid).then(setBackpack).catch(() => setBackpack([]))
+  }, [pid])
+  useEffect(() => {
+    reloadBackpack()
+  }, [reloadBackpack])
+
+  // Construit la charge utile à envoyer au backend : on copie les data en
+  // profondeur (pour ne pas voir le bloc stocké muter au gré du workflow) et on
+  // ne garde que les arêtes *internes* à la sélection — celles vers l'extérieur
+  // ne pourront pas être reconstruites dans la cible.
+  const buildBackpackPayload = useCallback(
+    (nodeIds, name = '') => {
+      const idSet = new Set(nodeIds)
+      const picked = nodes.filter((n) => idSet.has(n.id))
+      // Le format on-disk vit en clair : on supprime les flags React Flow
+      // (selected, dragging, measured, parentId quand il pointe hors sélection).
+      const cleanNodes = picked.map((n) => ({
+        id: n.id,
+        type: n.type,
+        position: { x: n.position?.x || 0, y: n.position?.y || 0 },
+        data: JSON.parse(JSON.stringify(n.data || {})),
+      }))
+      const cleanEdges = edges
+        .filter((e) => idSet.has(e.source) && idSet.has(e.target))
+        .map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          sourceHandle: e.sourceHandle || null,
+          targetHandle: e.targetHandle || null,
+        }))
+      return { name, nodes: cleanNodes, edges: cleanEdges }
+    },
+    [nodes, edges],
+  )
+
+  const storeInBackpack = useCallback(
+    (nodeIds, name = '') => {
+      if (!nodeIds.length) {
+        notify('Sélectionnez au moins un bloc à ranger.', 'warn')
+        return
+      }
+      api
+        .addBackpack(pid, buildBackpackPayload(nodeIds, name))
+        .then((item) => {
+          notifyStored(item.name)
+          setBackpackOpen(true)
+          reloadBackpack()
+        })
+        .catch((e) => notify(`Échec de l'ajout : ${e.message || e}`, 'error'))
+    },
+    [pid, buildBackpackPayload, reloadBackpack],
+  )
+
+  // Pose une copie du contenu d'un item à `position` (en coordonnées flow). On
+  // génère systématiquement de nouveaux IDs de nœud — sinon collisions avec les
+  // blocs déjà présents — et on remappe les arêtes pour pointer vers les
+  // nouveaux IDs. Le placement préserve la mise en page relative du groupe :
+  // on translate l'ensemble pour que le coin haut-gauche du bounding box
+  // tombe sur `position`.
+  const pasteBackpackItem = useCallback(
+    (itemId, position) => {
+      const item = backpack.find((b) => b.id === itemId)
+      if (!item || !item.nodes?.length) return
+      const minX = Math.min(...item.nodes.map((n) => n.position?.x || 0))
+      const minY = Math.min(...item.nodes.map((n) => n.position?.y || 0))
+      const idMap = {}
+      for (const n of item.nodes) idMap[n.id] = uid()
+      const newNodes = item.nodes.map((n) => ({
+        id: idMap[n.id],
+        type: n.type,
+        position: {
+          x: (n.position?.x || 0) - minX + position.x,
+          y: (n.position?.y || 0) - minY + position.y,
+        },
+        data: JSON.parse(JSON.stringify(n.data || {})),
+        selected: true,
+      }))
+      const newEdges = (item.edges || []).map((e) => ({
+        id: `bp-${uid()}`,
+        source: idMap[e.source],
+        target: idMap[e.target],
+        sourceHandle: e.sourceHandle || undefined,
+        targetHandle: e.targetHandle || undefined,
+        animated: true,
+      }))
+      setNodes((nds) => [...nds.map((n) => ({ ...n, selected: false })), ...newNodes])
+      setEdges((eds) => [...eds, ...newEdges])
+      notify(`« ${item.name} » inséré.`, 'ok')
+    },
+    [backpack, setNodes, setEdges],
+  )
+
+  // Drag d'un item depuis le panneau : on encode juste l'ID dans le
+  // dataTransfer ; tout l'état réel est dans `backpack` côté front.
+  const onBackpackItemDragStart = useCallback((iid, ev) => {
+    ev.dataTransfer.setData(BACKPACK_MIME, iid)
+    ev.dataTransfer.effectAllowed = 'copy'
+  }, [])
+
+  // Drop sur le canevas : on lit l'ID, on convertit le pointeur en coords flow.
+  const onCanvasDrop = useCallback(
+    (ev) => {
+      const iid = ev.dataTransfer?.getData(BACKPACK_MIME)
+      if (!iid) return
+      ev.preventDefault()
+      const pos =
+        rf?.screenToFlowPosition?.({ x: ev.clientX, y: ev.clientY }) || { x: 0, y: 0 }
+      pasteBackpackItem(iid, pos)
+    },
+    [rf, pasteBackpackItem],
+  )
+  const onCanvasDragOver = useCallback((ev) => {
+    if (ev.dataTransfer?.types?.includes(BACKPACK_MIME)) {
+      ev.preventDefault()
+      ev.dataTransfer.dropEffect = 'copy'
+    }
+  }, [])
+
+  // Insertion par clic sur un item (fallback non-drag) : au centre du viewport.
+  const insertBackpackAtCenter = useCallback(
+    (iid) => {
+      const rect = canvasRef.current?.getBoundingClientRect()
+      const center =
+        rect && rf?.screenToFlowPosition
+          ? rf.screenToFlowPosition({
+              x: rect.left + rect.width / 2,
+              y: rect.top + rect.height / 2,
+            })
+          : { x: 200, y: 200 }
+      pasteBackpackItem(iid, center)
+    },
+    [rf, pasteBackpackItem],
+  )
+
+  const renameBackpackItem = useCallback(
+    (iid, name) => {
+      api
+        .renameBackpack(pid, iid, name)
+        .then(reloadBackpack)
+        .catch((e) => notify(`Renommage refusé : ${e.message || e}`, 'error'))
+    },
+    [pid, reloadBackpack],
+  )
+  const deleteBackpackItem = useCallback(
+    (iid) => {
+      api
+        .deleteBackpack(pid, iid)
+        .then(reloadBackpack)
+        .catch((e) => notify(`Suppression refusée : ${e.message || e}`, 'error'))
+    },
+    [pid, reloadBackpack],
+  )
+
+  const addSelectionToBackpack = useCallback(() => {
+    const ids = nodes.filter((n) => n.selected).map((n) => n.id)
+    storeInBackpack(ids)
+  }, [nodes, storeInBackpack])
+
+  // ---- Hooks de drag pour détecter « drop sur le panneau d'inventaire » ---
+  // onSelectionDragStart fires when the user begins dragging a multi-selection
+  // (≥2 nodes). On capture les positions pour pouvoir les rétablir si la
+  // sélection a été *rangée* (pas *déplacée*).
+  const onSelectionDragStart = useCallback((_e, draggedNodes) => {
+    setSelectionDragActive(true)
+    const snap = new Map()
+    for (const n of draggedNodes) snap.set(n.id, { x: n.position?.x || 0, y: n.position?.y || 0 })
+    dragStartPositions.current = snap
+  }, [])
+  const onSelectionDragStop = useCallback(
+    (event, draggedNodes) => {
+      setSelectionDragActive(false)
+      const snap = dragStartPositions.current
+      dragStartPositions.current = null
+      if (!snap) return
+      const ev = event || {}
+      if (!isOverBackpack(ev.clientX, ev.clientY)) return
+      // Drop sur le panneau → on range et on restaure les positions.
+      const ids = draggedNodes.map((n) => n.id)
+      storeInBackpack(ids)
+      setNodes((nds) =>
+        nds.map((n) => (snap.has(n.id) ? { ...n, position: snap.get(n.id) } : n)),
+      )
+    },
+    [storeInBackpack, setNodes],
+  )
 
   // E.6 — raccourcis globaux. On évite de tirer dessus quand le focus est dans
   // un input/textarea/contenteditable (laisse le navigateur faire son job).
@@ -993,6 +1195,12 @@ function Editor({ pid, wid, onBack }) {
   }
   const onNodeDragStart = useCallback(
     (_e, node) => {
+      // Snapshot la position de départ pour pouvoir restaurer si l'utilisateur
+      // *range* le bloc dans l'inventaire (drop sur le panneau au lieu d'un
+      // déplacement réel — cf. onNodeDragStop).
+      dragStartPositions.current = new Map([
+        [node.id, { x: node.position?.x || 0, y: node.position?.y || 0 }],
+      ])
       if (node.type !== 'frame') return
       const gx = node.position.x,
         gy = node.position.y
@@ -1026,9 +1234,26 @@ function Editor({ pid, wid, onBack }) {
     },
     [setNodes],
   )
-  const onNodeDragStop = useCallback(() => {
-    groupDrag.current = null
-  }, [])
+  const onNodeDragStop = useCallback(
+    (event, node) => {
+      groupDrag.current = null
+      const snap = dragStartPositions.current
+      dragStartPositions.current = null
+      // Drop d'un seul bloc sur le panneau d'inventaire — symétrique du cas
+      // multi-sélection. Les frames ne sont pas rangeables (ce sont des
+      // conteneurs visuels, pas des étapes de pipeline).
+      if (!node || node.type === 'frame') return
+      const ev = event || {}
+      if (!isOverBackpack(ev.clientX, ev.clientY)) return
+      storeInBackpack([node.id])
+      // Restaure la position d'origine, le geste = ranger, pas déplacer.
+      if (snap && snap.has(node.id)) {
+        const before = snap.get(node.id)
+        setNodes((nds) => nds.map((n) => (n.id === node.id ? { ...n, position: before } : n)))
+      }
+    },
+    [storeInBackpack, setNodes],
+  )
 
   // Duplicate a block (its settings, not its links) next to the original. We
   // regenerate the internal IDs (conditions, outputs) so the copy never reuses
@@ -1696,7 +1921,12 @@ function Editor({ pid, wid, onBack }) {
               </div>
             )}
           </div>
-          <div className={`canvas ${selectMode ? 'selecting' : ''}`} ref={canvasRef}>
+          <div
+            className={`canvas ${selectMode ? 'selecting' : ''}`}
+            ref={canvasRef}
+            onDrop={onCanvasDrop}
+            onDragOver={onCanvasDragOver}
+          >
             <ReactFlow
               nodes={decoratedNodes}
               edges={decoratedEdges}
@@ -1706,6 +1936,8 @@ function Editor({ pid, wid, onBack }) {
               onNodeDragStart={onNodeDragStart}
               onNodeDrag={onNodeDrag}
               onNodeDragStop={onNodeDragStop}
+              onSelectionDragStart={onSelectionDragStart}
+              onSelectionDragStop={onSelectionDragStop}
               onNodesDelete={onNodesDelete}
               onEdgesDelete={onEdgesDelete}
               onNodeClick={(e, n) => {
@@ -1805,6 +2037,17 @@ function Editor({ pid, wid, onBack }) {
                 ajouter/retirer un bloc. Puis <b>Suppr</b> ou clic droit → <b>Supprimer</b>.
               </div>
             )}
+            <Backpack
+              open={backpackOpen}
+              onToggle={() => setBackpackOpen((v) => !v)}
+              items={backpack}
+              dropTargetActive={selectionDragActive}
+              onAddSelection={addSelectionToBackpack}
+              onDelete={deleteBackpackItem}
+              onRename={renameBackpackItem}
+              onInsert={insertBackpackAtCenter}
+              onItemDragStart={onBackpackItemDragStart}
+            />
           </div>
         </div>
 
