@@ -28,7 +28,10 @@ export default function DedupNode({ id, data, selected }) {
         <LockBadge locked={data.locked} />
       </div>
       <div className="node-body">
-        <div className="node-sub">
+        <div
+          className="node-sub"
+          title={keys.length ? `clé : ${keys.join(' + ')}` : 'clé : ligne entière'}
+        >
           clé : {keys.length ? <b>{keys.join(' + ')}</b> : <i>ligne entière</i>}
         </div>
         <div className="node-sub">doublons : {dupModeLabel(data.dups_mode)}</div>

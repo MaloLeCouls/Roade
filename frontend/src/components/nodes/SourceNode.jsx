@@ -27,10 +27,14 @@ export default function SourceNode({ id, data, selected }) {
       <div className="node-body">
         {data.file ? (
           <>
-            <div className="node-line">
+            <div className="node-line" title={data.file}>
               <b>{data.file}</b>
             </div>
-            {data.sheet && <div className="node-sub">feuille : {data.sheet}</div>}
+            {data.sheet && (
+              <div className="node-sub" title={`feuille : ${data.sheet}`}>
+                feuille : {data.sheet}
+              </div>
+            )}
           </>
         ) : (
           <div className="node-sub muted">aucun fichier</div>

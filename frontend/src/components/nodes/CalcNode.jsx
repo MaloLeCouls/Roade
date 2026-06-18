@@ -24,14 +24,17 @@ export default function CalcNode({ id, data, selected }) {
       </div>
       <div className="node-body">
         {groupFns.length > 0 && (
-          <div className="node-sub">
+          <div
+            className="node-sub"
+            title={`par groupe : ${groupKey.length ? groupKey.join(' + ') : '(aucune clé)'} · ${groupFns.length} col.`}
+          >
             par groupe : <b>{groupKey.length ? groupKey.join(' + ') : '—'}</b> · {groupFns.length}{' '}
             col.
           </div>
         )}
         <div className="node-sub">{cols.length} colonne(s) calculée(s)</div>
         {cols.slice(0, 3).map((c, i) => (
-          <div className="node-sub mini-op" key={i}>
+          <div className="node-sub mini-op" key={i} title={`• ${c.name}`}>
             • {c.name}
           </div>
         ))}

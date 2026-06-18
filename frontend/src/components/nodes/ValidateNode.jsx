@@ -46,7 +46,10 @@ export default function ValidateNode({ id, data, selected }) {
         <LockBadge locked={data.locked} />
       </div>
       <div className="node-body">
-        <div className="node-sub">
+        <div
+          className="node-sub"
+          title={`aiguillage sur ${data.target_column || '(colonne non choisie)'}`}
+        >
           aiguillage sur <b>{data.target_column || '?'}</b>
         </div>
         <div className="dedup-outs">

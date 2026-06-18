@@ -24,7 +24,7 @@ export default function CleanNode({ id, data, selected }) {
       <div className="node-body">
         <div className="node-sub">{ops.length} opération(s)</div>
         {ops.slice(0, 3).map((o, i) => (
-          <div className="node-sub mini-op" key={i}>
+          <div className="node-sub mini-op" key={i} title={`• ${o.op} → ${o.column}`}>
             • {o.op} → {o.column}
           </div>
         ))}
