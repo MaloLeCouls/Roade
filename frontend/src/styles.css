@@ -745,6 +745,14 @@ button.ghost.icon-only {
   padding: 2px 7px;
   border-radius: var(--radius);
   font-weight: 600;
+  /* Règle UX : la taille du bloc ne doit JAMAIS varier avec le contenu. Le
+     badge garde une ligne, et tronque proprement si le texte est trop long
+     (l'info complète reste accessible via le title=). */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  min-width: 0;
 }
 .badge.ok {
   background: #e7f0ea;

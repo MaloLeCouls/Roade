@@ -9,9 +9,15 @@ export default function SourceNode({ id, data, selected }) {
     running === id && sourceProgress?.nodeId === id && sourceProgress.totalRows > 0
       ? sourceProgress
       : null
+  // Règle UX : la hauteur du bloc reste fixe pendant qu'il tourne. On affiche
+  // un pourcentage compact (toujours ≤ 5 caractères) ; le compte exact reste
+  // accessible au survol via le title de la badge.
   const runningLabel = prog
-    ? `${prog.rowsRead.toLocaleString('fr-FR')} / ${prog.totalRows.toLocaleString('fr-FR')} lignes`
+    ? `${Math.min(100, Math.floor((prog.rowsRead / prog.totalRows) * 100))} %`
     : 'lecture…'
+  const runningTitle = prog
+    ? `${prog.rowsRead.toLocaleString('fr-FR')} / ${prog.totalRows.toLocaleString('fr-FR')} lignes lues`
+    : undefined
   return (
     <div className={`node node-source ${selected ? 'sel' : ''}`}>
       <div className="node-head">
@@ -34,6 +40,7 @@ export default function SourceNode({ id, data, selected }) {
         st={st}
         running={running === id}
         runningLabel={runningLabel}
+        runningTitle={runningTitle}
         onPreview={() => onPreview(id)}
         onRun={() => onRunNode(id)}
         onReload={() => onRunNode(id, true)}
@@ -52,27 +59,35 @@ export function LockBadge({ locked }) {
   )
 }
 
-export function StatusBadge({ st, running, runningLabel = 'exécution…' }) {
-  if (running) return <span className="badge run">{runningLabel}</span>
+export function StatusBadge({ st, running, runningLabel = 'exécution…', runningTitle }) {
+  if (running)
+    return (
+      <span className="badge run" title={runningTitle}>
+        {runningLabel}
+      </span>
+    )
   if (st.error)
     return (
       <span className="badge err" title={st.error}>
         erreur
       </span>
     )
-  if (st.ran)
+  if (st.ran) {
+    const rows = (st.rows ?? 0).toLocaleString('fr-FR')
+    const cached = st.cached ? ' · cache' : ''
     return (
-      <span className="badge ok">
-        {(st.rows ?? 0).toLocaleString('fr-FR')} lignes{st.cached ? ' · cache' : ''}
+      <span className="badge ok" title={`${rows} lignes${cached}`}>
+        {rows} lignes{cached}
       </span>
     )
+  }
   return <span className="badge idle">non exécuté</span>
 }
 
-export function NodeFooter({ st, running, runningLabel, onPreview, onRun, onReload }) {
+export function NodeFooter({ st, running, runningLabel, runningTitle, onPreview, onRun, onReload }) {
   return (
     <div className="node-foot">
-      <StatusBadge st={st} running={running} runningLabel={runningLabel} />
+      <StatusBadge st={st} running={running} runningLabel={runningLabel} runningTitle={runningTitle} />
       <div className="node-actions">
         <button
           className="mini"
