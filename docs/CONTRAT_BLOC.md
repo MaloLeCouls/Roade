@@ -77,13 +77,13 @@ Quand un manque est rattaché à un todo de la roadmap, l'ID est mentionné.
 | Bloc | 1. UI dédiée | 2. Picker typé | 3. Aperçu | 4. Profil | 5. Preflight | 6. Erreur nœud | 7. Info-bulle | 8. Exemples |
 |---|---|---|---|---|---|---|---|---|
 | **Source**     | ✅ | ➖ | ✅ | ✅ | ✅ `no_file` | ✅ | ✅ (`sniffSummary` + override encodage/décimale) | ➖ |
-| **SQL**        | ✅ | ➖ (constructeur visuel, pas de picker isolé) | ✅ | ✅ | ✅ `sql_empty` (mode raw) | ✅ | ✅ | ❌ (F.4) |
+| **SQL**        | ✅ | ➖ (constructeur visuel, pas de picker isolé) | ✅ | ✅ | ✅ `sql_empty` (mode raw) | ✅ | ✅ | ✅ (5 préréglages en mode raw — F.4) |
 | **Doublons**   | ✅ | ✅ | ✅ | ✅ | ❌ (clé vide non détectée) | ✅ | ✅ | ➖ |
 | **Validation** | ✅ | ✅ | ✅ | ✅ | ✅ `validate_target` | ✅ | ✅ | ❌ |
 | **Pivot**      | ✅ | ✅ | ✅ | ✅ | ✅ index/pivot/value (pivot) ; value_columns (unpivot) | ✅ | ✅ (depuis F.2) | ❌ |
-| **Nettoyage**  | ✅ | ✅ | ✅ | ✅ | ➖ (op sans colonne → skip silencieux, pas un échec moteur) | ✅ | ✅ | ❌ (F.4) |
+| **Nettoyage**  | ✅ | ✅ | ✅ | ✅ | ➖ (op sans colonne → skip silencieux, pas un échec moteur) | ✅ | ✅ | ✅ (4 recettes courtes — F.4) |
 | **Calcul**     | ✅ | ✅ | ✅ | ✅ | ➖ (formule vide → skip silencieux) | ✅ | ✅ | ✅ (`CALC_EXAMPLES`) |
-| **Filtre**     | ✅ | ✅ (paires Data/Ref typées — D.7) | ✅ | ✅ | ✅ `filter_empty`/`filter_mismatch` | ✅ | ✅ | ❌ (F.4) |
+| **Filtre**     | ✅ | ✅ (paires Data/Ref typées — D.7) | ✅ | ✅ | ✅ `filter_empty`/`filter_mismatch` | ✅ | ✅ | ➖ (mode toggle keep/exclude déjà très visible — page blanche évitée sans préréglages) |
 | **Cols**       | ✅ | ✅ | ✅ | ✅ | ✅ `cols_all_dropped` (tout décoché) | ✅ | ✅ | ➖ |
 | **Union**      | ✅ | ➖ | ✅ | ✅ | ⚠ (input manquant détecté ; alignement des schémas remonté hors preflight via l'aperçu de F.1) | ✅ | ✅ (depuis F.1 — explique nom vs position ; aperçu des orphelines) | ➖ |
 | **Analyse**    | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ➖ |
@@ -104,8 +104,10 @@ des faux positifs. À garder pour des warnings éventuels (couleur ambre, futur)
 Doublons : `key_columns` vide signifie « ligne entière » côté moteur, donc pas
 d'erreur.
 
-**Item 8 — exemples** : aujourd'hui seul Calcul en a (`CALC_EXAMPLES`).
-À étendre à SQL, Nettoyage, Filtre — c'est **F.4**.
+**Item 8 — exemples** : SQL (mode raw, 5 préréglages DuckDB), Nettoyage
+(4 recettes courtes) et Calcul (`CALC_EXAMPLES`) en ont. **F.4 fait**.
+Filtre n'en a pas — le toggle keep/exclude est déjà bien visible, ajouter
+des « préréglages » qui ne font qu'inverser le mode serait du bruit.
 
 ### Mapping F.x → manques du contrat
 
@@ -119,7 +121,8 @@ d'erreur.
   enrichie (déjà partiellement faite).
 - **F.3 Filtre typé** → ~~pickers typés sur `mainCols`/`refCols`~~ (fait avec
   D.7). Reste : dry-run des lignes exclues (bonus).
-- **F.4 Exemples** → item 8 sur SQL, Clean, Filter.
+- **F.4 Exemples** → item 8 ✅ — SQL (5 préréglages mode raw), Clean (4
+  recettes). Filter écarté à dessein (cf. note item 8 ci-dessus).
 - **F.5 Dry-run gros volumes** → ce n'est pas un item du contrat *à proprement
   parler* mais une couche transverse qui sert tous les blocs lourds.
 

@@ -312,6 +312,39 @@ const CLEAN_OPS = [
   ['round', 'Arrondir'],
   ['abs', 'Valeur absolue'],
 ]
+
+// F.4 — Préréglages Nettoyage : recettes courtes (1-3 ops) qu'on rencontre
+// 9 fois sur 10 quand on prépare un fichier FR. La colonne reste vide :
+// l'utilisateur la choisit après. Pas de magie devinante d'une colonne,
+// ce serait un faux service (cf. doctrine anti-slop #2 — spécifique > générique).
+const CLEAN_EXAMPLES = [
+  {
+    title: 'Normaliser un texte',
+    desc: 'enlève les espaces autour, puis Capitalise',
+    ops: [
+      { op: 'trim', column: '', enabled: true },
+      { op: 'capitalize', column: '', enabled: true },
+    ],
+  },
+  {
+    title: 'Convertir un nombre FR en nombre',
+    desc: 'remplace la virgule décimale par un point, puis cast',
+    ops: [
+      { op: 'replace', column: '', find: ',', replace: '.', enabled: true },
+      { op: 'to_number', column: '', enabled: true },
+    ],
+  },
+  {
+    title: 'Remplir les vides par "—"',
+    desc: 'évite les blancs visibles dans les exports',
+    ops: [{ op: 'fillna', column: '', value: '—', value_type: 'text', enabled: true }],
+  },
+  {
+    title: 'Arrondir au centime',
+    desc: 'round à 2 décimales',
+    ops: [{ op: 'round', column: '', digits: 2, enabled: true }],
+  },
+]
 const PIVOT_AGG = ['SUM', 'AVG', 'MIN', 'MAX', 'COUNT', 'MEDIAN', 'FIRST', 'LAST']
 
 // Group/window functions for the Calcul block: [value, label, needsColumn, needsOrder]
@@ -630,7 +663,22 @@ function CleanConfig({ node, inputs, set }) {
             </div>
           </div>
         ))}
-        {ops.length === 0 && <div className="qb-hint">Aucune opération.</div>}
+        {ops.length === 0 && (
+          <div className="calc-examples">
+            <div className="qb-hint">Aucune opération. Exemples (cliquez pour insérer) :</div>
+            {CLEAN_EXAMPLES.map((ex, i) => (
+              <button
+                key={i}
+                className="calc-example"
+                onClick={() => set({ operations: ex.ops.map((o) => ({ ...o })) })}
+                title={ex.desc}
+              >
+                <b>{ex.title}</b>
+                <span className="calc-example-desc">{ex.desc}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -2593,6 +2641,22 @@ function SqlConfig({ node, inputs, set }) {
             value={d.raw_sql || ''}
             onChange={(e) => set({ raw_sql: e.target.value })}
           />
+          {!(d.raw_sql || '').trim() && (
+            <div className="calc-examples">
+              <div className="qb-hint">Exemples DuckDB (cliquez pour insérer) :</div>
+              {SQL_RAW_EXAMPLES.map((ex, i) => (
+                <button
+                  key={i}
+                  className="calc-example"
+                  onClick={() => set({ raw_sql: ex.sql })}
+                  title={ex.desc}
+                >
+                  <b>{ex.title}</b>
+                  <span className="calc-example-desc">{ex.desc}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </>
       ) : (
         <QueryBuilder value={d.query} inputs={inputs} onChange={(q) => set({ query: q })} />
@@ -2600,6 +2664,38 @@ function SqlConfig({ node, inputs, set }) {
     </div>
   )
 }
+
+// F.4 — Préréglages SQL brut. Pas de magie : on dépose une requête à
+// retoucher, l'utilisateur change les noms de colonnes. La page blanche du
+// `<textarea>` était le pire ennemi de ce mode — un alias `in1` à coller,
+// ça donne le bon départ.
+const SQL_RAW_EXAMPLES = [
+  {
+    title: 'Filtrer',
+    desc: 'WHERE sur une colonne',
+    sql: 'SELECT *\nFROM in1\nWHERE colonne > 0',
+  },
+  {
+    title: 'Compter par catégorie',
+    desc: 'GROUP BY + tri décroissant',
+    sql: 'SELECT colonne, COUNT(*) AS n\nFROM in1\nGROUP BY colonne\nORDER BY n DESC',
+  },
+  {
+    title: 'Valeurs distinctes',
+    desc: 'DISTINCT sur une colonne',
+    sql: 'SELECT DISTINCT colonne\nFROM in1\nORDER BY colonne',
+  },
+  {
+    title: 'Top 10 récents',
+    desc: 'ORDER BY + LIMIT',
+    sql: 'SELECT *\nFROM in1\nORDER BY date DESC\nLIMIT 10',
+  },
+  {
+    title: 'Jointure (port 2 branché)',
+    desc: 'LEFT JOIN entre in1 et in2 sur une clé commune',
+    sql: 'SELECT in1.*, in2.libelle\nFROM in1\nLEFT JOIN in2 USING (id)',
+  },
+]
 
 function sanitizeSheet(name) {
   return (

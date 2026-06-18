@@ -1628,6 +1628,15 @@ code {
   font-size: 11px;
   color: var(--ink-soft);
 }
+/* Variante « titre + description » pour les exemples Nettoyage / SQL / Filtre :
+   l'expression à coller n'est pas un littéral mais une recette, donc on rend
+   un libellé court (b) + une glose courte. */
+.calc-example-desc {
+  display: block;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  margin-top: 2px;
+}
 
 /* visual builder for a calculated column */
 .calc-genexpr {
