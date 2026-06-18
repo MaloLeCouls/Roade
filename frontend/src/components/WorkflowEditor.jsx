@@ -675,7 +675,11 @@ function Editor({ pid, wid, onBack }) {
       return { ...m, targets: next }
     })
   }, [])
-  // `confirmConnect` est défini plus bas, après `onConnect`, car React TDZ.
+  // `confirmConnect` est défini plus bas, après `onConnect` (qu'il appelle).
+  // Le handler clavier ci-dessous l'invoque via ce ref : on garde une référence
+  // stable, mise à jour en useEffect, pour éviter la TDZ (le hook clavier est
+  // défini avant `confirmConnect` dans l'ordre du composant).
+  const confirmConnectRef = useRef(() => {})
 
   // ---------------------------------------------------------------------- //
   // Inventaire (backpack) — App Inventor-style                             //
@@ -923,7 +927,7 @@ function Editor({ pid, wid, onBack }) {
         // sélectionnées. Hors mode connexion, on laisse passer (le navigateur
         // l'utilise dans les champs et certains menus).
         e.preventDefault()
-        confirmConnect()
+        confirmConnectRef.current()
       }
     }
     window.addEventListener('keydown', onKey)
@@ -938,7 +942,6 @@ function Editor({ pid, wid, onBack }) {
     setEdges,
     connectMode,
     exitConnectMode,
-    confirmConnect,
   ])
 
   // Liste de commandes pour la palette (Ctrl+K). Anti-slop : pas de tout
@@ -1139,6 +1142,10 @@ function Editor({ pid, wid, onBack }) {
     notify(created === 1 ? 'Lien créé.' : `${created} liens créés.`, 'ok')
     exitConnectMode()
   }, [connectMode, nodes, onConnect, exitConnectMode])
+  // Garde le ref clavier en phase avec la dernière version de confirmConnect.
+  useEffect(() => {
+    confirmConnectRef.current = confirmConnect
+  }, [confirmConnect])
 
   // ---- node helpers ----
   const addNode = (type) => {
