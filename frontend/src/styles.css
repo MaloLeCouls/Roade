@@ -705,6 +705,11 @@ button.ghost.icon-only {
 .node-sub {
   font-size: 12px;
   color: var(--muted);
+  /* Règle UX (cf. fixed-block-size) : un nom de feuille / d'opération long ne
+     doit jamais faire grandir le bloc en hauteur. Tronquer plutôt qu'envelopper. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .node-foot {
   display: flex;
