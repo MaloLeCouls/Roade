@@ -2377,16 +2377,34 @@ function Editor({ pid, wid, onBack }) {
                   </div>
                 )}
                 {bulk ? (
-                  <button
-                    className="danger"
-                    role="menuitem"
-                    onClick={() => {
-                      deleteSelection()
-                      setMenu(null)
-                    }}
-                  >
-                    <Icon name="trash" size={13} /> Supprimer la sélection ({selCount})
-                  </button>
+                  <>
+                    {(() => {
+                      // Fan-in : on connecte les N blocs sélectionnés (qui ont
+                      // une sortie) vers un destinataire qu'on cliquera ensuite.
+                      const selected = nodes.filter((x) => x.selected)
+                      const validSources = selected.filter((s) => nodeOutputs(s).length > 0)
+                      if (validSources.length < 2) return null
+                      return (
+                        <button
+                          role="menuitem"
+                          onClick={() => enterConnectMode(validSources.map((s) => s.id))}
+                        >
+                          <Icon name="flow" size={13} /> Connecter ces {validSources.length} blocs
+                          à…
+                        </button>
+                      )
+                    })()}
+                    <button
+                      className="danger"
+                      role="menuitem"
+                      onClick={() => {
+                        deleteSelection()
+                        setMenu(null)
+                      }}
+                    >
+                      <Icon name="trash" size={13} /> Supprimer la sélection ({selCount})
+                    </button>
+                  </>
                 ) : (
                   <>
                     {mn?.type === 'stop' && mn.data?.attachedTo && (
@@ -2411,28 +2429,14 @@ function Editor({ pid, wid, onBack }) {
                         <Icon name="plus" size={13} /> Dupliquer
                       </button>
                     )}
-                    {mn &&
-                      (() => {
-                        // Multi-sélection ? On bascule en fan-in (N sources → 1
-                        // destination). Le clic-droit conserve la sélection
-                        // multiple si la cible du clic en faisait partie.
-                        const selected = nodes.filter((x) => x.selected)
-                        const fanIn = selected.length > 1 && selected.some((s) => s.id === menu.id)
-                        const sources = fanIn ? selected : [mn]
-                        const validSources = sources.filter((s) => nodeOutputs(s).length > 0)
-                        if (validSources.length === 0) return null
-                        return (
-                          <button
-                            role="menuitem"
-                            onClick={() => enterConnectMode(validSources.map((s) => s.id))}
-                          >
-                            <Icon name="flow" size={13} />{' '}
-                            {fanIn
-                              ? `Connecter ces ${validSources.length} blocs à…`
-                              : 'Connecter à…'}
-                          </button>
-                        )
-                      })()}
+                    {mn && nodeOutputs(mn).length > 0 && (
+                      <button
+                        role="menuitem"
+                        onClick={() => enterConnectMode([menu.id])}
+                      >
+                        <Icon name="flow" size={13} /> Connecter à…
+                      </button>
+                    )}
                     <button
                       className="danger"
                       role="menuitem"
