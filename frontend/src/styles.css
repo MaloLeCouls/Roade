@@ -4391,6 +4391,52 @@ table.dt th.idx {
   gap: var(--s-2);
 }
 
+/* ---- ConnectDialog (E.7, alternative clavier au drag) ------------------- */
+.connect-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.connect-from {
+  margin: 0;
+  color: var(--ink);
+}
+.connect-hint {
+  color: var(--muted);
+}
+.connect-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  font-size: var(--fs-sm);
+}
+.connect-row > span {
+  color: var(--ink-soft);
+  font-weight: var(--fw-semibold);
+}
+.connect-row > select {
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  font-size: var(--fs-sm);
+}
+.connect-warn {
+  margin: 0;
+  padding: var(--s-2) var(--s-3);
+  background: color-mix(in srgb, var(--warn) 12%, var(--panel));
+  border-left: 3px solid var(--warn);
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  border-radius: var(--radius-sm);
+}
+.connect-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
+}
+
 /* ---- Canvas legend (E.9) ------------------------------------------------- */
 .canvas-legend {
   position: absolute;

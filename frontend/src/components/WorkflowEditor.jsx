@@ -21,6 +21,7 @@ import { exportSubdir } from '../lib/paths'
 import { EditorContext } from './editorContext'
 import CommandPalette from './ui/CommandPalette'
 import { useConfirm } from './ui/ConfirmDialog'
+import ConnectDialog from './ui/ConnectDialog'
 import ShortcutsHelp from './ui/ShortcutsHelp'
 import SourceNode from './nodes/SourceNode'
 import SqlNode from './nodes/SqlNode'
@@ -309,6 +310,37 @@ const NODE_OUTPUTS = {
   ],
 }
 
+// Input handles per node type — symétrique de NODE_OUTPUTS. Utilisé par le
+// ConnectDialog (E.7) pour proposer les blocs cibles au clavier. Doit refléter
+// les <Handle type="target"> rendus par chaque composant de bloc.
+const NODE_INPUTS = {
+  source: [],
+  sql: [
+    { handle: 'in1', label: 'Entrée principale (FROM)' },
+    { handle: 'in2', label: 'Entrée à joindre (optionnelle)' },
+  ],
+  pivot: [{ handle: 'in', label: '' }],
+  clean: [{ handle: 'in', label: '' }],
+  calc: [{ handle: 'in', label: '' }],
+  filter: [
+    { handle: 'in', label: 'Données à filtrer' },
+    { handle: 'ref', label: 'Tableau de référence' },
+  ],
+  cols: [{ handle: 'in', label: '' }],
+  union: [{ handle: 'in', label: '' }],
+  validate: [{ handle: 'in', label: '' }],
+  dedup: [{ handle: 'in', label: '' }],
+  export: [{ handle: 'in', label: '' }],
+  report: [{ handle: 'in', label: '' }],
+  stop: [{ handle: 'in', label: '' }],
+  frame: [],
+}
+
+function nodeInputs(node) {
+  if (!node) return []
+  return NODE_INPUTS[node.type] || []
+}
+
 // Output handles for a node — dynamic for a validate block in 'route' mode
 // (user-defined outputs + optional 'else'). Mirrors backend _output_handles.
 function nodeOutputs(node) {
@@ -381,6 +413,7 @@ function Editor({ pid, wid, onBack }) {
   const [addMenu, setAddMenu] = useState(false) // "add a block" palette dropdown
   const [selectMode, setSelectMode] = useState(false) // box-selection mode (select many blocks → bulk delete)
   const [legendOpen, setLegendOpen] = useState(false) // canvas legend expanded?
+  const [connectFor, setConnectFor] = useState(null) // sourceNodeId pour ConnectDialog (E.7)
   const [previewPrefs, setPreviewPrefs] = useState({ tab: 'rows', column: null })
   const [banner, setBanner] = useState(null)
   const [saveState, setSaveState] = useState('saved')
@@ -560,6 +593,22 @@ function Editor({ pid, wid, onBack }) {
     notify(`Restauré : ${parts.join(' + ')}`, 'ok')
   }, [setNodes, setEdges])
 
+  // E.7 — ouvre le ConnectDialog pour le bloc sélectionné (alternative
+  // clavier au drag de connexion). Refuse si rien n'est sélectionné ou si le
+  // bloc n'a pas de sortie (source d'export, frame…).
+  const openConnectFromSelection = useCallback(() => {
+    const sel = nodes.find((n) => n.selected)
+    if (!sel) {
+      notify('Sélectionnez un bloc avant de lancer la connexion.', 'warn')
+      return
+    }
+    if (nodeOutputs(sel).length === 0) {
+      notify("Ce bloc n'a pas de sortie à connecter.", 'warn')
+      return
+    }
+    setConnectFor(sel.id)
+  }, [nodes])
+
   // E.6 — raccourcis globaux. On évite de tirer dessus quand le focus est dans
   // un input/textarea/contenteditable (laisse le navigateur faire son job).
   useEffect(() => {
@@ -585,6 +634,10 @@ function Editor({ pid, wid, onBack }) {
         // E.1 — Ctrl+Z (Cmd+Z) restaure la dernière suppression.
         e.preventDefault()
         undoDeletion()
+      } else if (mod && e.key.toLowerCase() === 'l' && !inField(document.activeElement)) {
+        // E.7 — Ctrl+L : alternative clavier au drag de connexion.
+        e.preventDefault()
+        openConnectFromSelection()
       } else if (e.key === '?' && !inField(document.activeElement) && !mod) {
         e.preventDefault()
         setHelpOpen(true)
@@ -592,7 +645,7 @@ function Editor({ pid, wid, onBack }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [quickSave, duplicateSelected, undoDeletion])
+  }, [quickSave, duplicateSelected, undoDeletion, openConnectFromSelection])
 
   // Liste de commandes pour la palette (Ctrl+K). Anti-slop : pas de tout
   // exposer, juste les actions de premier rang.
@@ -620,6 +673,13 @@ function Editor({ pid, wid, onBack }) {
         action: duplicateSelected,
       },
       {
+        id: 'connect',
+        label: 'Connecter ce bloc à un autre',
+        shortcut: 'Ctrl+L',
+        keywords: 'link arête lien connect',
+        action: openConnectFromSelection,
+      },
+      {
         id: 'undo',
         label: 'Annuler la dernière suppression',
         shortcut: 'Ctrl+Z',
@@ -635,7 +695,7 @@ function Editor({ pid, wid, onBack }) {
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [quickSave, duplicateSelected, undoDeletion],
+    [quickSave, duplicateSelected, undoDeletion, openConnectFromSelection],
   )
 
   // ---- C.3 garde-fou beforeunload ----
@@ -1874,6 +1934,17 @@ function Editor({ pid, wid, onBack }) {
                         <Icon name="plus" size={13} /> Dupliquer
                       </button>
                     )}
+                    {mn && nodeOutputs(mn).length > 0 && (
+                      <button
+                        role="menuitem"
+                        onClick={() => {
+                          setConnectFor(menu.id)
+                          setMenu(null)
+                        }}
+                      >
+                        <Icon name="flow" size={13} /> Connecter à…
+                      </button>
+                    )}
                     <button
                       className="danger"
                       role="menuitem"
@@ -1890,6 +1961,20 @@ function Editor({ pid, wid, onBack }) {
             )
           })()}
         {confirmNode}
+        <ConnectDialog
+          open={!!connectFor}
+          sourceId={connectFor}
+          nodes={nodes}
+          edges={edges}
+          outputsFor={nodeOutputs}
+          inputsFor={nodeInputs}
+          onConfirm={(conn) => {
+            onConnect(conn)
+            setConnectFor(null)
+            notify('Lien créé.', 'ok')
+          }}
+          onClose={() => setConnectFor(null)}
+        />
         <CommandPalette
           open={paletteOpen}
           onClose={() => setPaletteOpen(false)}

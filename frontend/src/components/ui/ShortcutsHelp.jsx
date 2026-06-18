@@ -8,6 +8,10 @@ const ITEMS = [
   { keys: ['Ctrl', 'S'], desc: 'Sauvegarder maintenant (flush du debounce)' },
   { keys: ['Ctrl', 'K'], desc: 'Palette de commandes' },
   { keys: ['Ctrl', 'D'], desc: 'Dupliquer le bloc sélectionné' },
+  {
+    keys: ['Ctrl', 'L'],
+    desc: 'Connecter le bloc sélectionné à un autre (alternative au drag souris)',
+  },
   { keys: ['Ctrl', 'Z'], desc: 'Annuler la dernière suppression (bloc ou lien)' },
   { keys: ['Suppr'], desc: 'Supprimer la sélection' },
   { keys: ['Échap'], desc: "Fermer l'aperçu ou un dialog" },
