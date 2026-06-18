@@ -4,6 +4,7 @@ import QueryBuilder from './QueryBuilder'
 import Icon from './Icon'
 import { ConditionsEditor, RuleRow, MaskBuilder, RulesBuilder } from './routing'
 import { EXTRACTOR_TYPES, defaultExtractor } from './validateHelpers'
+import ColumnPicker from './ui/ColumnPicker'
 
 export default function Inspector({
   pid,
@@ -375,49 +376,11 @@ function defaultGroupName(fn, col) {
   )
 }
 
-function ColSelect({ inputs, value, onChange, allowEmpty }) {
-  const cols = inputs[0]?.columns || []
-  return (
-    <select value={value || ''} onChange={(e) => onChange(e.target.value)}>
-      {allowEmpty && <option value="">—</option>}
-      {cols.length === 0 && <option value="">(exécutez l'amont)</option>}
-      {cols.map((c) => (
-        <option key={c.name} value={c.name}>
-          {c.name}
-        </option>
-      ))}
-    </select>
-  )
-}
-
-function ColChecklist({ inputs, selected, onToggle }) {
-  const cols = inputs[0]?.columns || []
-  return (
-    <div className="checklist">
-      {cols.length === 0 && <div className="qb-hint">— colonnes non chargées —</div>}
-      {cols.map((c) => (
-        <label key={c.name} className="qb-check">
-          <input
-            type="checkbox"
-            checked={selected.includes(c.name)}
-            onChange={() => onToggle(c.name)}
-          />
-          {c.name} <span className="coltype-inline">{c.type}</span>
-        </label>
-      ))}
-    </div>
-  )
-}
-
 function PivotConfig({ node, inputs, set }) {
   const d = node.data
   const mode = d.mode || 'pivot'
   const idx = d.index_columns || []
   const vals = d.value_columns || []
-  const toggleIdx = (c) =>
-    set({ index_columns: idx.includes(c) ? idx.filter((x) => x !== c) : [...idx, c] })
-  const toggleVal = (c) =>
-    set({ value_columns: vals.includes(c) ? vals.filter((x) => x !== c) : [...vals, c] })
   return (
     <div className="insp-body">
       <div className="mode-toggle">
@@ -445,26 +408,29 @@ function PivotConfig({ node, inputs, set }) {
           </p>
           <div className="fld">
             <span>Lignes (colonnes conservées)</span>
-            <ColChecklist inputs={inputs} selected={idx} onToggle={toggleIdx} />
+            <ColumnPicker
+              multi
+              columns={inputs[0]?.columns || []}
+              value={idx}
+              onChange={(v) => set({ index_columns: v })}
+            />
           </div>
-          <label className="fld">
+          <div className="fld">
             <span>Colonne à éclater en colonnes</span>
-            <ColSelect
-              inputs={inputs}
-              value={d.pivot_column}
+            <ColumnPicker
+              columns={inputs[0]?.columns || []}
+              value={d.pivot_column || ''}
               onChange={(v) => set({ pivot_column: v })}
-              allowEmpty
             />
-          </label>
-          <label className="fld">
+          </div>
+          <div className="fld">
             <span>Colonne de valeurs</span>
-            <ColSelect
-              inputs={inputs}
-              value={d.value_column}
+            <ColumnPicker
+              columns={inputs[0]?.columns || []}
+              value={d.value_column || ''}
               onChange={(v) => set({ value_column: v })}
-              allowEmpty
             />
-          </label>
+          </div>
           <label className="fld">
             <span>Agrégat</span>
             <select value={d.agg || 'SUM'} onChange={(e) => set({ agg: e.target.value })}>
@@ -487,7 +453,12 @@ function PivotConfig({ node, inputs, set }) {
           </p>
           <div className="fld">
             <span>Colonnes à dépivoter</span>
-            <ColChecklist inputs={inputs} selected={vals} onToggle={toggleVal} />
+            <ColumnPicker
+              multi
+              columns={inputs[0]?.columns || []}
+              value={vals}
+              onChange={(v) => set({ value_columns: v })}
+            />
           </div>
           <label className="fld">
             <span>Nom de la colonne « nom »</span>
@@ -681,8 +652,6 @@ function GroupCalcSection({ d, cols, set }) {
   const orderCol = order[0]?.column || ''
   const orderDesc = !!order[0]?.desc
   const setG = (patch) => set({ group: { ...g, ...patch } })
-  const togglePart = (c) =>
-    setG({ partition_by: part.includes(c) ? part.filter((x) => x !== c) : [...part, c] })
   const updF = (i, patch) =>
     setG({ functions: funcs.map((o, j) => (j === i ? { ...o, ...patch } : o)) })
   const delF = (i) => setG({ functions: funcs.filter((_, j) => j !== i) })
@@ -737,19 +706,13 @@ function GroupCalcSection({ d, cols, set }) {
         <div className="fld-head">
           <span>Clé de regroupement</span>
         </div>
-        <div className="checklist">
-          {cols.length === 0 && <div className="qb-hint">— colonnes non chargées —</div>}
-          {cols.map((c) => (
-            <label key={c.name} className="qb-check">
-              <input
-                type="checkbox"
-                checked={part.includes(c.name)}
-                onChange={() => togglePart(c.name)}
-              />
-              {c.name} <span className="coltype-inline">{c.type}</span>
-            </label>
-          ))}
-        </div>
+        <ColumnPicker
+          multi
+          columns={cols}
+          value={part}
+          onChange={(v) => setG({ partition_by: v })}
+          emptyMessage="— colonnes non chargées —"
+        />
       </div>
 
       {needsOrder && (
@@ -1060,25 +1023,18 @@ function buildCalcExpr(op) {
   }
 }
 
-function CalcColSelect({ cols, value, onChange, placeholder = '— colonne —' }) {
-  return (
-    <select className="qb-select" value={value || ''} onChange={(e) => onChange(e.target.value)}>
-      <option value="">{placeholder}</option>
-      {cols.map((c) => (
-        <option key={c.name} value={c.name}>
-          {c.name}
-        </option>
-      ))}
-    </select>
-  )
-}
-
 // a value that is either a typed constant or a reference to another column
 function ValueField({ cols, value, isCol, onValue, onToggle, placeholder = 'valeur' }) {
   return (
     <span className="calc-valuefield">
       {isCol ? (
-        <CalcColSelect cols={cols} value={value} onChange={onValue} />
+        <ColumnPicker
+          compact
+          columns={cols}
+          value={value || ''}
+          onChange={onValue}
+          placeholder="— colonne —"
+        />
       ) : (
         <input
           className="qb-input narrow"
@@ -1118,7 +1074,13 @@ function CombineForm({ op, setOp, cols }) {
               onChange={(e) => upd(i, { value: e.target.value })}
             />
           ) : (
-            <CalcColSelect cols={cols} value={p.value} onChange={(v) => upd(i, { value: v })} />
+            <ColumnPicker
+              compact
+              columns={cols}
+              value={p.value || ''}
+              onChange={(v) => upd(i, { value: v })}
+              placeholder="— colonne —"
+            />
           )}
           <button
             className="ghost danger small"
@@ -1206,7 +1168,13 @@ function CalcColumnCard({ item, index, count, cols, onChange, onMove, onDelete }
         <>
           <div className="qb-row indent">
             <span className="qb-lbl">de</span>
-            <CalcColSelect cols={cols} value={op.column} onChange={(v) => setOp({ column: v })} />
+            <ColumnPicker
+              compact
+              columns={cols}
+              value={op.column || ''}
+              onChange={(v) => setOp({ column: v })}
+              placeholder="— colonne —"
+            />
             <span className="qb-lbl">prendre</span>
             <select
               className="qb-select"
@@ -1305,7 +1273,13 @@ function CalcColumnCard({ item, index, count, cols, onChange, onMove, onDelete }
       {kind === 'transform' && (
         <>
           <div className="qb-row indent">
-            <CalcColSelect cols={cols} value={op.column} onChange={(v) => setOp({ column: v })} />
+            <ColumnPicker
+              compact
+              columns={cols}
+              value={op.column || ''}
+              onChange={(v) => setOp({ column: v })}
+              placeholder="— colonne —"
+            />
             <span className="qb-lbl">→</span>
             <select
               className="qb-select"
@@ -1344,7 +1318,13 @@ function CalcColumnCard({ item, index, count, cols, onChange, onMove, onDelete }
         <>
           <div className="qb-row indent">
             <span className="qb-lbl">si</span>
-            <CalcColSelect cols={cols} value={op.column} onChange={(v) => setOp({ column: v })} />
+            <ColumnPicker
+              compact
+              columns={cols}
+              value={op.column || ''}
+              onChange={(v) => setOp({ column: v })}
+              placeholder="— colonne —"
+            />
             <select
               className="qb-select"
               value={op.cmp || '='}
@@ -1387,7 +1367,13 @@ function CalcColumnCard({ item, index, count, cols, onChange, onMove, onDelete }
 
       {kind === 'math' && (
         <div className="qb-row indent">
-          <CalcColSelect cols={cols} value={op.column} onChange={(v) => setOp({ column: v })} />
+          <ColumnPicker
+            compact
+            columns={cols}
+            value={op.column || ''}
+            onChange={(v) => setOp({ column: v })}
+            placeholder="— colonne —"
+          />
           <select
             className="qb-select"
             value={op.mathOp || '+'}
@@ -1676,47 +1662,31 @@ function FilterConfig({ node, inputs, set }) {
       </div>
       {pairs.map((p, i) => (
         <div className="qb-row" key={i} style={{ alignItems: 'flex-end', gap: 6 }}>
-          <label className="fld" style={{ flex: 1 }}>
+          <div className="fld" style={{ flex: 1 }}>
             <span>{i === 0 ? 'Données' : ''}</span>
-            <select
+            <ColumnPicker
+              compact
+              columns={mainCols}
               value={p.column || ''}
-              onChange={(e) => updatePair(i, { column: e.target.value })}
-            >
-              <option value="">— colonne —</option>
-              {mainCols.length === 0 && (
-                <option value="" disabled>
-                  (exécutez l'amont « données »)
-                </option>
-              )}
-              {mainCols.map((c) => (
-                <option key={c.name} value={c.name}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </label>
+              onChange={(v) => updatePair(i, { column: v })}
+              placeholder="— colonne —"
+              emptyMessage="(exécutez l'amont « données »)"
+            />
+          </div>
           <span className="qb-hint" style={{ paddingBottom: 6 }}>
             =
           </span>
-          <label className="fld" style={{ flex: 1 }}>
+          <div className="fld" style={{ flex: 1 }}>
             <span>{i === 0 ? 'Référence' : ''}</span>
-            <select
+            <ColumnPicker
+              compact
+              columns={refCols}
               value={p.ref_column || ''}
-              onChange={(e) => updatePair(i, { ref_column: e.target.value })}
-            >
-              <option value="">— colonne —</option>
-              {refCols.length === 0 && (
-                <option value="" disabled>
-                  (exécutez l'amont « référence »)
-                </option>
-              )}
-              {refCols.map((c) => (
-                <option key={c.name} value={c.name}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </label>
+              onChange={(v) => updatePair(i, { ref_column: v })}
+              placeholder="— colonne —"
+              emptyMessage="(exécutez l'amont « référence »)"
+            />
+          </div>
           <button
             className="ghost small danger"
             onClick={() => removePair(i)}
@@ -2137,10 +2107,6 @@ function DedupConfig({ node, inputs, set }) {
   const d = node.data
   const cols = inputs[0]?.columns || []
   const selected = d.key_columns || []
-  const toggle = (name) => {
-    const next = selected.includes(name) ? selected.filter((c) => c !== name) : [...selected, name]
-    set({ key_columns: next })
-  }
   return (
     <div className="insp-body">
       {inputs.length === 0 && (
@@ -2158,19 +2124,13 @@ function DedupConfig({ node, inputs, set }) {
             leur <b>combinaison</b>.
           </InfoBubble>
         </div>
-        <div className="checklist">
-          {cols.length === 0 && <div className="qb-hint">— colonnes non chargées —</div>}
-          {cols.map((c) => (
-            <label key={c.name} className="qb-check">
-              <input
-                type="checkbox"
-                checked={selected.includes(c.name)}
-                onChange={() => toggle(c.name)}
-              />
-              {c.name} <span className="coltype-inline">{c.type}</span>
-            </label>
-          ))}
-        </div>
+        <ColumnPicker
+          multi
+          columns={cols}
+          value={selected}
+          onChange={(v) => set({ key_columns: v })}
+          emptyMessage="— colonnes non chargées —"
+        />
       </div>
 
       <label className="fld">

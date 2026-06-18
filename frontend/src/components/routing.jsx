@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 import Icon from './Icon'
+import ColumnPicker from './ui/ColumnPicker'
 import {
   VAL_TESTS,
   CHAR_CLASS,
@@ -81,21 +82,17 @@ export function ConditionsEditor({ node, cols, onChange }) {
   return (
     <div className="conditions-editor">
       <div className="route-toolbar">
-        <label className="fld" style={{ flex: 1, marginBottom: 0 }}>
+        <div className="fld" style={{ flex: 1, marginBottom: 0 }}>
           <span>Colonne par défaut</span>
-          <select
+          <ColumnPicker
+            compact
+            columns={cols}
             value={d.target_column || ''}
-            onChange={(e) => onChange({ target_column: e.target.value })}
-          >
-            <option value="">—</option>
-            {cols.length === 0 && <option value="">(exécutez l'amont)</option>}
-            {cols.map((c) => (
-              <option key={c.name} value={c.name}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </label>
+            onChange={(v) => onChange({ target_column: v })}
+            placeholder="—"
+            emptyMessage="(exécutez l'amont)"
+          />
+        </div>
         <label className="qb-check" style={{ marginBottom: 2 }}>
           <input
             type="checkbox"
@@ -171,21 +168,16 @@ function ConditionBuilder({ cond, cols, defaultCol, caseSensitive, onChange }) {
           </button>
         </div>
         {kind !== 'group' && (
-          <label className="cond-col">
+          <div className="cond-col">
             <span className="qb-lbl">colonne</span>
-            <select
-              className="qb-select"
+            <ColumnPicker
+              compact
+              columns={cols}
               value={cond.column || ''}
-              onChange={(e) => onChange({ column: e.target.value })}
-            >
-              <option value="">{defaultCol ? `défaut : ${defaultCol}` : '(par défaut)'}</option>
-              {cols.map((c) => (
-                <option key={c.name} value={c.name}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </label>
+              onChange={(v) => onChange({ column: v })}
+              placeholder={defaultCol ? `défaut : ${defaultCol}` : '(par défaut)'}
+            />
+          </div>
         )}
       </div>
       {kind === 'mask' ? (
@@ -264,14 +256,13 @@ function GroupCheckAlors({ ck, cols, defaultCol, boxed, onChange, onDelete }) {
   const isRules = spec[2] === 'rules' // 'rows_satisfy' consequent (a rules builder)
   const extra = spec[3]
   const colSelect = (val, onPick, placeholder = '(colonne)') => (
-    <select className="qb-select" value={val || ''} onChange={(e) => onPick(e.target.value)}>
-      <option value="">{placeholder}</option>
-      {cols.map((c) => (
-        <option key={c.name} value={c.name}>
-          {c.name}
-        </option>
-      ))}
-    </select>
+    <ColumnPicker
+      compact
+      columns={cols}
+      value={val || ''}
+      onChange={onPick}
+      placeholder={placeholder}
+    />
   )
   const checkSelect = (
     <select
@@ -384,8 +375,6 @@ function GroupCheckAlors({ ck, cols, defaultCol, boxed, onChange, onDelete }) {
 
 function GroupCheckBuilder({ cond, cols, defaultCol, onChange }) {
   const keys = cond.group_by || []
-  const toggle = (c) =>
-    onChange({ group_by: keys.includes(c) ? keys.filter((x) => x !== c) : [...keys, c] })
   // collapse the picker once a key is set — the long list rarely needs to stay open
   const [keysOpen, setKeysOpen] = useState(keys.length === 0)
   // one or several checks, AND-combined; migrate the legacy single-check shape.
@@ -462,19 +451,13 @@ function GroupCheckBuilder({ cond, cols, defaultCol, onChange }) {
           )}
         </button>
         {keysOpen && (
-          <div className="checklist">
-            {cols.length === 0 && <div className="qb-hint">— colonnes non chargées —</div>}
-            {cols.map((c) => (
-              <label key={c.name} className="qb-check">
-                <input
-                  type="checkbox"
-                  checked={keys.includes(c.name)}
-                  onChange={() => toggle(c.name)}
-                />
-                {c.name} <span className="coltype-inline">{c.type}</span>
-              </label>
-            ))}
-          </div>
+          <ColumnPicker
+            multi
+            columns={cols}
+            value={keys}
+            onChange={(v) => onChange({ group_by: v })}
+            emptyMessage="— colonnes non chargées —"
+          />
         )}
       </div>
 
@@ -638,19 +621,13 @@ export function RuleRow({ r, cols, defaultCol, onChange, onDelete }) {
       >
         NON
       </button>
-      <select
-        className="qb-select"
+      <ColumnPicker
+        compact
+        columns={cols}
         value={r.column || ''}
-        onChange={(e) => onChange({ column: e.target.value })}
-        title="Colonne testée"
-      >
-        <option value="">{defaultCol ? `(défaut : ${defaultCol})` : '(colonne par défaut)'}</option>
-        {cols.map((c) => (
-          <option key={c.name} value={c.name}>
-            {c.name}
-          </option>
-        ))}
-      </select>
+        onChange={(v) => onChange({ column: v })}
+        placeholder={defaultCol ? `(défaut : ${defaultCol})` : '(colonne par défaut)'}
+      />
       <select
         className="qb-select"
         value={r.test}
@@ -735,18 +712,13 @@ export function RuleRow({ r, cols, defaultCol, onChange, onDelete }) {
             </button>
           )}
           {r.via === 'column' && VS_COLUMN_TESTS.has(r.test) ? (
-            <select
-              className="qb-select"
+            <ColumnPicker
+              compact
+              columns={cols}
               value={r.column2 || ''}
-              onChange={(e) => onChange({ column2: e.target.value })}
-            >
-              <option value="">(autre colonne)</option>
-              {cols.map((c) => (
-                <option key={c.name} value={c.name}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => onChange({ column2: v })}
+              placeholder="(autre colonne)"
+            />
           ) : (
             <input
               className={`qb-input ${needs.numericValue.includes(r.test) ? 'narrow' : ''}`}

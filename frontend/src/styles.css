@@ -1260,19 +1260,6 @@ code {
   font-size: 12px;
 }
 
-.checklist {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-height: 220px;
-  overflow: auto;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 8px;
-}
-.checklist .qb-check {
-  font-weight: 400;
-}
 .coltype-inline {
   color: var(--muted);
   font-size: 11px;

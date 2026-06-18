@@ -45,6 +45,10 @@ function shortType(t) {
  * @param {string} [props.label]
  * @param {string} [props.placeholder='— choisir —']
  * @param {string} [props.emptyMessage='Aucune colonne disponible']
+ * @param {boolean} [props.compact=false]  - rendu inline (pas de <label> qui
+ *   wraperait : utilise `qb-select`, hérite de la largeur du parent). À utiliser
+ *   dans les rangées `qb-row` (Calc / Clean / Filter) où la primitive doit
+ *   tenir entre d'autres contrôles.
  */
 export default function ColumnPicker({
   columns = [],
@@ -54,6 +58,7 @@ export default function ColumnPicker({
   label,
   placeholder = '— choisir —',
   emptyMessage = 'Aucune colonne disponible',
+  compact = false,
 }) {
   const items = useMemo(
     () =>
@@ -65,6 +70,15 @@ export default function ColumnPicker({
   )
 
   if (items.length === 0) {
+    if (compact) {
+      // Dans une rangée, on doit rester un <select> pour ne pas casser le
+      // flex layout. Disabled + placeholder explicite suffit.
+      return (
+        <select className="qb-select" disabled value="">
+          <option value="">{emptyMessage}</option>
+        </select>
+      )
+    }
     return (
       <div className="colpick colpick-empty">
         {label && <span className="fld-label">{label}</span>}

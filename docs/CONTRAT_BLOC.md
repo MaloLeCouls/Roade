@@ -77,13 +77,13 @@ Quand un manque est rattaché à un todo de la roadmap, l'ID est mentionné.
 | Bloc | 1. UI dédiée | 2. Picker typé | 3. Aperçu | 4. Profil | 5. Preflight | 6. Erreur nœud | 7. Info-bulle | 8. Exemples |
 |---|---|---|---|---|---|---|---|---|
 | **Source**     | ✅ | ➖ | ✅ | ✅ | ✅ `no_file` | ✅ | ✅ (`sniffSummary` + override encodage/décimale) | ➖ |
-| **SQL**        | ✅ | ❌ (D.7) | ✅ | ✅ | ✅ `sql_empty` (mode raw) | ✅ | ✅ | ❌ (F.4) |
-| **Doublons**   | ✅ | ✅ (`ColChecklist` montre les types) | ✅ | ✅ | ❌ (clé vide non détectée) | ✅ | ✅ | ➖ |
-| **Validation** | ✅ | ⚠ (`ColSelect` non typé sur la cible) | ✅ | ✅ | ✅ `validate_target` | ✅ | ✅ | ❌ |
-| **Pivot**      | ✅ | ❌ (D.7) | ✅ | ✅ | ❌ (pas de check pivot_column/value_column ; F.2) | ✅ | ✅ (depuis F.2) | ❌ |
-| **Nettoyage**  | ✅ | ✅ (`CalcColSelect` typé) | ✅ | ✅ | ❌ (op sans colonne non détectée) | ✅ | ✅ | ❌ (F.4) |
-| **Calcul**     | ✅ | ✅ (`CalcColSelect` typé) | ✅ | ✅ | ❌ (formule vide non détectée) | ✅ | ✅ | ✅ (`CALC_EXAMPLES`) |
-| **Filtre**     | ✅ | ❌ (`mainCols`/`refCols` non typés ; F.3) | ✅ | ✅ | ✅ `filter_empty`/`filter_mismatch` | ✅ | ✅ | ❌ (F.4) |
+| **SQL**        | ✅ | ➖ (constructeur visuel, pas de picker isolé) | ✅ | ✅ | ✅ `sql_empty` (mode raw) | ✅ | ✅ | ❌ (F.4) |
+| **Doublons**   | ✅ | ✅ | ✅ | ✅ | ❌ (clé vide non détectée) | ✅ | ✅ | ➖ |
+| **Validation** | ✅ | ✅ | ✅ | ✅ | ✅ `validate_target` | ✅ | ✅ | ❌ |
+| **Pivot**      | ✅ | ✅ | ✅ | ✅ | ❌ (pas de check pivot_column/value_column ; F.2) | ✅ | ✅ (depuis F.2) | ❌ |
+| **Nettoyage**  | ✅ | ✅ | ✅ | ✅ | ❌ (op sans colonne non détectée) | ✅ | ✅ | ❌ (F.4) |
+| **Calcul**     | ✅ | ✅ | ✅ | ✅ | ❌ (formule vide non détectée) | ✅ | ✅ | ✅ (`CALC_EXAMPLES`) |
+| **Filtre**     | ✅ | ✅ (paires Data/Ref typées — D.7) | ✅ | ✅ | ✅ `filter_empty`/`filter_mismatch` | ✅ | ✅ | ❌ (F.4) |
 | **Cols**       | ✅ | ✅ | ✅ | ✅ | ❌ (sélection vide non détectée) | ✅ | ✅ | ➖ |
 | **Union**      | ✅ | ➖ | ✅ | ✅ | ⚠ (input manquant détecté, alignement des schémas pas remonté ; F.1) | ✅ | ⚠ (à enrichir ; F.1) | ➖ |
 | **Analyse**    | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ➖ |
@@ -91,10 +91,10 @@ Quand un manque est rattaché à un todo de la roadmap, l'ID est mentionné.
 
 ### Manques qui devront être adressés
 
-**Item 2 — pickers non typés** (rattaché à D.7, débloque F.1/F.2/F.3) :
-- `ColSelect` (Inspector.jsx:378) : utilisé dans SQL, Pivot, Validation (cible).
-- `mainCols`/`refCols` du Filtre (Inspector.jsx:991-1004 d'après l'audit 03) :
-  Filtre compare des valeurs, c'est typiquement là que le type compte le plus.
+**Item 2 — D.7 terminé** : tous les pickers de colonne passent désormais par
+`<ColumnPicker>` (mono ou multi, mode `compact` pour les rangées `qb-row`). Les
+helpers historiques `ColSelect`, `ColChecklist`, `CalcColSelect` ont été
+supprimés. Le type s'affiche partout à côté du nom.
 
 **Item 5 — preflight incomplet** : les blocs Doublons (clé vide), Pivot (colonnes
 manquantes), Nettoyage (op sans colonne), Calcul (formule vide), Cols (sélection
@@ -111,8 +111,8 @@ ligne dans `preflightWorkflow()`.
   orphelines.
 - **F.2 Pivot au socle** → pickers typés (item 2) + preflight (item 5) + bulle
   enrichie (déjà partiellement faite).
-- **F.3 Filtre typé** → pickers typés sur `mainCols`/`refCols` (item 2) + dry-run
-  des lignes exclues (bonus).
+- **F.3 Filtre typé** → ~~pickers typés sur `mainCols`/`refCols`~~ (fait avec
+  D.7). Reste : dry-run des lignes exclues (bonus).
 - **F.4 Exemples** → item 8 sur SQL, Clean, Filter.
 - **F.5 Dry-run gros volumes** → ce n'est pas un item du contrat *à proprement
   parler* mais une couche transverse qui sert tous les blocs lourds.
