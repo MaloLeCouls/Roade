@@ -641,18 +641,28 @@ function Editor({ pid, wid, onBack }) {
 
   // Click-to-connect mode : on tient notre propre Set d'IDs cibles pour ne pas
   // se battre avec la sélection native de React Flow (qui efface tout au clic
-  // simple sur la pane). `targets` est piloté à part : un clic sur un nœud
-  // toggle son id ici, et `decoratedNodes` reflète l'état sur `selected`.
+  // simple sur la pane). Deux variantes symétriques :
+  //   - fan-out : 1 source → on clique plusieurs cibles (1 → N).
+  //   - fan-in  : plusieurs sources sélectionnées → on clique 1 destination
+  //               (N → 1). Cas typique : 5 Sources qu'on veut tous brancher
+  //               sur un Union d'un coup.
+  // `confirmConnect` fait le produit cartésien sources × targets.
   const enterConnectMode = useCallback(
-    (sourceId) => {
-      const src = nodes.find((n) => n.id === sourceId)
-      if (!src) return
-      const outs = nodeOutputs(src)
-      if (outs.length === 0) {
-        notify("Ce bloc n'a pas de sortie à connecter.", 'warn')
+    (sourceIds) => {
+      const ids = Array.isArray(sourceIds) ? sourceIds : [sourceIds]
+      const sources = ids
+        .map((id) => nodes.find((n) => n.id === id))
+        .filter((s) => s && nodeOutputs(s).length > 0)
+      if (sources.length === 0) {
+        notify("Aucun bloc avec sortie n'est sélectionné.", 'warn')
         return
       }
-      setConnectMode({ sourceId, sourceHandle: outs[0].handle, targets: new Set() })
+      const kind = sources.length === 1 ? 'fan-out' : 'fan-in'
+      setConnectMode({
+        kind,
+        sources: sources.map((s) => ({ id: s.id, handle: nodeOutputs(s)[0].handle })),
+        targets: new Set(),
+      })
       setNodes((nds) => nds.map((n) => ({ ...n, selected: false })))
       setSelectedId(null)
       setMenu(null)
@@ -665,10 +675,16 @@ function Editor({ pid, wid, onBack }) {
     setNodes((nds) => nds.map((n) => ({ ...n, selected: false })))
   }, [setNodes])
 
-  // Toggle d'une cible (clic sur un bloc en mode connexion).
+  // Toggle d'une cible (clic sur un bloc en mode connexion). En fan-in il n'y
+  // a qu'UNE seule destination : on remplace au lieu d'ajouter (et re-cliquer
+  // la même la désélectionne).
   const toggleConnectTarget = useCallback((id) => {
     setConnectMode((m) => {
       if (!m) return m
+      if (m.kind === 'fan-in') {
+        const next = m.targets.has(id) ? new Set() : new Set([id])
+        return { ...m, targets: next }
+      }
       const next = new Set(m.targets)
       if (next.has(id)) next.delete(id)
       else next.add(id)
@@ -1111,33 +1127,39 @@ function Editor({ pid, wid, onBack }) {
     [setEdges, nodes, attachStop],
   )
 
-  // Confirme le mode click-to-connect : crée une edge par bloc cible. Filtre
-  // de défense : pas le source, doit avoir une entrée. Pour la cible on prend
-  // la 1ʳᵉ entrée valide (`in1` pour SQL/Filter, `in` ailleurs). Un Union
+  // Confirme : produit cartésien sources × targets. Filtre de défense : pas
+  // de boucle (source = target), la cible doit avoir une entrée. Handle cible
+  // = `in1` pour SQL/Filter (table principale), `in` ailleurs. Un Union
   // accepte plusieurs liens sans remplacement.
   const confirmConnect = useCallback(() => {
     if (!connectMode) return
+    const sourceIds = new Set(connectMode.sources.map((s) => s.id))
     const targets = nodes.filter(
       (n) =>
-        connectMode.targets.has(n.id) &&
-        n.id !== connectMode.sourceId &&
-        nodeInputs(n).length > 0,
+        connectMode.targets.has(n.id) && !sourceIds.has(n.id) && nodeInputs(n).length > 0,
     )
     if (targets.length === 0) {
-      notify('Cliquez au moins un bloc cible avant de valider.', 'warn')
+      notify(
+        connectMode.kind === 'fan-in'
+          ? 'Cliquez un bloc destination avant de valider.'
+          : 'Cliquez au moins un bloc cible avant de valider.',
+        'warn',
+      )
       return
     }
     let created = 0
-    for (const t of targets) {
-      const inputs = nodeInputs(t)
-      const targetHandle = inputs.find((i) => i.handle === 'in1')?.handle || inputs[0].handle
-      onConnect({
-        source: connectMode.sourceId,
-        sourceHandle: connectMode.sourceHandle,
-        target: t.id,
-        targetHandle,
-      })
-      created += 1
+    for (const src of connectMode.sources) {
+      for (const t of targets) {
+        const inputs = nodeInputs(t)
+        const targetHandle = inputs.find((i) => i.handle === 'in1')?.handle || inputs[0].handle
+        onConnect({
+          source: src.id,
+          sourceHandle: src.handle,
+          target: t.id,
+          targetHandle,
+        })
+        created += 1
+      }
     }
     notify(created === 1 ? 'Lien créé.' : `${created} liens créés.`, 'ok')
     exitConnectMode()
@@ -1852,7 +1874,7 @@ function Editor({ pid, wid, onBack }) {
         const stt = status[n.id]
         const lost = stt?.ran ? stt.unrouted ?? 0 : 0
         const unused = unusedOutputsOf(n, usedHandlesByNode[n.id])
-        const isConnectSource = connectMode?.sourceId === n.id
+        const isConnectSource = connectMode?.sources?.some((s) => s.id === n.id) || false
         const isConnectTarget = connectMode?.targets?.has(n.id) || false
         const needsPatch =
           active || dirty || issues || lost || unused || isConnectSource || isConnectTarget
@@ -2078,12 +2100,21 @@ function Editor({ pid, wid, onBack }) {
             )}
             {connectMode && (
               <ConnectBanner
-                source={nodes.find((n) => n.id === connectMode.sourceId)}
-                sourceHandle={connectMode.sourceHandle}
-                outputs={nodeOutputs(nodes.find((n) => n.id === connectMode.sourceId))}
+                kind={connectMode.kind}
+                sources={connectMode.sources
+                  .map((s) => nodes.find((n) => n.id === s.id))
+                  .filter(Boolean)}
+                sourceHandle={connectMode.sources[0]?.handle}
+                outputs={
+                  connectMode.kind === 'fan-out'
+                    ? nodeOutputs(nodes.find((n) => n.id === connectMode.sources[0]?.id))
+                    : []
+                }
                 targetCount={connectMode.targets.size}
                 onChangeHandle={(h) =>
-                  setConnectMode((m) => (m ? { ...m, sourceHandle: h } : m))
+                  setConnectMode((m) =>
+                    m ? { ...m, sources: [{ ...m.sources[0], handle: h }] } : m,
+                  )
                 }
                 onConfirm={confirmConnect}
                 onCancel={exitConnectMode}
@@ -2110,11 +2141,11 @@ function Editor({ pid, wid, onBack }) {
               onNodesDelete={onNodesDelete}
               onEdgesDelete={onEdgesDelete}
               onNodeClick={(e, n) => {
-                // Mode click-to-connect : tout clic devient additif (toggle dans
-                // notre Set), et on n'ouvre PAS l'éditeur. Le bloc source est
-                // interdit comme cible (on ne se connecte pas à soi).
+                // Mode click-to-connect : clic = toggle (fan-out) ou remplace
+                // (fan-in). Pas d'ouverture d'éditeur. Les blocs sources sont
+                // interdits comme cibles (on ne se connecte pas à soi-même).
                 if (connectMode) {
-                  if (n.id === connectMode.sourceId) return
+                  if (connectMode.sources.some((s) => s.id === n.id)) return
                   if (nodeInputs(n).length === 0) {
                     notify("Ce bloc n'a pas d'entrée — choisissez une autre cible.", 'warn')
                     return
@@ -2380,14 +2411,28 @@ function Editor({ pid, wid, onBack }) {
                         <Icon name="plus" size={13} /> Dupliquer
                       </button>
                     )}
-                    {mn && nodeOutputs(mn).length > 0 && (
-                      <button
-                        role="menuitem"
-                        onClick={() => enterConnectMode(menu.id)}
-                      >
-                        <Icon name="flow" size={13} /> Connecter à…
-                      </button>
-                    )}
+                    {mn &&
+                      (() => {
+                        // Multi-sélection ? On bascule en fan-in (N sources → 1
+                        // destination). Le clic-droit conserve la sélection
+                        // multiple si la cible du clic en faisait partie.
+                        const selected = nodes.filter((x) => x.selected)
+                        const fanIn = selected.length > 1 && selected.some((s) => s.id === menu.id)
+                        const sources = fanIn ? selected : [mn]
+                        const validSources = sources.filter((s) => nodeOutputs(s).length > 0)
+                        if (validSources.length === 0) return null
+                        return (
+                          <button
+                            role="menuitem"
+                            onClick={() => enterConnectMode(validSources.map((s) => s.id))}
+                          >
+                            <Icon name="flow" size={13} />{' '}
+                            {fanIn
+                              ? `Connecter ces ${validSources.length} blocs à…`
+                              : 'Connecter à…'}
+                          </button>
+                        )
+                      })()}
                     <button
                       className="danger"
                       role="menuitem"
@@ -2451,7 +2496,8 @@ function fmtElapsed(ms) {
 // laisse choisir le port de sortie quand il y en a plusieurs (Dédoublons /
 // Validation), compte les cibles sélectionnées, et propose Connecter / Annuler.
 function ConnectBanner({
-  source,
+  kind,
+  sources,
   sourceHandle,
   outputs,
   targetCount,
@@ -2459,14 +2505,23 @@ function ConnectBanner({
   onConfirm,
   onCancel,
 }) {
-  const srcLabel = source?.data?.label || source?.type || '?'
+  const fanIn = kind === 'fan-in'
+  // fan-out : on nomme le source unique. fan-in : on liste les premiers
+  // labels + un « +N autres » au-delà de 3, pour rester sur une ligne.
+  const headline = fanIn ? (
+    <>
+      Connexion de <b>{sources.length} blocs</b> ({fmtSourcesLabel(sources)}) vers…
+    </>
+  ) : (
+    <>
+      Connexion depuis <b>{sources[0]?.data?.label || sources[0]?.type || '?'}</b>
+    </>
+  )
   return (
     <div className="banner connect-banner" role="status" aria-live="polite">
       <Icon name="flow" size={13} />
-      <span>
-        Connexion depuis <b>{srcLabel}</b>
-      </span>
-      {outputs.length > 1 && (
+      <span>{headline}</span>
+      {!fanIn && outputs.length > 1 && (
         <select
           className="connect-banner-handle"
           value={sourceHandle}
@@ -2481,10 +2536,19 @@ function ConnectBanner({
         </select>
       )}
       <span className="connect-banner-hint">
-        cliquez chaque bloc cible — <kbd>Entrée</kbd> pour valider
+        {fanIn ? 'cliquez le bloc destination' : 'cliquez chaque bloc cible'} —{' '}
+        <kbd>Entrée</kbd> pour valider
       </span>
       <span className="connect-banner-count">
-        {targetCount === 0 ? 'aucune cible' : targetCount === 1 ? '1 cible' : `${targetCount} cibles`}
+        {fanIn
+          ? targetCount === 0
+            ? 'aucune destination'
+            : '1 destination'
+          : targetCount === 0
+            ? 'aucune cible'
+            : targetCount === 1
+              ? '1 cible'
+              : `${targetCount} cibles`}
       </span>
       <button
         className="primary small"
@@ -2499,6 +2563,12 @@ function ConnectBanner({
       </button>
     </div>
   )
+}
+
+function fmtSourcesLabel(sources) {
+  const labels = sources.map((s) => s.data?.label || s.type)
+  if (labels.length <= 3) return labels.join(', ')
+  return `${labels.slice(0, 3).join(', ')}, +${labels.length - 3}`
 }
 
 function ProgressBar({ progress, frac = 0, sourceProgress = null, onGo }) {
