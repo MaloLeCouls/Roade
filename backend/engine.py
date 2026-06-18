@@ -309,6 +309,55 @@ def _apply_casts(df: pd.DataFrame, casts, decimal: str, thousands) -> tuple[pd.D
     return df, report
 
 
+def _normalize_mixed_object_columns(df: pd.DataFrame) -> list[dict]:
+    """openpyxl renvoie le type Python natif de chaque cellule — un fichier
+    Excel humain mélange souvent texte et nombres dans la même colonne (ex. un
+    libellé qui contient parfois juste `7`). pyarrow refuse alors de sérialiser
+    la colonne object hétérogène (« Expected bytes, got a 'int' object ») et
+    `to_parquet` plante avant tout traitement aval.
+
+    Solution la moins traîtresse : on convertit en texte les colonnes object
+    qui mélangent plusieurs types Python (en gardant les `None`/NaN tels
+    quels). On ne touche pas aux colonnes monotypées (toutes-strings, toutes-
+    dates…). Le rapport retourné permet de prévenir l'utilisateur (les
+    nombres orphelins sont devenus du texte — un cast explicite après ce bloc
+    est encore possible).
+    """
+    coerced: list[dict] = []
+    for col in df.columns:
+        if df[col].dtype != object:
+            continue
+        types = set()
+        counts: dict[str, int] = {}
+        for v in df[col]:
+            if v is None or (isinstance(v, float) and pd.isna(v)):
+                continue
+            # On range int/float/bool sous l'étiquette « nombre » : c'est la
+            # confusion la plus fréquente (texte mêlé à des codes numériques),
+            # et donner un compte « 138 textes / 7 nombres » est plus parlant
+            # qu'« int / float / str ».
+            if isinstance(v, bool):
+                label = "booléen"
+            elif isinstance(v, (int, float)):
+                label = "nombre"
+            elif isinstance(v, str):
+                label = "texte"
+            elif isinstance(v, bytes):
+                label = "binaire"
+            else:
+                label = type(v).__name__
+            types.add(label)
+            counts[label] = counts.get(label, 0) + 1
+        if len(types) <= 1:
+            continue
+        # Coercion en texte, NaN/None préservés (pas de "None"/"nan" littéraux).
+        df[col] = df[col].map(
+            lambda v: None if v is None or (isinstance(v, float) and pd.isna(v)) else str(v)
+        )
+        coerced.append({"column": col, "counts": counts})
+    return coerced
+
+
 def _source_fingerprint(pid, node) -> str | None:
     """Identity of a source's inputs: file + sheet + header + read options +
     size + mtime. Changes whenever the underlying file or its read options
@@ -705,9 +754,15 @@ def _run_source(con, pid, node, ins, *, on_progress=None):
     # A.5 — casts utilisateur explicites (number / date / text / boolean) AVANT
     # matérialisation, pour ne pas forcer un détour par un bloc Nettoyage.
     df, casts_report = _apply_casts(df, d.get("casts"), d.get("decimal") or "", d.get("thousands"))
+    # Avant matérialisation, on désamorce les colonnes object hétérogènes que
+    # pyarrow refuserait de sérialiser. On le fait APRÈS les casts pour ne pas
+    # masquer une colonne que l'utilisateur a déjà forcée en nombre/date.
+    mixed_report = _normalize_mixed_object_columns(df)
     extra = {}
     if casts_report:
         extra["casts_report"] = casts_report
+    if mixed_report:
+        extra["mixed_types"] = mixed_report
     fp = _source_fingerprint(pid, node)
     if fp:
         extra["source_fingerprint"] = fp
@@ -2778,7 +2833,7 @@ def _reuse_result(pid, wid, node, handles, ntype, locked, signature) -> dict:
         outputs[h] = m.get("row_count", 0)
         if i == 0:
             columns = m.get("columns", [])
-            for k in ("compiled_sql", "clean_report", "report", "casts_report"):
+            for k in ("compiled_sql", "clean_report", "report", "casts_report", "mixed_types"):
                 if k in m:
                     extra[k] = m[k]
             for k in ("input_rows", "unrouted_rows"):
@@ -3204,6 +3259,8 @@ def preview_node(
             "stats": meta.get("stats"),
             "input_rows": meta.get("input_rows"),
             "unrouted_rows": meta.get("unrouted_rows"),
+            "casts_report": meta.get("casts_report"),
+            "mixed_types": meta.get("mixed_types"),
         }
     con = duckdb.connect()
     try:
@@ -3236,6 +3293,8 @@ def preview_node(
             "stats": meta.get("stats"),
             "input_rows": meta.get("input_rows"),
             "unrouted_rows": meta.get("unrouted_rows"),
+            "casts_report": meta.get("casts_report"),
+            "mixed_types": meta.get("mixed_types"),
         }
     finally:
         con.close()

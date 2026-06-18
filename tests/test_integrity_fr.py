@@ -247,6 +247,59 @@ def test_xlsx_merged_cells_warning(tmp_path):
     assert any("fusionn" in w.lower() for w in warns), warns
 
 
+def test_xlsx_mixed_text_and_numbers_imports_without_crash(tmp_path):
+    """Un xlsx « humain » mélange souvent texte et nombres dans la même colonne
+    (ex. un libellé qui contient parfois juste `7`). openpyxl renvoie les types
+    natifs ; pyarrow refuse alors la colonne object hétérogène (« Expected
+    bytes, got a 'int' object ») et `to_parquet` plante.
+
+    Le moteur doit détecter ces colonnes mixtes, les coercer en texte (en
+    préservant les vides), surfacer un rapport, et permettre la matérialisation
+    parquet. Régression : un Excel client réel a planté avec ce message exact."""
+    import openpyxl
+
+    pid, fd = _new_project("MixedTypes")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["code", "libelle"])
+    ws.append(["A1", "fermeuse"])
+    ws.append(["A2", "ressort"])
+    ws.append(["A3", 7])  # nombre orphelin au milieu de libellés texte
+    ws.append(["A4", "carter"])
+    ws.append(["A5", None])  # vide
+    ws.append(["A6", 12])  # un autre nombre
+    wb.save(fd / "mixed.xlsx")
+    wb.close()
+
+    node = {"id": "s", "type": "source", "data": {"file": "mixed.xlsx"}}
+    outputs, extra = engine._run_source(None, pid, node, [])
+    df = outputs["out"]
+
+    # La colonne hétérogène a été coercée en texte ; les nombres orphelins sont
+    # devenus "7" et "12" plutôt que de faire planter pyarrow. Les vides
+    # restent vides (None ou NaN — pandas peut osciller, parquet écrit null
+    # dans les deux cas, c'est ce qui compte).
+    vals = df["libelle"].tolist()
+    expected_non_null = {0: "fermeuse", 1: "ressort", 2: "7", 3: "carter", 5: "12"}
+    for i, v in expected_non_null.items():
+        assert vals[i] == v, (i, vals[i])
+    assert pd.isna(vals[4]) or vals[4] is None, vals[4]
+
+    # Rapport remonté pour que l'UI puisse prévenir l'utilisateur.
+    assert "mixed_types" in extra
+    rep = {it["column"]: it for it in extra["mixed_types"]}
+    assert "libelle" in rep
+    assert rep["libelle"]["counts"].get("texte") == 3
+    assert rep["libelle"]["counts"].get("nombre") == 2
+
+    # Le parquet s'écrit maintenant sans lever d'exception.
+    import tempfile
+
+    p = tmp_path / "out.parquet"
+    df.to_parquet(p, index=False)
+    assert p.exists() and p.stat().st_size > 0
+
+
 def test_fingerprint_invalidated_by_read_options(tmp_path):
     """Changer encoding ou decimal change la fingerprint Source → cache invalidé
     (A.9). Le bug serait un cache hit avec un décodage différent."""

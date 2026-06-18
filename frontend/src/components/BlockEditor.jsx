@@ -296,6 +296,9 @@ function OutputPreview({
         </div>
       ) : (
         <>
+          {data.mixed_types && data.mixed_types.length > 0 && (
+            <MixedTypesNotice items={data.mixed_types} />
+          )}
           <div className="be-rowcount">
             {data.row_count.toLocaleString('fr-FR')} lignes · {data.columns.length} colonnes
           </div>
@@ -363,6 +366,30 @@ function Spinner() {
     <span className="run-spin" aria-hidden="true">
       <span /> <span /> <span />
     </span>
+  )
+}
+
+// Avertissement « types mixtes coercés en texte » — visible juste au-dessus de
+// la table d'aperçu. Le moteur a vu un Excel humain où une colonne mélangeait
+// libellés et codes numériques (cas classique des fichiers FR). pyarrow l'aurait
+// refusée — on l'a sauvée en texte, on prévient pour que l'utilisateur sache.
+// Pas une erreur : un signal. Pose explicitement un cast « number » dans la
+// Source si tu veux relire ces valeurs comme des nombres.
+function MixedTypesNotice({ items }) {
+  return (
+    <div className="notice notice-warn" role="alert">
+      <b>{items.length} colonne(s) à types mixtes converties en texte.</b>
+      <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+        {items.map((it, i) => {
+          const parts = Object.entries(it.counts || {}).map(([k, n]) => `${n} ${k}`)
+          return (
+            <li key={i}>
+              <code>{it.column}</code> — {parts.join(' / ')}
+            </li>
+          )
+        })}
+      </ul>
+    </div>
   )
 }
 
