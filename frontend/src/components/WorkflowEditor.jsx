@@ -2009,6 +2009,13 @@ function Editor({ pid, wid, onBack }) {
               {legendOpen && (
                 <ul>
                   <li>
+                    <span className="legend-dot legend-dot-error" aria-hidden="true" />
+                    <span>
+                      <b>Erreur de configuration</b> — le bloc va échouer à l'exécution
+                      (entrée manquante, colonne non choisie…). Survol = détail.
+                    </span>
+                  </li>
+                  <li>
                     <span className="legend-dot legend-dot-dirty" aria-hidden="true" />
                     <span>
                       <b>Périmé</b> — la config a changé depuis le dernier run, le bloc sera

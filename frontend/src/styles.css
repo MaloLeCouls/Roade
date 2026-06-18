@@ -4610,6 +4610,10 @@ table.dt th.idx {
   background: var(--dot-loss);
   box-shadow: 0 0 0 2px rgba(185, 123, 255, 0.25);
 }
+.legend-dot-error {
+  background: var(--dot-error);
+  box-shadow: 0 0 0 2px rgba(192, 57, 47, 0.25);
+}
 .legend-badge {
   font-size: var(--fs-xs);
   padding: 1px 6px;
