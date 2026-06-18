@@ -7,6 +7,7 @@ export default function ValidateNode({ id, data, selected }) {
   const { status, onPreview, onRunNode, running } = useEditor()
   const st = status[id] || {}
   const outs = st.outputs || {}
+  const unused = new Set(data.__unusedHandles || [])
 
   const outputs = [
     ...(data.outputs || []).map((o) => ({
@@ -53,22 +54,32 @@ export default function ValidateNode({ id, data, selected }) {
           aiguillage sur <b>{data.target_column || '?'}</b>
         </div>
         <div className="dedup-outs">
-          {list.map((o) => (
-            <div className="dedup-out" key={o.handle}>
-              <span className="odot" style={o.color ? { background: o.color } : undefined} />
-              <span className={`oname ${o.empty ? 'oname-empty' : ''}`}>{o.label}</span>
-              {st.ran && (
-                <span className="ocount">{(outs[o.handle] ?? 0).toLocaleString('fr-FR')}</span>
-              )}
-              <Handle
-                type="source"
-                position={Position.Right}
-                id={o.handle}
-                className="anchor anchor-out"
-                style={o.color ? { background: o.color, borderColor: o.color } : undefined}
-              />
-            </div>
-          ))}
+          {list.map((o) => {
+            const dangling = unused.has(o.handle)
+            return (
+              <div className={`dedup-out${dangling ? ' dangling' : ''}`} key={o.handle}>
+                <span className="odot" style={o.color ? { background: o.color } : undefined} />
+                <span className={`oname ${o.empty ? 'oname-empty' : ''}`}>{o.label}</span>
+                {dangling && (
+                  <span
+                    className="oport-unused"
+                    title="Sortie non reliée — aucun bloc en aval ne s'en sert."
+                    aria-label="Sortie non reliée"
+                  />
+                )}
+                {st.ran && (
+                  <span className="ocount">{(outs[o.handle] ?? 0).toLocaleString('fr-FR')}</span>
+                )}
+                <Handle
+                  type="source"
+                  position={Position.Right}
+                  id={o.handle}
+                  className={`anchor anchor-out${dangling ? ' anchor-unused' : ''}`}
+                  style={o.color ? { background: o.color, borderColor: o.color } : undefined}
+                />
+              </div>
+            )
+          })}
         </div>
       </div>
       <div className="node-foot">

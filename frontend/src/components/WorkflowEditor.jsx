@@ -198,7 +198,9 @@ const DEFAULT_DATA = {
         name: 'Conforme',
         kind: 'rules',
         column: '',
-        groups: [],
+        // Une condition vide « prête à éditer » par défaut : pas besoin de
+        // cliquer « + Groupe (OU) » pour commencer (cf. RulesBuilder seed).
+        groups: [{ rules: [{ test: 'contains', value: '' }] }],
         segments: [],
         test_samples: '',
       },
@@ -372,6 +374,21 @@ function outputColorOf(node, handle) {
     if (handle === 'else') return node.data.else_color || '#9aa3b2'
   }
   return null
+}
+
+// Liste les ancres de sortie d'un nœud multi-sorties qui n'ont aucun lien.
+// Renvoie `null` quand il n'y a rien à signaler — un seul handle (chemin
+// nominal des blocs « out ») ne mérite pas de marque : un bloc terminal est
+// un cas légitime (export, analyse en bout de chaîne). Réservé aux blocs où
+// l'utilisateur compose plusieurs sorties et risque d'en oublier une.
+function unusedOutputsOf(node, used) {
+  if (!node) return null
+  if (node.type !== 'dedup' && node.type !== 'validate') return null
+  const outs = nodeOutputs(node)
+  if (outs.length <= 1) return null
+  const usedSet = used || new Set()
+  const orphans = outs.map((o) => o.handle).filter((h) => !usedSet.has(h))
+  return orphans.length ? orphans : null
 }
 
 export default function WorkflowEditor(props) {
@@ -844,18 +861,29 @@ function Editor({ pid, wid, onBack }) {
         e.preventDefault()
         setHelpOpen(true)
       } else if (e.key === 'Escape' && !inField(document.activeElement) && !mod) {
-        // Esc sort du mode sélection si on y est. Quand une modale (preview /
-        // BlockEditor / palette…) est ouverte, son propre handler intercepte
-        // d'abord — donc on n'a pas à se soucier de ne pas leur marcher dessus.
-        if (selectMode) {
-          e.preventDefault()
-          setSelectMode(false)
-        }
+        // Esc : (1) sort du mode sélection si on y est, (2) désélectionne
+        // tout (blocs + arêtes + curseur d'inspecteur). Quand une modale
+        // (preview / BlockEditor / palette…) est ouverte, son propre handler
+        // intercepte d'abord — on n'a pas à se soucier de leur marcher dessus.
+        e.preventDefault()
+        if (selectMode) setSelectMode(false)
+        setNodes((nds) => (nds.some((n) => n.selected) ? nds.map((n) => ({ ...n, selected: false })) : nds))
+        setEdges((eds) => (eds.some((ed) => ed.selected) ? eds.map((ed) => ({ ...ed, selected: false })) : eds))
+        setSelectedId(null)
+        setMenu(null)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [quickSave, duplicateSelected, undoDeletion, openConnectFromSelection, selectMode])
+  }, [
+    quickSave,
+    duplicateSelected,
+    undoDeletion,
+    openConnectFromSelection,
+    selectMode,
+    setNodes,
+    setEdges,
+  ])
 
   // Liste de commandes pour la palette (Ctrl+K). Anti-slop : pas de tout
   // exposer, juste les actions de premier rang.
@@ -1701,6 +1729,20 @@ function Editor({ pid, wid, onBack }) {
   // le badge.
   const preflight = useMemo(() => preflightWorkflow(nodes, edges), [nodes, edges])
 
+  // Sorties branchées par nœud (`{nodeId: Set<sourceHandle>}`). Sert à signaler
+  // sur Dédoublons / Validation les ancres orphelines : « cette sortie existe
+  // mais aucun bloc en aval ne s'en sert ». Pas une erreur — juste un repère
+  // pour ne pas oublier une branche.
+  const usedHandlesByNode = useMemo(() => {
+    const m = {}
+    for (const e of edges) {
+      const h = e.sourceHandle || 'out'
+      if (!m[e.source]) m[e.source] = new Set()
+      m[e.source].add(h)
+    }
+    return m
+  }, [edges])
+
   // highlight the currently-executing node (ComfyUI-style) + flag stale blocks.
   // Frames are dragged by their title bar only and rendered behind the blocks.
   const decoratedNodes = useMemo(
@@ -1714,18 +1756,20 @@ function Editor({ pid, wid, onBack }) {
         const issues = preflight[n.id]
         const stt = status[n.id]
         const lost = stt?.ran ? stt.unrouted ?? 0 : 0
-        if (!active && !dirty && !issues && !lost) return n
+        const unused = unusedOutputsOf(n, usedHandlesByNode[n.id])
+        if (!active && !dirty && !issues && !lost && !unused) return n
         const newData = { ...n.data }
         if (dirty) newData.__dirty = true
         if (issues) newData.__preflight = issues
         if (lost > 0) newData.__lost = lost
+        if (unused) newData.__unusedHandles = unused
         return {
           ...n,
           className: active ? 'rf-active' : undefined,
           data: newData,
         }
       }),
-    [nodes, progress.currentId, dirtyMap, preflight, status],
+    [nodes, progress.currentId, dirtyMap, preflight, status, usedHandlesByNode],
   )
 
   // colour links by the data type leaving the source port; make them deletable
@@ -2030,6 +2074,13 @@ function Editor({ pid, wid, onBack }) {
                     </span>
                   </li>
                   <li>
+                    <span className="legend-dot legend-dot-unused" aria-hidden="true" />
+                    <span>
+                      <b>Sortie non reliée</b> — sur un bloc à plusieurs sorties (Dédoublons,
+                      Validation), une des ancres n'a aucun lien aval.
+                    </span>
+                  </li>
+                  <li>
                     <span className="legend-badge" aria-hidden="true">
                       non exécuté
                     </span>
@@ -2097,6 +2148,7 @@ function Editor({ pid, wid, onBack }) {
               setEditorNode(null)
             }}
             onRun={(force = false) => doRun(editorNode, force)}
+            running={progress.active && progress.currentId === editorNode}
             onPreview={(id, handle) => setPreviewNode({ id, handle })}
             onClose={() => setEditorNode(null)}
           />

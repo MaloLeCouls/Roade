@@ -21,6 +21,10 @@
   --dot-stale: #e0a73a;
   --dot-error: var(--danger);
   --dot-loss: #b97bff;
+  /* unused (slate)  → sortie d'un bloc multi-sorties qui n'a aucun lien aval.
+     Tirage neutre : pas une erreur, juste « cette branche n'est pas exploitée ».
+     Choix de teinte : slate gris-bleu, distinct des 3 ci-dessus ET des --t-*. */
+  --dot-unused: #7e8a99;
 
   --radius: 4px;
   --radius-lg: 6px;
@@ -877,6 +881,28 @@ button.ghost.icon-only {
 }
 .odot.uniq {
   background: var(--accent);
+}
+
+/* Pastille slate (« sortie non reliée ») posée entre le nom et le compteur.
+   Visible mais discrète : c'est un repère, pas une alerte.
+   - taille fixe : ne change ni la hauteur de la rangée ni celle du bloc
+     ([[fixed-block-size]]) ;
+   - nom de la sortie légèrement adouci pour soutenir l'idée « branche en
+     attente » sans la noyer. */
+.dedup-out .oport-unused {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dot-unused);
+  flex: 0 0 auto;
+}
+.dedup-out.dangling .oname {
+  color: var(--muted);
+}
+.anchor-out.anchor-unused {
+  background: var(--panel) !important;
+  border: 1.5px dashed var(--dot-unused) !important;
 }
 .anchor-kept {
   background: var(--ok) !important;
@@ -4626,6 +4652,48 @@ table.dt th.idx {
 .legend-dot-error {
   background: var(--dot-error);
   box-shadow: 0 0 0 2px rgba(192, 57, 47, 0.25);
+}
+.legend-dot-unused {
+  background: var(--dot-unused);
+  box-shadow: 0 0 0 2px rgba(126, 138, 153, 0.25);
+}
+
+/* « Exécution… » : un bouton qu'on a cliqué doit le signaler. Le bouton se
+   désactive ; l'icône play laisse place à un point pulsé (3 points), et le
+   libellé devient « Exécution… ». Règle UX : tout déclencheur d'action longue
+   donne un retour immédiat (cf. [[run-status-visibility]]). */
+.run-btn[aria-busy='true'] {
+  cursor: progress;
+  opacity: 0.85;
+}
+.run-spin {
+  display: inline-flex;
+  gap: 3px;
+  vertical-align: middle;
+  margin-right: 2px;
+}
+.run-spin span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: run-spin-pulse 1s ease-in-out infinite;
+}
+.run-spin span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.run-spin span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes run-spin-pulse {
+  0%, 80%, 100% { opacity: 0.25; transform: scale(0.85); }
+  40% { opacity: 1; transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .run-spin span {
+    animation: none;
+    opacity: 0.6;
+  }
 }
 .legend-badge {
   font-size: var(--fs-xs);

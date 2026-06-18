@@ -50,6 +50,7 @@ export default function BlockEditor({
   onSchema,
   onDelete,
   onRun,
+  running,
   onPreview,
   onClose,
 }) {
@@ -92,6 +93,7 @@ export default function BlockEditor({
                 status={status}
                 onChange={onChange}
                 onRun={onRun}
+                running={running}
                 onPreview={onPreview}
               />
             </ErrorBoundary>
@@ -102,7 +104,7 @@ export default function BlockEditor({
   )
 }
 
-function BlockView({ pid, wid, node, status, onChange, onRun, onPreview }) {
+function BlockView({ pid, wid, node, status, onChange, onRun, running, onPreview }) {
   if (node.type === 'validate' && node.data.mode === 'route') {
     return (
       <ValidateView
@@ -112,6 +114,7 @@ function BlockView({ pid, wid, node, status, onChange, onRun, onPreview }) {
         status={status}
         onChange={(patch) => onChange(node.id, patch)}
         onRun={onRun}
+        running={running}
         onPreview={onPreview}
       />
     )
@@ -124,6 +127,7 @@ function BlockView({ pid, wid, node, status, onChange, onRun, onPreview }) {
         node={node}
         status={status}
         onRun={onRun}
+        running={running}
         onPreview={onPreview}
       />
     )
@@ -136,6 +140,7 @@ function BlockView({ pid, wid, node, status, onChange, onRun, onPreview }) {
         node={node}
         status={status}
         onRun={onRun}
+        running={running}
         onPreview={onPreview}
         title="Données exportées"
         note={
@@ -154,6 +159,7 @@ function BlockView({ pid, wid, node, status, onChange, onRun, onPreview }) {
       node={node}
       status={status}
       onRun={onRun}
+      running={running}
       onPreview={onPreview}
     />
   )
@@ -162,7 +168,7 @@ function BlockView({ pid, wid, node, status, onChange, onRun, onPreview }) {
 // Validation block: right pane with two tabs — "Sorties" (flow map + outputs
 // settings) and "Visualisation" (the data of a given output, inline). Clicking an
 // output's eye flips to the Visualisation tab on that output — no hidden modal.
-function ValidateView({ pid, wid, node, status, onChange, onRun, onPreview }) {
+function ValidateView({ pid, wid, node, status, onChange, onRun, running, onPreview }) {
   const [tab, setTab] = useState('settings')
   const [handle, setHandle] = useState(null)
   return (
@@ -194,6 +200,7 @@ function ValidateView({ pid, wid, node, status, onChange, onRun, onPreview }) {
             status={status}
             onChange={onChange}
             onRun={onRun}
+            running={running}
             onPreview={(h) => {
               setHandle(h)
               setTab('preview')
@@ -206,6 +213,7 @@ function ValidateView({ pid, wid, node, status, onChange, onRun, onPreview }) {
             node={node}
             status={status}
             onRun={onRun}
+            running={running}
             onPreview={onPreview}
             initialHandle={handle}
           />
@@ -215,7 +223,18 @@ function ValidateView({ pid, wid, node, status, onChange, onRun, onPreview }) {
   )
 }
 
-function OutputPreview({ pid, wid, node, status, onRun, onPreview, initialHandle, title, note }) {
+function OutputPreview({
+  pid,
+  wid,
+  node,
+  status,
+  onRun,
+  running,
+  onPreview,
+  initialHandle,
+  title,
+  note,
+}) {
   const outs = outputsOf(node)
   const [handle, setHandle] = useState(initialHandle || outs[0]?.handle || 'out')
   const [data, setData] = useState(null)
@@ -242,11 +261,7 @@ function OutputPreview({ pid, wid, node, status, onRun, onPreview, initialHandle
         <span className="ports-title">{title || 'Aperçu de la sortie'}</span>
         <div className="be-view-actions">
           {/* one "Exécuter" at a time: here once there is data, else the big CTA below */}
-          {data?.available && (
-            <button className="ghost small" onClick={() => onRun()} title="Exécuter ce bloc">
-              <Icon name="play" /> Exécuter
-            </button>
-          )}
+          {data?.available && <RunButton running={running} onRun={onRun} variant="ghost small" />}
           <button
             className="ghost small"
             disabled={!data?.available}
@@ -277,9 +292,7 @@ function OutputPreview({ pid, wid, node, status, onRun, onPreview, initialHandle
         <div className="be-view-empty">
           <Icon name="play" size={26} />
           <p>Ce bloc n'a pas encore été exécuté.</p>
-          <button className="primary" onClick={() => onRun()}>
-            Exécuter
-          </button>
+          <RunButton running={running} onRun={onRun} variant="primary" />
         </div>
       ) : (
         <>
@@ -317,6 +330,42 @@ function OutputPreview({ pid, wid, node, status, onRun, onPreview, initialHandle
   )
 }
 
+// Un bouton « Exécuter » qui se désactive et affiche « Exécution… » pendant
+// que le bloc tourne. La règle UX qu'on respecte : tout déclencheur d'action
+// longue doit donner un retour immédiat (cf. [[run-status-visibility]]). Sans
+// ça, l'utilisateur reclique sans savoir que ça a démarré.
+function RunButton({ running, onRun, variant = 'ghost small', idleTitle }) {
+  return (
+    <button
+      className={`${variant} run-btn${running ? ' run-btn-busy' : ''}`}
+      onClick={() => !running && onRun()}
+      disabled={running}
+      title={running ? 'Exécution en cours…' : idleTitle || 'Exécuter ce bloc'}
+      aria-busy={running || undefined}
+    >
+      {running ? (
+        <>
+          <Spinner /> Exécution…
+        </>
+      ) : (
+        <>
+          <Icon name="play" /> Exécuter
+        </>
+      )}
+    </button>
+  )
+}
+
+// Petit indicateur d'attente — 3 points qui pulsent. Pas d'image, pas de
+// dépendance ; CSS via .run-spin (cf. styles.css).
+function Spinner() {
+  return (
+    <span className="run-spin" aria-hidden="true">
+      <span /> <span /> <span />
+    </span>
+  )
+}
+
 function fmtCell(v) {
   if (v === null || v === undefined) return <span className="null">vide</span>
   if (typeof v === 'number') return v.toLocaleString('fr-FR', { maximumFractionDigits: 6 })
@@ -325,7 +374,7 @@ function fmtCell(v) {
 
 // "Analyse" block: an état des lieux of the input — per-column composition, for
 // reporting. Reads the profile the backend stored on the block's output meta.
-function ReportView({ pid, wid, node, status, onRun, onPreview }) {
+function ReportView({ pid, wid, node, status, onRun, running, onPreview }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const ran = status?.ran ? JSON.stringify(status.outputs || status.rows) : ''
@@ -350,13 +399,12 @@ function ReportView({ pid, wid, node, status, onRun, onPreview }) {
         <span className="ports-title">État des lieux</span>
         <div className="be-view-actions">
           {data?.available && (
-            <button
-              className="ghost small"
-              onClick={() => onRun(true)}
-              title="Recalculer l'analyse"
-            >
-              <Icon name="play" /> Exécuter
-            </button>
+            <RunButton
+              running={running}
+              onRun={() => onRun(true)}
+              variant="ghost small"
+              idleTitle="Recalculer l'analyse"
+            />
           )}
           <button
             className="ghost small"
@@ -376,9 +424,7 @@ function ReportView({ pid, wid, node, status, onRun, onPreview }) {
         <div className="be-view-empty">
           <Icon name="play" size={26} />
           <p>Ce bloc n'a pas encore été exécuté.</p>
-          <button className="primary" onClick={() => onRun()}>
-            Exécuter
-          </button>
+          <RunButton running={running} onRun={onRun} variant="primary" />
         </div>
       ) : !report ? (
         <div className="be-view-empty">

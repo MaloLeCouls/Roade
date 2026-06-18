@@ -14,6 +14,7 @@ export default function DedupNode({ id, data, selected }) {
   const st = status[id] || {}
   const outs = st.outputs || {}
   const keys = data.key_columns || []
+  const unused = new Set(data.__unusedHandles || [])
   return (
     <div className={`node node-dedup ${selected ? 'sel' : ''}`}>
       <Handle
@@ -37,21 +38,31 @@ export default function DedupNode({ id, data, selected }) {
         <div className="node-sub">doublons : {dupModeLabel(data.dups_mode)}</div>
 
         <div className="dedup-outs">
-          {OUTPUTS.map((o) => (
-            <div className="dedup-out" key={o.handle}>
-              <span className={`odot ${o.cls}`} />
-              <span className="oname">{o.label}</span>
-              {st.ran && (
-                <span className="ocount">{(outs[o.handle] ?? 0).toLocaleString('fr-FR')}</span>
-              )}
-              <Handle
-                type="source"
-                position={Position.Right}
-                id={o.handle}
-                className={`anchor anchor-out anchor-${o.cls}`}
-              />
-            </div>
-          ))}
+          {OUTPUTS.map((o) => {
+            const dangling = unused.has(o.handle)
+            return (
+              <div className={`dedup-out${dangling ? ' dangling' : ''}`} key={o.handle}>
+                <span className={`odot ${o.cls}`} />
+                <span className="oname">{o.label}</span>
+                {dangling && (
+                  <span
+                    className="oport-unused"
+                    title="Sortie non reliée — aucun bloc en aval ne s'en sert."
+                    aria-label="Sortie non reliée"
+                  />
+                )}
+                {st.ran && (
+                  <span className="ocount">{(outs[o.handle] ?? 0).toLocaleString('fr-FR')}</span>
+                )}
+                <Handle
+                  type="source"
+                  position={Position.Right}
+                  id={o.handle}
+                  className={`anchor anchor-out anchor-${o.cls}${dangling ? ' anchor-unused' : ''}`}
+                />
+              </div>
+            )
+          })}
         </div>
       </div>
       <div className="node-foot">

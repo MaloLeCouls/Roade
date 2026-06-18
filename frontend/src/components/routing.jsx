@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
 import Icon from './Icon'
 import ColumnPicker from './ui/ColumnPicker'
@@ -67,6 +67,15 @@ export function ConditionsEditor({ node, cols, onChange }) {
     setConditions(conditions.map((c, j) => (j === i ? { ...c, ...patch } : c)))
   const addCond = () =>
     setConditions([...conditions, makeCondition({ name: `Condition ${conditions.length + 1}` })])
+  const dupCond = (i) => {
+    const src = conditions[i]
+    if (!src) return
+    // Copie collée juste après l'originale. Nouvel `id` pour ne pas collisionner
+    // avec les références d'outputs ; nom suffixé pour repérer la copie au
+    // premier coup d'œil.
+    const copy = { ...src, id: 'c' + uid(), name: `${src.name || 'Condition'} (copie)` }
+    setConditions([...conditions.slice(0, i + 1), copy, ...conditions.slice(i + 1)])
+  }
   const delCond = (i) => {
     const removed = conditions[i]
     onChange({
@@ -119,9 +128,18 @@ export function ConditionsEditor({ node, cols, onChange }) {
               onChange={(e) => updCond(i, { name: e.target.value })}
             />
             <button
+              className="ghost small"
+              onClick={() => dupCond(i)}
+              title="Dupliquer la condition"
+              aria-label="Dupliquer la condition"
+            >
+              <Icon name="copy" />
+            </button>
+            <button
               className="ghost danger small"
               onClick={() => delCond(i)}
               title="Supprimer la condition"
+              aria-label="Supprimer la condition"
             >
               <Icon name="x" />
             </button>
@@ -558,6 +576,22 @@ export function RulesBuilder({ groups, cols, defaultCol, onChange }) {
   const addGroup = () => onChange([...groups, { rules: [{ test: 'contains', value: '' }] }])
   const updGroup = (gi, rules) => onChange(groups.map((g, j) => (j === gi ? { ...g, rules } : g)))
   const delGroup = (gi) => onChange(groups.filter((_, j) => j !== gi))
+  // Premier rendu sur condition vide → on amorce un groupe avec une règle
+  // prête à éditer, plutôt que de demander à l'utilisateur de cliquer
+  // « + Groupe (OU) » d'abord (geste pré-requis non intuitif). Le `useRef`
+  // empêche de re-créer après que l'utilisateur a explicitement supprimé son
+  // dernier groupe : son geste fait foi.
+  const seededRef = useRef(false)
+  useEffect(() => {
+    if (groups.length > 0) {
+      seededRef.current = true
+      return
+    }
+    if (!seededRef.current) {
+      seededRef.current = true
+      onChange([{ rules: [{ test: 'contains', value: '' }] }])
+    }
+  }, [groups, onChange])
   return (
     <div className="ocard-cond">
       {groups.length === 0 && <div className="qb-hint">Aucune règle. Ajoutez un groupe.</div>}
@@ -963,7 +997,7 @@ function ConditionTester({ cond, caseSensitive, onChange }) {
  *  RIGHT — flow map + outputs settings (the "where it goes") + preview
  * ======================================================================== */
 
-export function OutputsPane({ pid, wid, node, status, onChange, onRun, onPreview }) {
+export function OutputsPane({ pid, wid, node, status, onChange, onRun, running, onPreview }) {
   const dist = useRoutePreview(pid, wid, node, status)
   const d = node.data
   const conditions = d.conditions || []
@@ -1157,8 +1191,25 @@ export function OutputsPane({ pid, wid, node, status, onChange, onRun, onPreview
             <Icon name="maximize" size={13} /> Agrandir
           </button>
           {onRun && (
-            <button className="ghost small" onClick={() => onRun()} title="Exécuter ce bloc">
-              <Icon name="play" size={13} /> Exécuter
+            <button
+              className={`ghost small run-btn${running ? ' run-btn-busy' : ''}`}
+              onClick={() => !running && onRun()}
+              disabled={running}
+              title={running ? 'Exécution en cours…' : 'Exécuter ce bloc'}
+              aria-busy={running || undefined}
+            >
+              {running ? (
+                <>
+                  <span className="run-spin" aria-hidden="true">
+                    <span /> <span /> <span />
+                  </span>{' '}
+                  Exécution…
+                </>
+              ) : (
+                <>
+                  <Icon name="play" size={13} /> Exécuter
+                </>
+              )}
             </button>
           )}
           <span className="route-total">Entrée : {dist.total.toLocaleString('fr-FR')}</span>

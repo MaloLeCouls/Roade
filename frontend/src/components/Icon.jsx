@@ -177,6 +177,13 @@ export default function Icon({ name, size = 14 }) {
           <rect {...P} x="2.5" y="2.5" width="11" height="11" rx="1.5" strokeDasharray="2.4 2" />
         </svg>
       )
+    case 'copy':
+      return (
+        <svg style={s} viewBox="0 0 16 16">
+          <rect {...P} x="5.5" y="5.5" width="8" height="8" rx="1.2" />
+          <path {...P} d="M3.5 10.5H2.5v-8h8v1" />
+        </svg>
+      )
     default:
       return null
   }
