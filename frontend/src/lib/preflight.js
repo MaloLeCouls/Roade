@@ -74,6 +74,40 @@ export function preflightWorkflow(nodes, edges) {
       }
     }
 
+    if (n.type === 'pivot') {
+      // Le moteur `_run_pivot` raise sans config minimale :
+      //   - mode pivot : index_columns vide OU pivot_column OU value_column manquant
+      //   - mode unpivot : value_columns vide
+      // Voir engine.py:1638 / 1627.
+      const mode = d.mode || 'pivot'
+      if (mode === 'unpivot') {
+        if (!(d.value_columns || []).length) {
+          add(n.id, 'pivot_unpivot_empty', 'Choisissez les colonnes à dépivoter.')
+        }
+      } else {
+        if (!(d.index_columns || []).length) {
+          add(n.id, 'pivot_index_empty', 'Choisissez au moins une colonne « ligne ».')
+        }
+        if (!d.pivot_column) {
+          add(n.id, 'pivot_column_missing', 'Choisissez la colonne à éclater.')
+        }
+        if (!d.value_column) {
+          add(n.id, 'pivot_value_missing', 'Choisissez la colonne de valeurs.')
+        }
+      }
+    }
+
+    if (n.type === 'cols') {
+      // `_run_cols` raise « aucune colonne conservée » si tout est décoché
+      // ET qu'aucune colonne n'est ajoutée en amont. On flagge le cas le plus
+      // courant (toutes les entrées sont keep=false) ; on n'a pas le schéma
+      // amont côté preflight pour décider du cas marginal.
+      const items = d.columns || []
+      if (items.length > 0 && items.every((it) => it.keep === false)) {
+        add(n.id, 'cols_all_dropped', 'Vous avez décoché toutes les colonnes — gardez-en au moins une.')
+      }
+    }
+
     if (n.type === 'validate') {
       // Le but de la pastille : signaler UNIQUEMENT ce qui empêche le runtime
       // de tourner. Le moteur a deux chemins :

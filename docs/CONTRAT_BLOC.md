@@ -80,11 +80,11 @@ Quand un manque est rattaché à un todo de la roadmap, l'ID est mentionné.
 | **SQL**        | ✅ | ➖ (constructeur visuel, pas de picker isolé) | ✅ | ✅ | ✅ `sql_empty` (mode raw) | ✅ | ✅ | ❌ (F.4) |
 | **Doublons**   | ✅ | ✅ | ✅ | ✅ | ❌ (clé vide non détectée) | ✅ | ✅ | ➖ |
 | **Validation** | ✅ | ✅ | ✅ | ✅ | ✅ `validate_target` | ✅ | ✅ | ❌ |
-| **Pivot**      | ✅ | ✅ | ✅ | ✅ | ❌ (pas de check pivot_column/value_column ; F.2) | ✅ | ✅ (depuis F.2) | ❌ |
-| **Nettoyage**  | ✅ | ✅ | ✅ | ✅ | ❌ (op sans colonne non détectée) | ✅ | ✅ | ❌ (F.4) |
-| **Calcul**     | ✅ | ✅ | ✅ | ✅ | ❌ (formule vide non détectée) | ✅ | ✅ | ✅ (`CALC_EXAMPLES`) |
+| **Pivot**      | ✅ | ✅ | ✅ | ✅ | ✅ index/pivot/value (pivot) ; value_columns (unpivot) | ✅ | ✅ (depuis F.2) | ❌ |
+| **Nettoyage**  | ✅ | ✅ | ✅ | ✅ | ➖ (op sans colonne → skip silencieux, pas un échec moteur) | ✅ | ✅ | ❌ (F.4) |
+| **Calcul**     | ✅ | ✅ | ✅ | ✅ | ➖ (formule vide → skip silencieux) | ✅ | ✅ | ✅ (`CALC_EXAMPLES`) |
 | **Filtre**     | ✅ | ✅ (paires Data/Ref typées — D.7) | ✅ | ✅ | ✅ `filter_empty`/`filter_mismatch` | ✅ | ✅ | ❌ (F.4) |
-| **Cols**       | ✅ | ✅ | ✅ | ✅ | ❌ (sélection vide non détectée) | ✅ | ✅ | ➖ |
+| **Cols**       | ✅ | ✅ | ✅ | ✅ | ✅ `cols_all_dropped` (tout décoché) | ✅ | ✅ | ➖ |
 | **Union**      | ✅ | ➖ | ✅ | ✅ | ⚠ (input manquant détecté, alignement des schémas pas remonté ; F.1) | ✅ | ⚠ (à enrichir ; F.1) | ➖ |
 | **Analyse**    | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ➖ |
 | **Export**     | ✅ | ➖ | ➖ | ➖ | ❌ (filename vide non détecté) | ✅ | ✅ | ➖ |
@@ -96,10 +96,13 @@ Quand un manque est rattaché à un todo de la roadmap, l'ID est mentionné.
 helpers historiques `ColSelect`, `ColChecklist`, `CalcColSelect` ont été
 supprimés. Le type s'affiche partout à côté du nom.
 
-**Item 5 — preflight incomplet** : les blocs Doublons (clé vide), Pivot (colonnes
-manquantes), Nettoyage (op sans colonne), Calcul (formule vide), Cols (sélection
-vide), Export (`filename` vide) n'ont pas encore de règle. Ajouter ligne par
-ligne dans `preflightWorkflow()`.
+**Item 5 — preflight** : Pivot et Cols ont gagné leurs règles (et leurs tests).
+Les cas restants sont des *fallbacks silencieux* du moteur, pas des échecs :
+Nettoyage (op sans colonne → skip), Calcul (formule vide → skip), Export
+(`filename` vide → « resultat ») — pas de pastille rouge à ajouter, ce serait
+des faux positifs. À garder pour des warnings éventuels (couleur ambre, futur).
+Doublons : `key_columns` vide signifie « ligne entière » côté moteur, donc pas
+d'erreur.
 
 **Item 8 — exemples** : aujourd'hui seul Calcul en a (`CALC_EXAMPLES`).
 À étendre à SQL, Nettoyage, Filtre — c'est **F.4**.

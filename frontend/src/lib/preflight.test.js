@@ -59,6 +59,74 @@ describe('preflightWorkflow', () => {
     expect(hasBlockingIssues(issues)).toBe(false)
   })
 
+  it('Pivot flagge les configurations qui plantent au runtime', () => {
+    const src = n('s', 'source', { file: 'x' })
+    // Mode pivot par défaut, aucune config → 3 erreurs (index + pivot col + value col)
+    const empty = preflightWorkflow([src, n('p', 'pivot')], [e('s', 'p')])
+    const kinds = (empty.p || []).map((i) => i.kind)
+    expect(kinds).toContain('pivot_index_empty')
+    expect(kinds).toContain('pivot_column_missing')
+    expect(kinds).toContain('pivot_value_missing')
+
+    // Config valide → aucune erreur Pivot.
+    const ok = preflightWorkflow(
+      [
+        src,
+        n('p', 'pivot', {
+          mode: 'pivot',
+          index_columns: ['region'],
+          pivot_column: 'mois',
+          value_column: 'montant',
+        }),
+      ],
+      [e('s', 'p')],
+    )
+    expect(ok.p).toBeUndefined()
+
+    // Mode unpivot sans value_columns → flag dédié.
+    const unpiv = preflightWorkflow(
+      [src, n('p', 'pivot', { mode: 'unpivot' })],
+      [e('s', 'p')],
+    )
+    expect(unpiv.p?.some((i) => i.kind === 'pivot_unpivot_empty')).toBe(true)
+  })
+
+  it('Cols flagge le cas « toutes les colonnes décochées »', () => {
+    const src = n('s', 'source', { file: 'x' })
+    // 3 items, tous décochés → flag.
+    const noKept = preflightWorkflow(
+      [
+        src,
+        n('c', 'cols', {
+          columns: [
+            { name: 'a', keep: false },
+            { name: 'b', keep: false },
+          ],
+        }),
+      ],
+      [e('s', 'c')],
+    )
+    expect(noKept.c?.some((i) => i.kind === 'cols_all_dropped')).toBe(true)
+    // Au moins une cochée → pas de flag.
+    const someKept = preflightWorkflow(
+      [
+        src,
+        n('c', 'cols', {
+          columns: [
+            { name: 'a', keep: true },
+            { name: 'b', keep: false },
+          ],
+        }),
+      ],
+      [e('s', 'c')],
+    )
+    expect(someKept.c).toBeUndefined()
+    // Aucune config (premier ouverture) → pas de flag : l'engine forwarde
+    // les colonnes amont, le bloc tourne.
+    const fresh = preflightWorkflow([src, n('c', 'cols')], [e('s', 'c')])
+    expect(fresh.c).toBeUndefined()
+  })
+
   it('valide sans target_column : non-route → flag, route → pas de flag', () => {
     // En mode non-route (rules / mask / undefined), _run_validate exige
     // target_column. La pastille est légitime.
