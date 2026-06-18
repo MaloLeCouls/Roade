@@ -5,6 +5,10 @@
 // « Exécuter », attendait, et recevait une erreur 30s plus tard. Ici on
 // détecte STATIQUEMENT ce qu'on peut, on l'affiche sous forme de badges
 // sur les nodes, et le run pré-vérifie tout avant de partir.
+//
+// Cette fonction matérialise l'item 5 du « contrat de bloc » (F.0,
+// `docs/CONTRAT_BLOC.md`) : tout nouveau type de bloc dont l'engine peut
+// échouer de manière déterministe doit gagner sa règle ci-dessous.
 
 // Types qui exigent une entrée (sinon l'engine plante immédiatement).
 const NEEDS_INPUT = new Set([
