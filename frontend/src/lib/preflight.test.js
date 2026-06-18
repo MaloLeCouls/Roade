@@ -58,4 +58,37 @@ describe('preflightWorkflow', () => {
     expect(issues).toEqual({})
     expect(hasBlockingIssues(issues)).toBe(false)
   })
+
+  it('valide sans target_column : non-route → flag, route → pas de flag', () => {
+    // En mode non-route (rules / mask / undefined), _run_validate exige
+    // target_column. La pastille est légitime.
+    const src = n('s', 'source', { file: 'x' })
+    const noTargetNonRoute = preflightWorkflow(
+      [src, n('v', 'validate', { mode: 'rules' })],
+      [e('s', 'v')],
+    )
+    expect(noTargetNonRoute.v?.some((i) => i.kind === 'validate_target')).toBe(true)
+
+    // En mode route, target_column n'est qu'un fallback : si chaque condition
+    // a sa propre colonne, le moteur tourne sans erreur, donc PAS de pastille.
+    const routeNoTarget = preflightWorkflow(
+      [src, n('v', 'validate', { mode: 'route' })],
+      [e('s', 'v')],
+    )
+    expect(routeNoTarget.v).toBeUndefined()
+
+    // Route + split activé sans colonne dédiée ni fallback → là on flagge.
+    const routeSplitMissing = preflightWorkflow(
+      [src, n('v', 'validate', { mode: 'route', split: { enabled: true } })],
+      [e('s', 'v')],
+    )
+    expect(routeSplitMissing.v?.some((i) => i.kind === 'validate_target')).toBe(true)
+
+    // Route + split activé avec sa colonne propre → OK même sans target_column.
+    const routeSplitWithCol = preflightWorkflow(
+      [src, n('v', 'validate', { mode: 'route', split: { enabled: true, column: 'x' } })],
+      [e('s', 'v')],
+    )
+    expect(routeSplitWithCol.v).toBeUndefined()
+  })
 })

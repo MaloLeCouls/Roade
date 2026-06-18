@@ -843,11 +843,19 @@ function Editor({ pid, wid, onBack }) {
       } else if (e.key === '?' && !inField(document.activeElement) && !mod) {
         e.preventDefault()
         setHelpOpen(true)
+      } else if (e.key === 'Escape' && !inField(document.activeElement) && !mod) {
+        // Esc sort du mode sélection si on y est. Quand une modale (preview /
+        // BlockEditor / palette…) est ouverte, son propre handler intercepte
+        // d'abord — donc on n'a pas à se soucier de ne pas leur marcher dessus.
+        if (selectMode) {
+          e.preventDefault()
+          setSelectMode(false)
+        }
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [quickSave, duplicateSelected, undoDeletion, openConnectFromSelection])
+  }, [quickSave, duplicateSelected, undoDeletion, openConnectFromSelection, selectMode])
 
   // Liste de commandes pour la palette (Ctrl+K). Anti-slop : pas de tout
   // exposer, juste les actions de premier rang.

@@ -75,9 +75,23 @@ export function preflightWorkflow(nodes, edges) {
     }
 
     if (n.type === 'validate') {
+      // Le but de la pastille : signaler UNIQUEMENT ce qui empêche le runtime
+      // de tourner. Le moteur a deux chemins :
+      //   - `_run_validate` (mode = rules/mask, contrôle mono-colonne) →
+      //     `target_column` est obligatoire (erreur sinon).
+      //   - `_run_route` (mode = route) → `target_column` n'est qu'un *fallback*.
+      //     Chaque condition/règle peut spécifier son propre `column` ; le moteur
+      //     n'échoue pas, il fait juste « pas de match » pour les règles à
+      //     colonne manquante. Donc on ne flagge que si le *split* est activé
+      //     et que ni la colonne de split ni le fallback ne sont fournis.
       const target = d.target_column
       const mode = d.mode || 'rules'
-      if (mode !== 'group' && !target) {
+      const split = d.split || {}
+      if (mode === 'route') {
+        if (split.enabled && !target && !split.column) {
+          add(n.id, 'validate_target', 'Colonne à éclater non choisie.')
+        }
+      } else if (mode !== 'group' && !target) {
         add(n.id, 'validate_target', 'Colonne cible non choisie.')
       }
     }
