@@ -432,6 +432,11 @@ function Editor({ pid, wid, onBack }) {
   const [selectMode, setSelectMode] = useState(false) // box-selection mode (select many blocks → bulk delete)
   const [legendOpen, setLegendOpen] = useState(false) // canvas legend expanded?
   const [connectFor, setConnectFor] = useState(null) // sourceNodeId pour ConnectDialog (E.7)
+  // Mode « click-to-connect » : entré via clic-droit → « Connecter à… ».
+  // L'utilisateur clique (ou box-sélectionne) ensuite ses cibles sur le canvas
+  // puis valide. `{ sourceId, sourceHandle }`. ConnectDialog reste pour Ctrl+L
+  // (alternative clavier pure, sans souris).
+  const [connectMode, setConnectMode] = useState(null)
   const [backpack, setBackpack] = useState([]) // inventaire projet (App Inventor-style)
   const [backpackOpen, setBackpackOpen] = useState(false)
   const [selectionDragActive, setSelectionDragActive] = useState(false)
@@ -633,6 +638,44 @@ function Editor({ pid, wid, onBack }) {
     }
     setConnectFor(sel.id)
   }, [nodes])
+
+  // Click-to-connect mode : on tient notre propre Set d'IDs cibles pour ne pas
+  // se battre avec la sélection native de React Flow (qui efface tout au clic
+  // simple sur la pane). `targets` est piloté à part : un clic sur un nœud
+  // toggle son id ici, et `decoratedNodes` reflète l'état sur `selected`.
+  const enterConnectMode = useCallback(
+    (sourceId) => {
+      const src = nodes.find((n) => n.id === sourceId)
+      if (!src) return
+      const outs = nodeOutputs(src)
+      if (outs.length === 0) {
+        notify("Ce bloc n'a pas de sortie à connecter.", 'warn')
+        return
+      }
+      setConnectMode({ sourceId, sourceHandle: outs[0].handle, targets: new Set() })
+      setNodes((nds) => nds.map((n) => ({ ...n, selected: false })))
+      setSelectedId(null)
+      setMenu(null)
+    },
+    [nodes, setNodes],
+  )
+
+  const exitConnectMode = useCallback(() => {
+    setConnectMode(null)
+    setNodes((nds) => nds.map((n) => ({ ...n, selected: false })))
+  }, [setNodes])
+
+  // Toggle d'une cible (clic sur un bloc en mode connexion).
+  const toggleConnectTarget = useCallback((id) => {
+    setConnectMode((m) => {
+      if (!m) return m
+      const next = new Set(m.targets)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return { ...m, targets: next }
+    })
+  }, [])
+  // `confirmConnect` est défini plus bas, après `onConnect`, car React TDZ.
 
   // ---------------------------------------------------------------------- //
   // Inventaire (backpack) — App Inventor-style                             //
@@ -861,16 +904,26 @@ function Editor({ pid, wid, onBack }) {
         e.preventDefault()
         setHelpOpen(true)
       } else if (e.key === 'Escape' && !inField(document.activeElement) && !mod) {
-        // Esc : (1) sort du mode sélection si on y est, (2) désélectionne
+        // Esc : (1) sort du mode sélection / mode connexion, (2) désélectionne
         // tout (blocs + arêtes + curseur d'inspecteur). Quand une modale
         // (preview / BlockEditor / palette…) est ouverte, son propre handler
         // intercepte d'abord — on n'a pas à se soucier de leur marcher dessus.
         e.preventDefault()
+        if (connectMode) {
+          exitConnectMode()
+          return
+        }
         if (selectMode) setSelectMode(false)
         setNodes((nds) => (nds.some((n) => n.selected) ? nds.map((n) => ({ ...n, selected: false })) : nds))
         setEdges((eds) => (eds.some((ed) => ed.selected) ? eds.map((ed) => ({ ...ed, selected: false })) : eds))
         setSelectedId(null)
         setMenu(null)
+      } else if (e.key === 'Enter' && connectMode && !inField(document.activeElement) && !mod) {
+        // Entrée en mode connexion : valide les liens sur les cibles
+        // sélectionnées. Hors mode connexion, on laisse passer (le navigateur
+        // l'utilise dans les champs et certains menus).
+        e.preventDefault()
+        confirmConnect()
       }
     }
     window.addEventListener('keydown', onKey)
@@ -883,6 +936,9 @@ function Editor({ pid, wid, onBack }) {
     selectMode,
     setNodes,
     setEdges,
+    connectMode,
+    exitConnectMode,
+    confirmConnect,
   ])
 
   // Liste de commandes pour la palette (Ctrl+K). Anti-slop : pas de tout
@@ -1051,6 +1107,38 @@ function Editor({ pid, wid, onBack }) {
     },
     [setEdges, nodes, attachStop],
   )
+
+  // Confirme le mode click-to-connect : crée une edge par bloc cible. Filtre
+  // de défense : pas le source, doit avoir une entrée. Pour la cible on prend
+  // la 1ʳᵉ entrée valide (`in1` pour SQL/Filter, `in` ailleurs). Un Union
+  // accepte plusieurs liens sans remplacement.
+  const confirmConnect = useCallback(() => {
+    if (!connectMode) return
+    const targets = nodes.filter(
+      (n) =>
+        connectMode.targets.has(n.id) &&
+        n.id !== connectMode.sourceId &&
+        nodeInputs(n).length > 0,
+    )
+    if (targets.length === 0) {
+      notify('Cliquez au moins un bloc cible avant de valider.', 'warn')
+      return
+    }
+    let created = 0
+    for (const t of targets) {
+      const inputs = nodeInputs(t)
+      const targetHandle = inputs.find((i) => i.handle === 'in1')?.handle || inputs[0].handle
+      onConnect({
+        source: connectMode.sourceId,
+        sourceHandle: connectMode.sourceHandle,
+        target: t.id,
+        targetHandle,
+      })
+      created += 1
+    }
+    notify(created === 1 ? 'Lien créé.' : `${created} liens créés.`, 'ok')
+    exitConnectMode()
+  }, [connectMode, nodes, onConnect, exitConnectMode])
 
   // ---- node helpers ----
   const addNode = (type) => {
@@ -1757,19 +1845,28 @@ function Editor({ pid, wid, onBack }) {
         const stt = status[n.id]
         const lost = stt?.ran ? stt.unrouted ?? 0 : 0
         const unused = unusedOutputsOf(n, usedHandlesByNode[n.id])
-        if (!active && !dirty && !issues && !lost && !unused) return n
+        const isConnectSource = connectMode?.sourceId === n.id
+        const isConnectTarget = connectMode?.targets?.has(n.id) || false
+        const needsPatch =
+          active || dirty || issues || lost || unused || isConnectSource || isConnectTarget
+        if (!needsPatch && !connectMode) return n
         const newData = { ...n.data }
         if (dirty) newData.__dirty = true
         if (issues) newData.__preflight = issues
         if (lost > 0) newData.__lost = lost
         if (unused) newData.__unusedHandles = unused
-        return {
-          ...n,
-          className: active ? 'rf-active' : undefined,
-          data: newData,
-        }
+        const className = active
+          ? 'rf-active'
+          : isConnectSource
+            ? 'rf-connect-source'
+            : undefined
+        // En mode connexion on pilote `selected` depuis notre Set de cibles —
+        // sinon on laisse React Flow gérer le sien.
+        const patched = { ...n, className, data: newData }
+        if (connectMode) patched.selected = isConnectTarget
+        return patched
       }),
-    [nodes, progress.currentId, dirtyMap, preflight, status, usedHandlesByNode],
+    [nodes, progress.currentId, dirtyMap, preflight, status, usedHandlesByNode, connectMode],
   )
 
   // colour links by the data type leaving the source port; make them deletable
@@ -1972,6 +2069,19 @@ function Editor({ pid, wid, onBack }) {
                 </button>
               </div>
             )}
+            {connectMode && (
+              <ConnectBanner
+                source={nodes.find((n) => n.id === connectMode.sourceId)}
+                sourceHandle={connectMode.sourceHandle}
+                outputs={nodeOutputs(nodes.find((n) => n.id === connectMode.sourceId))}
+                targetCount={connectMode.targets.size}
+                onChangeHandle={(h) =>
+                  setConnectMode((m) => (m ? { ...m, sourceHandle: h } : m))
+                }
+                onConfirm={confirmConnect}
+                onCancel={exitConnectMode}
+              />
+            )}
           </div>
           <div
             className={`canvas ${selectMode ? 'selecting' : ''}`}
@@ -1993,6 +2103,18 @@ function Editor({ pid, wid, onBack }) {
               onNodesDelete={onNodesDelete}
               onEdgesDelete={onEdgesDelete}
               onNodeClick={(e, n) => {
+                // Mode click-to-connect : tout clic devient additif (toggle dans
+                // notre Set), et on n'ouvre PAS l'éditeur. Le bloc source est
+                // interdit comme cible (on ne se connecte pas à soi).
+                if (connectMode) {
+                  if (n.id === connectMode.sourceId) return
+                  if (nodeInputs(n).length === 0) {
+                    notify("Ce bloc n'a pas d'entrée — choisissez une autre cible.", 'warn')
+                    return
+                  }
+                  toggleConnectTarget(n.id)
+                  return
+                }
                 setSelectedId(n.id)
                 // multi-selecting (selection mode, or Maj/Ctrl/Cmd held): keep adding
                 // to the selection, don't pop the full-screen editor open.
@@ -2014,6 +2136,13 @@ function Editor({ pid, wid, onBack }) {
                 setMenu({ id: ns[0]?.id, x: e.clientX, y: e.clientY })
               }}
               onPaneClick={() => {
+                // En mode connexion on protège l'utilisateur d'un clic accidentel
+                // sur le canevas : il ne perd pas ses cibles. Échap reste la
+                // sortie explicite.
+                if (connectMode) {
+                  setMenu(null)
+                  return
+                }
                 setSelectedId(null)
                 setMenu(null)
               }}
@@ -2247,10 +2376,7 @@ function Editor({ pid, wid, onBack }) {
                     {mn && nodeOutputs(mn).length > 0 && (
                       <button
                         role="menuitem"
-                        onClick={() => {
-                          setConnectFor(menu.id)
-                          setMenu(null)
-                        }}
+                        onClick={() => enterConnectMode(menu.id)}
                       >
                         <Icon name="flow" size={13} /> Connecter à…
                       </button>
@@ -2312,6 +2438,60 @@ function MenuInfo({ children }) {
 function fmtElapsed(ms) {
   const s = Math.max(0, Math.floor(ms / 1000))
   return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s`
+}
+
+// Bannière du mode « click-to-connect » : rappelle qui est le bloc source,
+// laisse choisir le port de sortie quand il y en a plusieurs (Dédoublons /
+// Validation), compte les cibles sélectionnées, et propose Connecter / Annuler.
+function ConnectBanner({
+  source,
+  sourceHandle,
+  outputs,
+  targetCount,
+  onChangeHandle,
+  onConfirm,
+  onCancel,
+}) {
+  const srcLabel = source?.data?.label || source?.type || '?'
+  return (
+    <div className="banner connect-banner" role="status" aria-live="polite">
+      <Icon name="flow" size={13} />
+      <span>
+        Connexion depuis <b>{srcLabel}</b>
+      </span>
+      {outputs.length > 1 && (
+        <select
+          className="connect-banner-handle"
+          value={sourceHandle}
+          onChange={(e) => onChangeHandle(e.target.value)}
+          title="Port de sortie"
+        >
+          {outputs.map((o) => (
+            <option key={o.handle} value={o.handle}>
+              {o.label || o.handle}
+            </option>
+          ))}
+        </select>
+      )}
+      <span className="connect-banner-hint">
+        cliquez chaque bloc cible — <kbd>Entrée</kbd> pour valider
+      </span>
+      <span className="connect-banner-count">
+        {targetCount === 0 ? 'aucune cible' : targetCount === 1 ? '1 cible' : `${targetCount} cibles`}
+      </span>
+      <button
+        className="primary small"
+        onClick={onConfirm}
+        disabled={targetCount === 0}
+        title="Connecter (Entrée)"
+      >
+        Connecter
+      </button>
+      <button className="ghost small" onClick={onCancel} title="Annuler (Échap)">
+        <Icon name="x" />
+      </button>
+    </div>
+  )
 }
 
 function ProgressBar({ progress, frac = 0, sourceProgress = null, onGo }) {

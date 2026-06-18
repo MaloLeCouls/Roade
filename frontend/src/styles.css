@@ -630,6 +630,62 @@ button.ghost.icon-only {
   margin-left: auto;
 }
 
+/* Bannière dédiée au mode click-to-connect : assez visible pour qu'on sache
+   qu'on est dans un mode modal du canvas, sobre pour ne pas perturber la
+   lecture des nodes. Couleur accent (le « voici ce que tu es en train de
+   faire »), pas alerte. */
+.banner.connect-banner {
+  background: var(--surface-3);
+  color: var(--ink);
+  border-bottom: 1px solid #cdd6e2;
+  flex-wrap: wrap;
+}
+.banner.connect-banner b {
+  color: var(--accent-d);
+}
+.banner.connect-banner-handle,
+.connect-banner-handle {
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+.connect-banner-hint {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.connect-banner-count {
+  margin-left: auto;
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+}
+.banner.connect-banner button.primary,
+.banner.connect-banner button.ghost {
+  margin-left: 0;
+}
+.banner.connect-banner kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  font-size: 10px;
+  font-family: ui-monospace, monospace;
+}
+
+/* Surlignage du bloc source pendant le mode connexion — anneau accent qui
+   l'isole sans le faire bouger (taille fixe). Distinct du `selected` standard
+   qu'on réserve aux *cibles* en cours de sélection. */
+.react-flow__node.rf-connect-source > .node {
+  box-shadow: 0 0 0 2px var(--accent), 0 1px 3px rgba(20, 30, 60, 0.1);
+}
+
+/* Curseur explicite : on est en train de pointer une cible. */
+.editor:has(.banner.connect-banner) .react-flow__pane {
+  cursor: crosshair;
+}
+
 /* ---------- nodes ---------- */
 .node-source {
   --type: var(--t-source);
