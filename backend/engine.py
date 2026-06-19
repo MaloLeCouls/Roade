@@ -946,12 +946,49 @@ _VS_COLUMN_STR_TESTS = frozenset(
 _NUMERIC_TESTS = frozenset({"num_eq", "num_ne", "num_gt", "num_ge", "num_lt", "num_le"})
 
 
+# Tests whose negation has a positive counterpart : utile en mode multi-valeur
+# pour interpréter « ne contient aucune de ces valeurs » comme NOT(contient une).
+_NEGATION_OF = {"not_contains": "contains", "not_equals": "equals"}
+
+
+def _multi_values(rule: dict) -> list | None:
+    """Renvoie la liste des valeurs `rule.values` si elle est non-vide (après
+    strip), sinon None. Permet de dispatcher en mode multi-valeur : un même test
+    contre N valeurs, combiné en OR (ANY-match)."""
+    vals = rule.get("values")
+    if not isinstance(vals, list):
+        return None
+    cleaned = [v for v in vals if v is not None and str(v).strip() != ""]
+    return cleaned if cleaned else None
+
+
 def _rule_mask(df: pd.DataFrame, rule: dict, cs: bool, default_col: str) -> pd.Series:
     """Boolean Series: does each row satisfy this single rule (optionally negated)?
     Vectorized via pandas .str.* / numeric ops for the common tests; per-row
     _rule_ok fallback for positional/numeric-string tests. A rule may compare
     against either a literal (rule['value']) or another column (rule['via']
-    == 'column' + rule['column2'])."""
+    == 'column' + rule['column2']). En mode multi-valeur (`rule.values` =
+    liste), la règle matche si au moins une valeur de la liste matche le test
+    (pour les tests positifs) ; pour `not_contains`/`not_equals`, on bascule
+    sur l'équivalent positif et on inverse (« ne matche aucune »)."""
+    # Multi-valeur : recurse sur chaque valeur avec le test (positif si négation)
+    # et combine en OR. La `negate` finale est appliquée à la fin pour ne pas
+    # se télescoper avec la conversion not_X → X.
+    mv = _multi_values(rule)
+    if mv is not None:
+        is_neg = rule.get("test") in _NEGATION_OF
+        pos_test = _NEGATION_OF.get(rule.get("test"), rule.get("test"))
+        sub_base = {k: v for k, v in rule.items() if k not in ("values", "negate")}
+        sub_base["test"] = pos_test
+        masks = [_rule_mask(df, {**sub_base, "value": v}, cs, default_col) for v in mv]
+        m = masks[0]
+        for x in masks[1:]:
+            m = m | x
+        if is_neg:
+            m = ~m
+        m = m.astype(bool)
+        return ~m if rule.get("negate") else m
+
     col = rule.get("column") or default_col
     if not col or col not in df.columns:
         return pd.Series(False, index=df.index)
@@ -2690,6 +2727,27 @@ def _rule_label(r: dict) -> str:
     if r.get("label"):
         return r["label"]
     test = r.get("test")
+    # Mode multi-valeur : on affiche la liste pour que les libellés des règles
+    # restent lisibles (« doit commencer par l'une de : 00, 01, 02… »).
+    mv = _multi_values(r)
+    if mv is not None:
+        preview = ", ".join(str(x) for x in mv[:6])
+        if len(mv) > 6:
+            preview += f"… (+{len(mv) - 6})"
+        multi_labels = {
+            "starts_with": f"doit commencer par l'une de : {preview}",
+            "ends_with": f"doit finir par l'une de : {preview}",
+            "contains": f"doit contenir l'une de : {preview}",
+            "not_contains": f"ne doit contenir aucune de : {preview}",
+            "equals": f"doit être égal à l'une de : {preview}",
+            "not_equals": f"ne doit être égal à aucune de : {preview}",
+            "regex": f"doit correspondre à l'une de : {preview}",
+            "regex_full": f"doit correspondre à l'une de : {preview}",
+            "char_equals": f"le caractère {r.get('position', 1)} doit être l'un de : {preview}",
+            "substr_equals": f"les caractères {r.get('start', 1)}… doivent être l'un de : {preview}",
+        }
+        if test in multi_labels:
+            return multi_labels[test]
     v = r.get("value", "")
     labels = {
         "starts_with": f"doit commencer par « {v} »",
@@ -2743,6 +2801,19 @@ def _signed_label(r: dict) -> str:
 
 
 def _rule_ok(s: str, r: dict, cs: bool) -> bool:
+    # Multi-valeur (cf. _rule_mask) — même sémantique côté scalaire pour rester
+    # cohérent quand un test non vectorisable est utilisé. La négation `r.negate`
+    # est appliquée par le caller (testers / _rule_mask), pas ici : on renvoie
+    # le résultat brut du test.
+    mv = _multi_values(r)
+    if mv is not None:
+        is_neg = r.get("test") in _NEGATION_OF
+        pos_test = _NEGATION_OF.get(r.get("test"), r.get("test"))
+        sub_base = {k: v for k, v in r.items() if k not in ("values", "negate")}
+        sub_base["test"] = pos_test
+        ok = any(_rule_ok(s, {**sub_base, "value": v}, cs) for v in mv)
+        return (not ok) if is_neg else ok
+
     test = r.get("test")
     v = r.get("value")
     flags = 0 if cs else re.IGNORECASE

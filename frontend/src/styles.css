@@ -2730,8 +2730,43 @@ table.dt th.idx {
   color: var(--accent);
   border-color: var(--accent);
 }
+.rhs-toggle.on {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
 .rrow-del {
   margin-left: auto;
+}
+
+/* Mode multi-valeur d'une règle : textarea pour saisir N valeurs (une par ligne)
+   + un petit pied avec le compte + le toggle « liste » pour revenir au mode
+   simple. La zone occupe toute la largeur restante de la ligne pour pouvoir
+   coller proprement une grosse liste sans se battre avec l'alignement. */
+.rrow-multi {
+  flex: 1 1 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.rrow-multi-area {
+  width: 100%;
+  resize: vertical;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.rrow-multi-tail {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.rrow-multi-count {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .route-add {

@@ -92,6 +92,24 @@ export const VS_COLUMN_TESTS = new Set([
   'num_le',
 ])
 
+// Tests qui supportent le mode multi-valeur (r.values = liste). Sémantique :
+// le test matche si au moins une valeur matche (« ANY-match »). Pour
+// `not_contains`/`not_equals`, le backend bascule sur l'équivalent positif et
+// inverse — sémantique « NONE-match ». `is_in` est exclu : c'est déjà une liste
+// par construction (forme « F0, F1, FE… » dans le champ).
+export const MULTI_VALUE_TESTS = new Set([
+  'starts_with',
+  'ends_with',
+  'contains',
+  'not_contains',
+  'equals',
+  'not_equals',
+  'char_equals',
+  'substr_equals',
+  'regex',
+  'regex_full',
+])
+
 // D.2 — la palette des sorties utilisateur est une vue (10 premières couleurs)
 // de la palette catégorielle unique (`theme.js`). On re-exporte pour conserver
 // l'API existante des modules qui importent `OUTPUT_COLORS` depuis ici.

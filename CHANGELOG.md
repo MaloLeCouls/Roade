@@ -42,6 +42,18 @@ Rubriques utilisées : `Ajouté` · `Changé` · `Corrigé` · `Sécurité` · `
   la connexion partagée. Avant : un workflow tiers pouvait lire/écrire/
   exfiltrer n'importe quel fichier accessible par le process.
 
+### Changé
+
+- **Validation — règles multi-valeur** : les tests `starts_with`, `ends_with`,
+  `contains`, `not_contains`, `equals`, `not_equals`, `regex`, `regex_full`,
+  `char_equals`, `substr_equals` acceptent désormais une **liste** de valeurs
+  (champ `rule.values` array). Sémantique : ANY-match pour les tests positifs,
+  NONE-match pour `not_*`. UI : petit toggle « liste » dans la cellule valeur
+  qui transforme l'input en textarea (une valeur par ligne). Évite d'avoir à
+  créer N conditions en OR pour tester N préfixes/suffixes — paste de 30
+  valeurs en un coup. Rétro-compatible (les règles existantes en single-value
+  continuent à marcher).
+
 ---
 
 ## [0.4.0] — 2026-06-19 — UX d'éditeur

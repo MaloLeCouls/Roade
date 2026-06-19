@@ -12,6 +12,7 @@ import {
   buildMaskPattern,
   makeCondition,
   VS_COLUMN_TESTS,
+  MULTI_VALUE_TESTS,
 } from './validateHelpers'
 
 /*
@@ -754,13 +755,7 @@ export function RuleRow({ r, cols, defaultCol, onChange, onDelete }) {
               placeholder="(autre colonne)"
             />
           ) : (
-            <input
-              className={`qb-input ${needs.numericValue.includes(r.test) ? 'narrow' : ''}`}
-              type={needs.numericValue.includes(r.test) ? 'number' : 'text'}
-              placeholder={r.test === 'is_in' ? 'F0, F1, FE…' : 'valeur'}
-              value={r.value ?? ''}
-              onChange={(e) => onChange({ value: e.target.value })}
-            />
+            <RuleValueField r={r} onChange={onChange} />
           )}
         </>
       )}
@@ -770,6 +765,75 @@ export function RuleRow({ r, cols, defaultCol, onChange, onDelete }) {
         </button>
       )}
     </div>
+  )
+}
+
+// Cellule « valeur littérale » d'une règle. Par défaut input simple ; sur les
+// tests qui le supportent (MULTI_VALUE_TESTS), un toggle « liste » bascule en
+// textarea (une valeur par ligne). Stocke `r.values` (array) en mode liste,
+// `r.value` (string) en mode simple. Les deux ne coexistent pas — le backend
+// donne la priorité à `r.values` si non-vide, sinon retombe sur `r.value`.
+function RuleValueField({ r, onChange }) {
+  const isMulti = Array.isArray(r.values)
+  const isNumeric = needs.numericValue.includes(r.test)
+  const canMulti = MULTI_VALUE_TESTS.has(r.test)
+
+  const enterMulti = () => {
+    const seed = r.value ? [r.value] : []
+    onChange({ values: seed, value: '' })
+  }
+  const leaveMulti = () => {
+    const first = (r.values || []).find((v) => v && String(v).trim() !== '')
+    onChange({ values: undefined, value: first ?? '' })
+  }
+
+  if (isMulti) {
+    const text = (r.values || []).join('\n')
+    const nonEmpty = (r.values || []).filter((v) => v && String(v).trim() !== '').length
+    return (
+      <div className="rrow-multi" title="Mode liste : une valeur par ligne, la règle matche si au moins une matche">
+        <textarea
+          className="qb-input rrow-multi-area"
+          rows={Math.min(8, Math.max(2, (r.values || []).length + 1))}
+          placeholder={'une valeur par ligne\n(ex. 00\n01\n02)'}
+          value={text}
+          onChange={(e) => onChange({ values: e.target.value.split('\n') })}
+        />
+        <div className="rrow-multi-tail">
+          <span className="rrow-multi-count">{nonEmpty} val.</span>
+          <button
+            type="button"
+            className="rhs-toggle on"
+            onClick={leaveMulti}
+            title="Revenir à une valeur unique"
+          >
+            <Icon name="list" size={12} /> liste
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <>
+      <input
+        className={`qb-input ${isNumeric ? 'narrow' : ''}`}
+        type={isNumeric ? 'number' : 'text'}
+        placeholder={r.test === 'is_in' ? 'F0, F1, FE…' : 'valeur'}
+        value={r.value ?? ''}
+        onChange={(e) => onChange({ value: e.target.value })}
+      />
+      {canMulti && (
+        <button
+          type="button"
+          className="rhs-toggle"
+          onClick={enterMulti}
+          title="Tester contre une liste de valeurs (« commence par l'une de… »)"
+        >
+          <Icon name="list" size={12} /> liste
+        </button>
+      )}
+    </>
   )
 }
 
