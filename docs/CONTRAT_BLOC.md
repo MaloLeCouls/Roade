@@ -124,7 +124,13 @@ des « préréglages » qui ne font qu'inverser le mode serait du bruit.
 - **F.4 Exemples** → item 8 ✅ — SQL (5 préréglages mode raw), Clean (4
   recettes). Filter écarté à dessein (cf. note item 8 ci-dessus).
 - **F.5 Dry-run gros volumes** → ce n'est pas un item du contrat *à proprement
-  parler* mais une couche transverse qui sert tous les blocs lourds.
+  parler* mais une couche transverse qui sert tous les blocs lourds. **Fait** :
+  pastille orange `node-dot-heavy` sur les blocs dont l'amont (déjà exécuté)
+  porte un volume au-dessus du seuil — seuils calibrés par type dans
+  `frontend/src/lib/loadEstimate.js` (Pivot et SQL-joint plus stricts ; XLSX
+  export à part). Aucun signal si l'amont n'a jamais tourné (pas de
+  mensonge). Variante `heavy-critical` (anneau intérieur) au-delà de 2 M
+  lignes (ou 1 048 576 pour un export XLSX, limite Excel).
 
 ---
 

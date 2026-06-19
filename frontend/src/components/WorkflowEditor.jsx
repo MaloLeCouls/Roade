@@ -15,6 +15,7 @@ import {
 import '@xyflow/react/dist/style.css'
 
 import { api } from '../api'
+import { estimateWorkflowLoad, formatRows } from '../lib/loadEstimate'
 import { hasBlockingIssues, preflightWorkflow } from '../lib/preflight'
 import { notify } from '../toast'
 import { exportSubdir } from '../lib/paths'
@@ -111,6 +112,7 @@ function withComment(Comp) {
     const note = props.data?.description
     const issues = props.data?.__preflight
     const lost = props.data?.__lost || 0
+    const heavy = props.data?.__heavy
     // Order = priority (most severe first); they stack leftward from the corner.
     const dots = []
     if (issues && issues.length > 0) {
@@ -125,6 +127,17 @@ function withComment(Comp) {
         kind: 'loss',
         title: `${lost.toLocaleString('fr-FR')} ligne(s) ne correspondent à aucune sortie (non redistribuées)`,
         label: `${lost} ligne(s) non redistribuées`,
+      })
+    }
+    if (heavy) {
+      const label =
+        heavy.level === 'critical'
+          ? `Volume très élevé : ~${formatRows(heavy.rows)} lignes en entrée`
+          : `Volume élevé : ~${formatRows(heavy.rows)} lignes en entrée`
+      dots.push({
+        kind: heavy.level === 'critical' ? 'heavy-critical' : 'heavy',
+        title: `${label} — ${heavy.reason}.\nL'exécution risque d'être longue.`,
+        label,
       })
     }
     if (props.data?.__dirty) {
@@ -1957,6 +1970,14 @@ function Editor({ pid, wid, onBack }) {
     return m
   }, [edges])
 
+  // F.5 — heatmap « ce bloc va être lourd » dérivée des comptes de lignes
+  // remontés par le dernier run de l'amont. Aucun signal si l'amont n'a jamais
+  // tourné (pas de mensonge).
+  const heavyMap = useMemo(
+    () => estimateWorkflowLoad(nodes, edges, status),
+    [nodes, edges, status],
+  )
+
   // highlight the currently-executing node (ComfyUI-style) + flag stale blocks.
   // Frames are dragged by their title bar only and rendered behind the blocks.
   const decoratedNodes = useMemo(
@@ -1971,16 +1992,18 @@ function Editor({ pid, wid, onBack }) {
         const stt = status[n.id]
         const lost = stt?.ran ? stt.unrouted ?? 0 : 0
         const unused = unusedOutputsOf(n, usedHandlesByNode[n.id])
+        const heavy = heavyMap[n.id]
         const isConnectSource = connectMode?.sources?.some((s) => s.id === n.id) || false
         const isConnectTarget = connectMode?.targets?.has(n.id) || false
         const needsPatch =
-          active || dirty || issues || lost || unused || isConnectSource || isConnectTarget
+          active || dirty || issues || lost || unused || heavy || isConnectSource || isConnectTarget
         if (!needsPatch && !connectMode) return n
         const newData = { ...n.data }
         if (dirty) newData.__dirty = true
         if (issues) newData.__preflight = issues
         if (lost > 0) newData.__lost = lost
         if (unused) newData.__unusedHandles = unused
+        if (heavy) newData.__heavy = heavy
         const className = active
           ? 'rf-active'
           : isConnectSource
@@ -1992,7 +2015,7 @@ function Editor({ pid, wid, onBack }) {
         if (connectMode) patched.selected = isConnectTarget
         return patched
       }),
-    [nodes, progress.currentId, dirtyMap, preflight, status, usedHandlesByNode, connectMode],
+    [nodes, progress.currentId, dirtyMap, preflight, status, usedHandlesByNode, heavyMap, connectMode],
   )
 
   // colour links by the data type leaving the source port; make them deletable
@@ -2335,6 +2358,13 @@ function Editor({ pid, wid, onBack }) {
                     <span>
                       <b>Données perdues</b> — des lignes ne correspondent à aucune sortie (non
                       redistribuées).
+                    </span>
+                  </li>
+                  <li>
+                    <span className="legend-dot legend-dot-heavy" aria-hidden="true" />
+                    <span>
+                      <b>Volume élevé</b> — beaucoup de lignes en entrée, l'exécution risque d'être
+                      longue. Survol = nombre de lignes + cause.
                     </span>
                   </li>
                   <li>

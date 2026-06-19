@@ -14,13 +14,15 @@
 
   /* ---- Pastilles d'état des blocs (coin du nœud) -------------------------- */
   /* Une couleur = un sens, jamais réutilisée d'une pastille à l'autre :
-       stale  (ambre)   → modifié depuis le dernier run, sera recalculé
-       error  (rouge)   → erreur de configuration (preflight)
-       loss   (violet)  → données perdues / lignes non redistribuées
-     Toute nouvelle pastille doit prendre une teinte libre, pas l'une de ces 3. */
+       stale  (ambre)        → modifié depuis le dernier run, sera recalculé
+       error  (rouge)        → erreur de configuration (preflight)
+       loss   (violet)       → données perdues / lignes non redistribuées
+       heavy  (orange foncé) → volume élevé en entrée, exécution longue attendue (F.5)
+     Toute nouvelle pastille doit prendre une teinte libre, pas l'une de ces 4. */
   --dot-stale: #e0a73a;
   --dot-error: var(--danger);
   --dot-loss: #b97bff;
+  --dot-heavy: #d97706;
   /* unused (slate)  → sortie d'un bloc multi-sorties qui n'a aucun lien aval.
      Tirage neutre : pas une erreur, juste « cette branche n'est pas exploitée ».
      Choix de teinte : slate gris-bleu, distinct des 3 ci-dessus ET des --t-*. */
@@ -2011,6 +2013,18 @@ code {
 }
 .node-dot-loss {
   background: var(--dot-loss);
+}
+/* F.5 — pastille « volume élevé ». Le « critical » ajoute un anneau intérieur
+   pour le distinguer du simple « heavy » sans changer de couleur (la couleur
+   reste la signature de cette famille de signal). */
+.node-dot-heavy,
+.node-dot-heavy-critical {
+  background: var(--dot-heavy);
+}
+.node-dot-heavy-critical {
+  box-shadow:
+    0 0 0 2px #fff,
+    inset 0 0 0 2px rgba(255, 255, 255, 0.85);
 }
 
 /* Empty-value split output: italic + muted so the "(vide)" label is read as a
@@ -4717,6 +4731,9 @@ table.dt th.idx {
 .legend-dot-error {
   background: var(--dot-error);
   box-shadow: 0 0 0 2px rgba(192, 57, 47, 0.25);
+}
+.legend-dot-heavy {
+  background: var(--dot-heavy);
 }
 .legend-dot-unused {
   background: var(--dot-unused);
