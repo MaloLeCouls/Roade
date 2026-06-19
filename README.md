@@ -105,3 +105,12 @@ frontend/
   src/components/   éditeur React Flow, blocs, aperçu
 projects/           données runtime (un dossier par projet, hors git)
 ```
+
+## Licence
+
+Roade est distribué sous **[GNU Affero General Public License v3.0](LICENSE)**
+(AGPL-3.0-only). Concrètement : tu peux l'utiliser, le modifier et le
+redistribuer librement, mais **toute version modifiée mise à disposition
+d'utilisateurs via un réseau (par ex. en SaaS) doit elle aussi publier son
+code source sous AGPL**. C'est ce qui distingue l'AGPL de la GPL classique
+et ce qui protège un éventuel cloud Roade futur d'un fork propriétaire.

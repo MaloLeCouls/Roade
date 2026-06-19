@@ -28,6 +28,10 @@ Rubriques utilisées : `Ajouté` · `Changé` · `Corrigé` · `Sécurité` · `
 - **G.5** — `__version__` exposé côté backend (constante module + endpoint
   `GET /api/version`), versions synchronisées entre `pyproject.toml`,
   `frontend/package.json` et `backend/main.py`. Création du CHANGELOG.
+- **G.6** — Licence **AGPL-3.0-only** : texte canonique FSF dans `LICENSE`,
+  champ `license` ajouté dans `pyproject.toml` et `frontend/package.json`,
+  section dédiée au README (avec son implication SaaS). Avant ce commit,
+  le repo public était de facto « tous droits réservés ».
 
 ---
 
