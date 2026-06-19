@@ -4,7 +4,9 @@
 
 [project]
 name = "roade"
-version = "0.1.0"
+# Source unique : `backend/main.py:__version__` doit suivre. Voir CHANGELOG.md
+# pour la politique de versions (SemVer, [Unreleased] → bump → tag v$VERSION).
+version = "0.4.0"
 description = "Web app pour transformer des fichiers Excel/CSV via un workflow visuel de blocs (FastAPI + DuckDB)."
 requires-python = ">=3.11"
 dependencies = [

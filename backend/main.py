@@ -27,7 +27,11 @@ import engine
 import storage
 import workflow_doc
 
-app = FastAPI(title="Roade API")
+# Source unique de la version backend. Tenu en synchro avec `pyproject.toml` et
+# `frontend/package.json` ; voir CHANGELOG.md pour la politique de release (G.5).
+__version__ = "0.4.0"
+
+app = FastAPI(title="Roade API", version=__version__)
 
 # CORS volontairement étroit (cf. todo B.1). Roade est mono-utilisateur local :
 # le seul cas où l'on a besoin de CORS, c'est le dev avec Vite (port 5173) qui
@@ -110,6 +114,11 @@ class FreeJsonBody(BaseModel):
 @app.get("/api/health")
 def health():
     return {"ok": True}
+
+
+@app.get("/api/version")
+def version():
+    return {"version": __version__}
 
 
 # --------------------------------------------------------------------------- #
