@@ -769,28 +769,76 @@ def _run_source(con, pid, node, ins, *, on_progress=None):
     return {"out": df}, extra
 
 
+def _open_sandboxed_duckdb():
+    """B.4 — connexion DuckDB jetable pour exécuter du SQL utilisateur (mode raw).
+
+    `enable_external_access = false` coupe en un seul interrupteur : accès
+    filesystem, réseau, chargement d'extensions, ATTACH de bases externes. Le
+    réglage est *one-way* (impossible à remettre à true dans la même session)
+    — donc même un SQL malicieux qui essaie `SET enable_external_access = true`
+    en début de requête est rejeté par DuckDB. Les fonctions interdites
+    (`read_csv_auto`, `read_parquet`, `COPY ... TO`, `httpfs`, `INSTALL`,
+    `LOAD`, `ATTACH`, `EXPORT DATABASE`) lèvent une `IOException`.
+
+    On utilise quand même `register()` sur des DataFrames pandas en mémoire :
+    ça ne passe pas par le filesystem, c'est autorisé après le verrouillage.
+    """
+    sandbox = duckdb.connect()
+    sandbox.execute("SET enable_external_access = false")
+    return sandbox
+
+
 def _run_sql(con, pid, node, ins):
     d = node["data"]
     if not ins:
         raise ValueError("aucune entrée connectée")
+    is_raw = d.get("mode") == "raw"
+    # Mode raw → connexion sandboxée jetable (B.4). Mode builder → la connexion
+    # partagée du workflow (le SQL est généré par nous, donc sûr).
+    sql_con = _open_sandboxed_duckdb() if is_raw else con
     aliases = []
-    for alias, df in ins:
-        con.register(alias, df)
-        aliases.append(alias)
-    primary = "in1" if "in1" in aliases else aliases[0]
-    if d.get("mode") == "raw":
-        sql = (d.get("raw_sql") or "").strip()
-        if not sql:
-            raise ValueError("SQL brut vide")
-    else:
-        sql = query_builder.compile_query(d.get("query") or {}, primary)
     try:
-        df = con.execute(sql).df()
-    except Exception as e:
-        raise ValueError(f"{e}  —  SQL généré : {sql}")
+        for alias, df in ins:
+            sql_con.register(alias, df)
+            aliases.append(alias)
+        primary = "in1" if "in1" in aliases else aliases[0]
+        if is_raw:
+            sql = (d.get("raw_sql") or "").strip()
+            if not sql:
+                raise ValueError("SQL brut vide")
+        else:
+            sql = query_builder.compile_query(d.get("query") or {}, primary)
+        try:
+            df = sql_con.execute(sql).df()
+        except Exception as e:
+            # Message dédié pour le cas sandbox : on dit clairement que c'est
+            # une restriction de sécurité, pas un bug DuckDB. DuckDB ne renvoie
+            # pas un message uniforme — on en reconnaît plusieurs formes.
+            if is_raw:
+                emsg = str(e).lower()
+                sandbox_signals = (
+                    "external access",
+                    "external_access",
+                    "file system operations are disabled",
+                    "disabled by configuration",
+                )
+                if any(s in emsg for s in sandbox_signals):
+                    raise ValueError(
+                        "SQL brut refusé : accès filesystem/réseau désactivé dans cette "
+                        "sandbox (read_csv_auto, COPY, httpfs, ATTACH… sont interdits). "
+                        "Branchez vos fichiers via un bloc Source en amont. "
+                        f"— Détail DuckDB : {e}"
+                    )
+            raise ValueError(f"{e}  —  SQL généré : {sql}")
     finally:
-        for alias in aliases:
-            con.unregister(alias)
+        # Sandbox jetable : `unregister` n'est pas requis (close suffit), mais
+        # sur la connexion partagée on doit nettoyer pour ne pas polluer les
+        # blocs aval qui réutilisent les mêmes alias.
+        if is_raw:
+            sql_con.close()
+        else:
+            for alias in aliases:
+                con.unregister(alias)
     return {"out": df}, {"compiled_sql": sql}
 
 

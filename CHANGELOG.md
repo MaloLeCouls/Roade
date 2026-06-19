@@ -33,6 +33,15 @@ Rubriques utilisées : `Ajouté` · `Changé` · `Corrigé` · `Sécurité` · `
   section dédiée au README (avec son implication SaaS). Avant ce commit,
   le repo public était de facto « tous droits réservés ».
 
+### Sécurité
+
+- **B.4** — SQL `raw` exécuté dans une **sandbox DuckDB** (`enable_external_access
+  = false`). Bloque `read_csv_auto`, `read_parquet`, `COPY ... TO`, `httpfs`,
+  `INSTALL`, `LOAD`, `ATTACH`, et toute tentative de remettre le réglage à
+  `true` (one-way DuckDB). Le mode `builder` (SQL généré par nous) reste sur
+  la connexion partagée. Avant : un workflow tiers pouvait lire/écrire/
+  exfiltrer n'importe quel fichier accessible par le process.
+
 ---
 
 ## [0.4.0] — 2026-06-19 — UX d'éditeur
