@@ -594,34 +594,99 @@ function Editor({ pid, wid, onBack }) {
     setNodes((nds) => [...nds.map((n) => ({ ...n, selected: false })), ...newNodes])
   }, [rf, setNodes])
 
-  // E.1 (minimal) — pile d'« undo de suppression » (50 entrées max). On capture
-  // les nodes supprimés ET les arêtes qui les bordaient, parce que React Flow
-  // efface les arêtes adjacentes en silence — sans elles, un Ctrl+Z restaurerait
-  // un bloc déconnecté du graphe. Déclaré ici (avant raccourcis Ctrl+Z / palette)
-  // pour éviter la TDZ sur undoDeletion.
-  const undoStackRef = useRef([])
-  const pushDeletion = useCallback((deletedNodes, deletedEdges) => {
-    const entry = {
-      nodes: deletedNodes.map((n) => ({ ...n, selected: false })),
-      edges: deletedEdges.map((e) => ({ ...e })),
-    }
-    undoStackRef.current = [...undoStackRef.current.slice(-49), entry]
-  }, [])
-  const undoDeletion = useCallback(() => {
-    const stack = undoStackRef.current
-    if (stack.length === 0) {
+  // E.1 — historique past/future de l'état du graphe (Ctrl+Z / Ctrl+Y).
+  //
+  // Chaque entrée est un *snapshot complet* de (nodes, edges), 50 niveaux max
+  // par côté. `commitHistory()` doit être appelé AVANT chaque mutation
+  // structurelle ; il efface l'historique futur (une nouvelle mutation invalide
+  // la branche redo). Les statuts/schémas/runStamps ne sont PAS undoables —
+  // après undo, les blocs restaurés apparaissent comme « jamais exécutés » et
+  // un nouveau run rétablit leurs caches.
+  //
+  // Coalescence : les rafales rapprochées (frappe dans l'Inspector, batch de
+  // liens créés par `confirmConnect`, duplication multiple) doivent compter
+  // pour UN seul pas d'historique. `commitHistory({coalesce:true})` ignore le
+  // commit s'il a déjà eu lieu il y a moins de 500 ms.
+  //
+  // On lit l'état via des refs synchrones (mis à jour à chaque render) plutôt
+  // que via le closure de `nodes`/`edges` : ça permet de capturer la scène
+  // *avant* mutation même quand React n'a pas encore re-render — utile dans
+  // `onBeforeDelete` qui fire pile avant que React Flow ne déclenche la
+  // suppression via `onNodesChange`.
+  const nodesRef = useRef(nodes)
+  const edgesRef = useRef(edges)
+  nodesRef.current = nodes
+  edgesRef.current = edges
+
+  const historyRef = useRef({ past: [], future: [] })
+  const lastCommitAt = useRef(0)
+  const [, bumpHistory] = useState(0)
+  const snapshotGraph = useCallback(
+    () => ({
+      nodes: JSON.parse(JSON.stringify(nodesRef.current)),
+      edges: JSON.parse(JSON.stringify(edgesRef.current)),
+    }),
+    [],
+  )
+  const commitHistory = useCallback(
+    ({ coalesce = false } = {}) => {
+      const now = Date.now()
+      if (coalesce && now - lastCommitAt.current < 500) {
+        lastCommitAt.current = now
+        return
+      }
+      historyRef.current = {
+        past: [...historyRef.current.past.slice(-49), snapshotGraph()],
+        future: [],
+      }
+      lastCommitAt.current = now
+      bumpHistory((t) => t + 1)
+    },
+    [snapshotGraph],
+  )
+  const undo = useCallback(() => {
+    const { past, future } = historyRef.current
+    if (past.length === 0) {
       notify('Rien à annuler.', 'warn')
       return
     }
-    const last = stack[stack.length - 1]
-    undoStackRef.current = stack.slice(0, -1)
-    if (last.nodes.length) setNodes((nds) => [...nds, ...last.nodes])
-    if (last.edges.length) setEdges((eds) => [...eds, ...last.edges])
-    const parts = []
-    if (last.nodes.length) parts.push(`${last.nodes.length} bloc(s)`)
-    if (last.edges.length) parts.push(`${last.edges.length} lien(s)`)
-    notify(`Restauré : ${parts.join(' + ')}`, 'ok')
-  }, [setNodes, setEdges])
+    const prev = past[past.length - 1]
+    historyRef.current = {
+      past: past.slice(0, -1),
+      future: [...future, snapshotGraph()].slice(-50),
+    }
+    setNodes(prev.nodes)
+    setEdges(prev.edges)
+    // Un undo n'est pas une « mutation à coalescer avec la suivante ».
+    lastCommitAt.current = 0
+    bumpHistory((t) => t + 1)
+    notify('Annulé.', 'ok')
+  }, [snapshotGraph, setNodes, setEdges])
+  const redo = useCallback(() => {
+    const { past, future } = historyRef.current
+    if (future.length === 0) {
+      notify('Rien à rétablir.', 'warn')
+      return
+    }
+    const next = future[future.length - 1]
+    historyRef.current = {
+      past: [...past, snapshotGraph()].slice(-50),
+      future: future.slice(0, -1),
+    }
+    setNodes(next.nodes)
+    setEdges(next.edges)
+    lastCommitAt.current = 0
+    bumpHistory((t) => t + 1)
+    notify('Rétabli.', 'ok')
+  }, [snapshotGraph, setNodes, setEdges])
+  // Hook React Flow : capture l'état *avant* une suppression initiée par le
+  // clavier (Suppr) ou par l'API de RF. Pour les suppressions invoquées par
+  // notre menu contextuel (deleteNode/deleteSelection → removeByIds), on
+  // commit dans `removeByIds` directement.
+  const onBeforeDelete = useCallback(() => {
+    commitHistory()
+    return true
+  }, [commitHistory])
 
   // E.7 — ouvre le ConnectDialog pour le bloc sélectionné (alternative
   // clavier au drag de connexion). Refuse si rien n'est sélectionné ou si le
@@ -768,6 +833,7 @@ function Editor({ pid, wid, onBack }) {
     (itemId, position) => {
       const item = backpack.find((b) => b.id === itemId)
       if (!item || !item.nodes?.length) return
+      commitHistory()
       const minX = Math.min(...item.nodes.map((n) => n.position?.x || 0))
       const minY = Math.min(...item.nodes.map((n) => n.position?.y || 0))
       const idMap = {}
@@ -794,7 +860,7 @@ function Editor({ pid, wid, onBack }) {
       setEdges((eds) => [...eds, ...newEdges])
       notify(`« ${item.name} » inséré.`, 'ok')
     },
-    [backpack, setNodes, setEdges],
+    [backpack, setNodes, setEdges, commitHistory],
   )
 
   // Drag d'un item depuis le panneau : on encode juste l'ID dans le
@@ -913,9 +979,14 @@ function Editor({ pid, wid, onBack }) {
         e.preventDefault()
         duplicateSelected()
       } else if (mod && e.key.toLowerCase() === 'z' && !inField(document.activeElement)) {
-        // E.1 — Ctrl+Z (Cmd+Z) restaure la dernière suppression.
+        // E.1 — Ctrl+Z annule, Ctrl+Maj+Z rétablit (convention macOS/Linux).
         e.preventDefault()
-        undoDeletion()
+        if (e.shiftKey) redo()
+        else undo()
+      } else if (mod && e.key.toLowerCase() === 'y' && !inField(document.activeElement)) {
+        // E.1 — Ctrl+Y rétablit (convention Windows).
+        e.preventDefault()
+        redo()
       } else if (mod && e.key.toLowerCase() === 'l' && !inField(document.activeElement)) {
         // E.7 — Ctrl+L : alternative clavier au drag de connexion.
         e.preventDefault()
@@ -951,7 +1022,8 @@ function Editor({ pid, wid, onBack }) {
   }, [
     quickSave,
     duplicateSelected,
-    undoDeletion,
+    undo,
+    redo,
     openConnectFromSelection,
     selectMode,
     setNodes,
@@ -994,10 +1066,17 @@ function Editor({ pid, wid, onBack }) {
       },
       {
         id: 'undo',
-        label: 'Annuler la dernière suppression',
+        label: 'Annuler',
         shortcut: 'Ctrl+Z',
-        keywords: 'undo restore',
-        action: undoDeletion,
+        keywords: 'undo annuler',
+        action: undo,
+      },
+      {
+        id: 'redo',
+        label: 'Rétablir',
+        shortcut: 'Ctrl+Y',
+        keywords: 'redo rétablir',
+        action: redo,
       },
       {
         id: 'help',
@@ -1008,7 +1087,7 @@ function Editor({ pid, wid, onBack }) {
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [quickSave, duplicateSelected, undoDeletion, openConnectFromSelection],
+    [quickSave, duplicateSelected, undo, redo, openConnectFromSelection],
   )
 
   // ---- C.3 garde-fou beforeunload ----
@@ -1087,6 +1166,7 @@ function Editor({ pid, wid, onBack }) {
 
   const detachStop = useCallback(
     (stopId) => {
+      commitHistory()
       setNodes((nds) =>
         nds.map((n) => {
           if (n.id !== stopId || !n.parentId) return n
@@ -1103,7 +1183,7 @@ function Editor({ pid, wid, onBack }) {
         }),
       )
     },
-    [setNodes],
+    [setNodes, commitHistory],
   )
 
   // ---- connections ----
@@ -1111,6 +1191,9 @@ function Editor({ pid, wid, onBack }) {
   // single input; every other target handle keeps a single incoming edge.
   const onConnect = useCallback(
     (conn) => {
+      // coalesce=true : les N appels successifs depuis `confirmConnect` (fan-in /
+      // fan-out) collapsent en un seul pas d'historique.
+      commitHistory({ coalesce: true })
       const target = nodes.find((n) => n.id === conn.target)
       if (target?.type === 'stop') {
         attachStop(conn.target, conn.source, conn.sourceHandle || 'out')
@@ -1124,7 +1207,7 @@ function Editor({ pid, wid, onBack }) {
         return addEdge({ ...conn, animated: true }, filtered)
       })
     },
-    [setEdges, nodes, attachStop],
+    [setEdges, nodes, attachStop, commitHistory],
   )
 
   // Confirme : produit cartésien sources × targets. Filtre de défense : pas
@@ -1171,6 +1254,7 @@ function Editor({ pid, wid, onBack }) {
 
   // ---- node helpers ----
   const addNode = (type) => {
+    commitHistory()
     const id = `${type}-${Math.random().toString(36).slice(2, 8)}`
     const data = JSON.parse(JSON.stringify(DEFAULT_DATA[type]))
     if (type === 'export') data.filename = `${(wfName || 'Workflow').trim()} - ${data.label}`
@@ -1237,6 +1321,10 @@ function Editor({ pid, wid, onBack }) {
 
   const updateNodeData = useCallback(
     (id, patch) => {
+      // coalesce=true : la frappe dans l'Inspector déclenche un updateNodeData
+      // par keystroke ; on les fusionne en un seul pas d'historique tant que
+      // la pause entre deux est < 500 ms.
+      commitHistory({ coalesce: true })
       setNodes((nds) => {
         const cur = nds.find((n) => n.id === id)
         // When the user removes/replaces a Validation route's outputs (or flips
@@ -1278,14 +1366,15 @@ function Editor({ pid, wid, onBack }) {
         updateNodeInternals(id)
       }
     },
-    [setNodes, setEdges, updateNodeInternals],
+    [setNodes, setEdges, updateNodeInternals, commitHistory],
   )
 
   const onDeleteEdge = useCallback(
     (edgeId) => {
+      commitHistory()
       setEdges((eds) => eds.filter((e) => e.id !== edgeId))
     },
-    [setEdges],
+    [setEdges, commitHistory],
   )
 
   // Drop every trace of a set of removed nodes: their links, and the per-node
@@ -1318,26 +1407,26 @@ function Editor({ pid, wid, onBack }) {
   )
 
   // Remove a batch of blocks ourselves (used by the context menu). The Suppr key
-  // is handled by React Flow directly — see onNodesDelete on <ReactFlow>.
-  // forgetNodes removes the nodes themselves and every adjacent piece of state.
-  const removeByIds = (ids) => forgetNodes(new Set(ids))
+  // is handled by React Flow directly — see onBeforeDelete / onNodesDelete on
+  // <ReactFlow>. forgetNodes removes the nodes themselves and every adjacent
+  // piece of state.
+  const removeByIds = (ids) => {
+    const arr = Array.isArray(ids) ? ids : [...ids]
+    if (arr.length === 0) return
+    commitHistory()
+    forgetNodes(new Set(arr))
+  }
   const deleteNode = (id) => removeByIds([id])
   const deleteSelection = () => removeByIds(nodes.filter((n) => n.selected).map((n) => n.id))
-  // onNodesDelete / onEdgesDelete alimentent pushDeletion (déclaré plus haut).
+  // L'historique est capturé en amont (onBeforeDelete pour la voie clavier RF ;
+  // removeByIds pour la voie menu contextuel) — ici on se contente du nettoyage
+  // d'état dérivé (statuts, schémas, runStamps).
   const onNodesDelete = useCallback(
     (deleted) => {
       const ids = new Set(deleted.map((n) => n.id))
-      const relatedEdges = edges.filter((e) => ids.has(e.source) || ids.has(e.target))
-      pushDeletion(deleted, relatedEdges)
       forgetNodes([...ids])
     },
-    [forgetNodes, edges, pushDeletion],
-  )
-  const onEdgesDelete = useCallback(
-    (deleted) => {
-      pushDeletion([], deleted)
-    },
-    [pushDeletion],
+    [forgetNodes],
   )
 
   // ---- ComfyUI-style frames: dragging a group carries the blocks inside it ----
@@ -1348,6 +1437,11 @@ function Editor({ pid, wid, onBack }) {
   }
   const onNodeDragStart = useCallback(
     (_e, node) => {
+      // E.1 — un drag déplace ; on capture l'état AVANT le mouvement pour que
+      // Ctrl+Z restaure la position de départ. xyflow ne déclenche
+      // onNodeDragStart que sur un drag réel (pas un clic), donc pas de pas
+      // d'historique parasite.
+      commitHistory()
       // Snapshot la position de départ pour pouvoir restaurer si l'utilisateur
       // *range* le bloc dans l'inventaire (drop sur le panneau au lieu d'un
       // déplacement réel — cf. onNodeDragStop).
@@ -1370,7 +1464,7 @@ function Editor({ pid, wid, onBack }) {
         .map((n) => ({ id: n.id, x: n.position.x, y: n.position.y }))
       groupDrag.current = { id: node.id, x: gx, y: gy, items }
     },
-    [nodes],
+    [nodes, commitHistory],
   )
   const onNodeDrag = useCallback(
     (_e, node) => {
@@ -1415,6 +1509,9 @@ function Editor({ pid, wid, onBack }) {
   const duplicateNode = (id) => {
     const src = nodes.find((n) => n.id === id)
     if (!src) return
+    // coalesce=true : duplicateSelected appelle duplicateNode pour chaque bloc
+    // sélectionné — on veut UN seul pas d'historique pour le batch.
+    commitHistory({ coalesce: true })
     const newId = `${src.type}-${Math.random().toString(36).slice(2, 8)}`
     const data = JSON.parse(JSON.stringify(src.data))
     data.label = `${data.label || src.type} (copie)`
@@ -2139,7 +2236,7 @@ function Editor({ pid, wid, onBack }) {
               onSelectionDragStart={onSelectionDragStart}
               onSelectionDragStop={onSelectionDragStop}
               onNodesDelete={onNodesDelete}
-              onEdgesDelete={onEdgesDelete}
+              onBeforeDelete={onBeforeDelete}
               onNodeClick={(e, n) => {
                 // Mode click-to-connect : clic = toggle (fan-out) ou remplace
                 // (fan-in). Pas d'ouverture d'éditeur. Les blocs sources sont
