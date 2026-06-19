@@ -1261,6 +1261,57 @@ button.ghost.icon-only {
   border-radius: var(--radius);
   font-size: 12px;
 }
+
+/* F.3 bonus — encadré « aperçu sans exécuter » du Filtre. Style proche de
+   qb-section (cadre discret, fond panel) avec une barre 2-couleurs gardé/exclu
+   inspirée des stats Validation. */
+.filter-dryrun {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2, #f7f8fb);
+  font-size: 12px;
+}
+.filter-dryrun-hint {
+  color: var(--muted);
+  font-style: italic;
+}
+.filter-dryrun-warn {
+  border-color: #e8dcc0;
+  background: #f6efe0;
+  color: var(--warn);
+}
+.filter-dryrun-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.filter-dryrun-bar {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: #e8a5a5;
+  overflow: hidden;
+}
+.filter-dryrun-bar-kept {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: #6cb55e;
+  transition: width 200ms ease;
+}
+.filter-dryrun-counts {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+.filter-dryrun-kept {
+  color: #2f7a23;
+}
+.filter-dryrun-excluded {
+  color: #a13131;
+}
 .qb-section {
   border: 1px solid var(--line);
   border-radius: var(--radius);

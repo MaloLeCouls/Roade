@@ -120,7 +120,11 @@ des « préréglages » qui ne font qu'inverser le mode serait du bruit.
 - **F.2 Pivot au socle** → pickers typés (item 2) + preflight (item 5) + bulle
   enrichie (déjà partiellement faite).
 - **F.3 Filtre typé** → ~~pickers typés sur `mainCols`/`refCols`~~ (fait avec
-  D.7). Reste : dry-run des lignes exclues (bonus).
+  D.7) + ~~dry-run des lignes exclues~~ (bonus livré) : encadré « Aperçu » en
+  bas du Filtre qui affiche gardées/exclues avec barre proportionnelle et
+  compteur de lignes à clé nulle. Appel `engine.filter_preview` (route
+  `/filter-preview`) debouncé à 350 ms, n'est tiré que si les deux amonts
+  sont matérialisés (colonnes connues).
 - **F.4 Exemples** → item 8 ✅ — SQL (5 préréglages mode raw), Clean (4
   recettes). Filter écarté à dessein (cf. note item 8 ci-dessus).
 - **F.5 Dry-run gros volumes** → ce n'est pas un item du contrat *à proprement

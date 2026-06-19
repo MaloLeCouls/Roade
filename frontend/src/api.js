@@ -154,6 +154,13 @@ export const api = {
       'POST',
       config,
     ),
+  // ---- filter: live dry-run (kept / excluded counts, no materialization) ----
+  filterPreview: (pid, wid, nodeId, config) =>
+    sendJSON(
+      `/projects/${enc(pid)}/workflows/${enc(wid)}/nodes/${enc(nodeId)}/filter-preview`,
+      'POST',
+      config,
+    ),
 
   // ---- streaming run (Server-Sent Events) ----
   runStream: (pid, wid, onlyNode, onEvent, force = false, allExports = false) => {

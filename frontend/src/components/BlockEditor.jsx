@@ -75,6 +75,7 @@ export default function BlockEditor({
           <div className="be-params">
             <Inspector
               pid={pid}
+              wid={wid}
               node={node}
               files={files}
               inputs={inputs}

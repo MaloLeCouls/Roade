@@ -568,6 +568,14 @@ def split_scan(pid: str, wid: str, nid: str, payload: FreeJsonBody):
         raise HTTPException(400, str(e))
 
 
+@app.post("/api/projects/{pid}/workflows/{wid}/nodes/{nid}/filter-preview")
+def filter_preview(pid: str, wid: str, nid: str, payload: FreeJsonBody):
+    try:
+        return engine.filter_preview(pid, wid, nid, payload.model_dump())
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, str(e))
+
+
 # --------------------------------------------------------------------------- #
 # Validation tester
 # --------------------------------------------------------------------------- #

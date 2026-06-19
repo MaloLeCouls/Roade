@@ -8,6 +8,7 @@ import ColumnPicker from './ui/ColumnPicker'
 
 export default function Inspector({
   pid,
+  wid,
   node,
   files,
   inputs,
@@ -85,7 +86,9 @@ export default function Inspector({
       {node.type === 'pivot' && <PivotConfig node={node} inputs={inputs} set={set} />}
       {node.type === 'clean' && <CleanConfig node={node} inputs={inputs} set={set} />}
       {node.type === 'calc' && <CalcConfig node={node} inputs={inputs} set={set} />}
-      {node.type === 'filter' && <FilterConfig node={node} inputs={inputs} set={set} />}
+      {node.type === 'filter' && (
+        <FilterConfig pid={pid} wid={wid} node={node} inputs={inputs} set={set} />
+      )}
       {node.type === 'cols' && <ColsConfig node={node} inputs={inputs} set={set} />}
       {node.type === 'report' && <ReportConfig node={node} inputs={inputs} set={set} />}
       {node.type === 'union' && <UnionConfig node={node} inputs={inputs} set={set} />}
@@ -1769,13 +1772,57 @@ function UnionSchemaPreview({ inputs, byName }) {
   )
 }
 
-function FilterConfig({ node, inputs, set }) {
+// F.3 bonus — dry-run du Filtre. Comme `useDistribution` pour la Validation, on
+// re-tire un aperçu à chaque édition de la config (debounce 350 ms), à condition
+// que les deux amonts soient chargés (colonnes connues = Parquet matérialisé).
+// Pas d'appel sinon : l'API ne pourrait pas lire l'entrée et renverrait 400,
+// qu'on n'a aucune envie de promener en boucle.
+function useFilterDryRun(pid, wid, node, mainColsLen, refColsLen) {
+  const d = node.data
+  // clé sérialisable : ne sert qu'à invalider l'effet, JSON.stringify est OK
+  // (objet petit, frappe rare une fois le debounce écoulé).
+  const cfgKey = JSON.stringify({
+    m: d.mode,
+    p: d.pairs,
+    c: d.column,
+    rc: d.ref_column,
+    ci: d.case_insensitive,
+  })
+  const ready = pid && wid && node?.id && mainColsLen > 0 && refColsLen > 0
+  const [state, setState] = useState({
+    loading: false,
+    res: null,
+    error: null,
+    ready: false,
+  })
+  useEffect(() => {
+    if (!ready) {
+      setState({ loading: false, res: null, error: null, ready: false })
+      return
+    }
+    setState((s) => ({ ...s, loading: true, ready: true }))
+    const h = setTimeout(() => {
+      api
+        .filterPreview(pid, wid, node.id, d)
+        .then((res) => setState({ loading: false, res, error: null, ready: true }))
+        .catch((e) =>
+          setState({ loading: false, res: null, error: e.message || String(e), ready: true }),
+        )
+    }, 350)
+    return () => clearTimeout(h)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pid, wid, node?.id, cfgKey, ready])
+  return state
+}
+
+function FilterConfig({ pid, wid, node, inputs, set }) {
   const d = node.data
   const main = inputs.find((i) => i.alias === 'in')
   const ref = inputs.find((i) => i.alias === 'ref')
   const mainCols = main?.columns || []
   const refCols = ref?.columns || []
   const keep = d.mode !== 'exclude'
+  const dryRun = useFilterDryRun(pid, wid, node, mainCols.length, refCols.length)
 
   // Effective list of column pairs — the new source of truth. Backward compat:
   // a legacy block with only `column`/`ref_column` is read as a single pair.
@@ -1894,6 +1941,82 @@ function FilterConfig({ node, inputs, set }) {
       <p className="qb-hint">
         Le bloc ne garde que les colonnes des données — il n'ajoute aucune colonne de la référence.
       </p>
+
+      <FilterDryRunPanel dryRun={dryRun} keep={keep} />
+    </div>
+  )
+}
+
+// F.3 bonus — encadré « aperçu sans exécuter ». Affiché en bas de la config :
+// l'utilisateur voit, dès qu'il configure ses paires, combien de lignes vont
+// rester (ou disparaître), sans avoir à cliquer Exécuter et attendre.
+function FilterDryRunPanel({ dryRun, keep }) {
+  if (!dryRun.ready) {
+    return (
+      <div className="filter-dryrun filter-dryrun-hint">
+        <Icon name="info" size={12} /> Exécutez les amonts pour voir combien de lignes
+        seraient gardées / exclues.
+      </div>
+    )
+  }
+  if (dryRun.loading && !dryRun.res) {
+    return <div className="filter-dryrun filter-dryrun-hint">Calcul de l'aperçu…</div>
+  }
+  if (dryRun.error) {
+    return (
+      <div className="filter-dryrun filter-dryrun-warn">
+        Aperçu indisponible : {dryRun.error}
+      </div>
+    )
+  }
+  const r = dryRun.res
+  if (!r) return null
+  if (r.status !== 'ok') {
+    return (
+      <div className="filter-dryrun filter-dryrun-hint">
+        Aperçu en attente — {r.message}.
+      </div>
+    )
+  }
+  const fmt = (n) => Number(n || 0).toLocaleString('fr-FR')
+  const pct = r.total_main > 0 ? Math.round((r.kept / r.total_main) * 100) : 0
+  // Largeur de la barre de gardés en %. À 100% de gardés on remplit tout ; à 0 vide.
+  const keptPct = r.total_main > 0 ? (r.kept / r.total_main) * 100 : 0
+  return (
+    <div className="filter-dryrun">
+      <div className="filter-dryrun-head">
+        <b>Aperçu</b>{' '}
+        <span className="qb-hint">
+          sur {fmt(r.total_main)} ligne{r.total_main > 1 ? 's' : ''} des données
+          {r.total_ref != null && (
+            <>
+              {' '}
+              · {fmt(r.total_ref)} référence{r.total_ref > 1 ? 's' : ''}
+            </>
+          )}
+        </span>
+      </div>
+      <div
+        className="filter-dryrun-bar"
+        role="img"
+        aria-label={`${pct}% gardées, ${100 - pct}% exclues`}
+      >
+        <div className="filter-dryrun-bar-kept" style={{ width: `${keptPct}%` }} />
+      </div>
+      <div className="filter-dryrun-counts">
+        <span className="filter-dryrun-kept">
+          <b>{fmt(r.kept)}</b> gardée{r.kept > 1 ? 's' : ''} ({pct}%)
+        </span>
+        <span className="filter-dryrun-excluded">
+          <b>{fmt(r.excluded)}</b> exclue{r.excluded > 1 ? 's' : ''}
+        </span>
+      </div>
+      {r.null_keys > 0 && (
+        <p className="qb-hint" style={{ marginTop: 4 }}>
+          {fmt(r.null_keys)} ligne{r.null_keys > 1 ? 's ont' : ' a'} au moins une cellule vide
+          dans les colonnes comparées — {keep ? 'exclue(s) faute de pouvoir matcher' : 'gardée(s) (faute de pouvoir matcher)'}.
+        </p>
+      )}
     </div>
   )
 }

@@ -1966,6 +1966,93 @@ def _run_calc(con, pid, node, ins):
     return {"out": out}, {}
 
 
+def filter_preview(pid, wid, node_id, config: dict) -> dict:
+    """Dry-run d'un Filtre (semi/anti-jointure) contre ses entrées actuelles, sans
+    matérialisation. Renvoie les comptes (total entrées, gardées, exclues) plus un
+    statut explicite pour les configs incomplètes (paires vides, colonnes absentes,
+    référence non branchée) — l'utilisateur voit *avant* d'exécuter combien de
+    lignes vont survivre au filtre. Inspiré de `route_preview` pour Validation."""
+    wf = storage.get_workflow(pid, wid)
+    if not wf:
+        raise ValueError("Workflow introuvable")
+    node = next((n for n in wf.get("nodes", []) if n["id"] == node_id), None)
+    if not node:
+        raise ValueError("Bloc introuvable")
+    d = config or {}
+    ins = _node_inputs(pid, wid, node, wf.get("edges", []))
+    main = next((df for a, df in ins if a == "in"), None)
+    ref = next((df for a, df in ins if a == "ref"), None)
+    if main is None:
+        return {"status": "no_main", "message": "branchez l'entrée principale « données »"}
+    total_main = int(len(main))
+    if ref is None:
+        return {
+            "status": "no_ref",
+            "message": "branchez l'entrée de référence « réf »",
+            "total_main": total_main,
+        }
+    pairs = [p for p in (d.get("pairs") or []) if p.get("column") and p.get("ref_column")]
+    if not pairs and d.get("column") and d.get("ref_column"):
+        pairs = [{"column": d["column"], "ref_column": d["ref_column"]}]
+    if not pairs:
+        return {
+            "status": "no_pairs",
+            "message": "choisissez au moins une paire de colonnes à comparer",
+            "total_main": total_main,
+            "total_ref": int(len(ref)),
+        }
+    main_cols = [p["column"] for p in pairs]
+    ref_cols = [p["ref_column"] for p in pairs]
+    for c in main_cols:
+        if c not in main.columns:
+            return {
+                "status": "bad_column",
+                "message": f"colonne « {c} » absente des données",
+                "total_main": total_main,
+                "total_ref": int(len(ref)),
+            }
+    for c in ref_cols:
+        if c not in ref.columns:
+            return {
+                "status": "bad_column",
+                "message": f"colonne « {c} » absente de la référence",
+                "total_main": total_main,
+                "total_ref": int(len(ref)),
+            }
+    ci = bool(d.get("case_insensitive"))
+
+    def _row_keys(df: pd.DataFrame, cols: list[str]) -> pd.Series:
+        parts = [df[c].astype("string").fillna("") for c in cols]
+        if ci:
+            parts = [p.str.lower() for p in parts]
+        return pd.Series(list(zip(*parts)), index=df.index)
+
+    ref_keep_mask = pd.Series(True, index=ref.index)
+    for c in ref_cols:
+        ref_keep_mask &= ref[c].notna()
+    rset = set(_row_keys(ref[ref_keep_mask], ref_cols).tolist())
+    main_keep_mask = pd.Series(True, index=main.index)
+    for c in main_cols:
+        main_keep_mask &= main[c].notna()
+    main_keys = _row_keys(main, main_cols)
+    present = main_keep_mask & main_keys.isin(rset)
+    matches = int(present.sum())
+    null_keys = int((~main_keep_mask).sum())
+    keep_mode = d.get("mode", "keep") != "exclude"
+    kept = matches if keep_mode else (total_main - matches)
+    excluded = total_main - kept
+    return {
+        "status": "ok",
+        "mode": "keep" if keep_mode else "exclude",
+        "total_main": total_main,
+        "total_ref": int(len(ref)),
+        "matches": matches,
+        "kept": kept,
+        "excluded": excluded,
+        "null_keys": null_keys,
+    }
+
+
 def _run_filter(con, pid, node, ins):
     """Membership filter (semi-join / anti-join). Keeps — or excludes — the rows
     of the main input whose values in N chosen columns ALL appear together in the
