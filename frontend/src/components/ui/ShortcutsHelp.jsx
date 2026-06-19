@@ -10,7 +10,7 @@ const ITEMS = [
   { keys: ['Ctrl', 'D'], desc: 'Dupliquer le bloc sélectionné' },
   {
     keys: ['Ctrl', 'L'],
-    desc: 'Connecter le bloc sélectionné à un autre (alternative au drag souris)',
+    desc: 'Connecter le bloc sélectionné à un autre via un dialogue (alternative purement clavier au mode « Connecter à… »)',
   },
   { keys: ['Ctrl', 'Z'], desc: 'Annuler la dernière suppression (bloc ou lien)' },
   { keys: ['Suppr'], desc: 'Supprimer la sélection' },
@@ -31,6 +31,10 @@ const GESTURES = [
   {
     name: 'Bouchon collé',
     desc: 'Posez un Bouchon sur la sortie d\'un bloc : il marque cette sortie comme "fermée" sans la débrancher.',
+  },
+  {
+    name: 'Connecter à…',
+    desc: 'Clic droit sur un bloc (ou sur 2+ blocs sélectionnés pour brancher N sources vers une même destination) → « Connecter à… » : cliquez ensuite chaque cible sur le canevas, puis Entrée pour valider, Échap pour annuler.',
   },
 ]
 
