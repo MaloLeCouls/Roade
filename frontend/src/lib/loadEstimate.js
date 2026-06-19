@@ -71,15 +71,17 @@ export function estimateBlockLoad(node, edges, status) {
     criticalAt = 500_000
     reason = 'jointure entre plusieurs entrées — sans clé sélective le coût est ~ rows1 × rows2'
   } else if (node.type === 'filter') {
-    reason = 'semi/anti-jointure — chaque ligne de l\'entrée principale est cherchée dans la référence'
+    reason =
+      "semi/anti-jointure — chaque ligne de l'entrée principale est cherchée dans la référence"
   } else if (node.type === 'dedup') {
-    reason = 'détection de doublons : DuckDB doit voir l\'ensemble pour grouper'
+    reason = "détection de doublons : DuckDB doit voir l'ensemble pour grouper"
   } else if (node.type === 'union') {
     reason = `empilement de ${incoming.length} entrée${incoming.length > 1 ? 's' : ''} — la sortie cumule leurs lignes`
   } else if (node.type === 'validate') {
     // Le coût d'une Validation grimpe vite si les règles font des regex sur
     // texte ligne par ligne.
-    reason = 'classement ligne à ligne — les contrôles textuels (regex, masque) sont les plus coûteux'
+    reason =
+      'classement ligne à ligne — les contrôles textuels (regex, masque) sont les plus coûteux'
   } else if (node.type === 'export') {
     // XLSX est sensiblement plus lent que CSV/Parquet à grosse volumétrie.
     const fmt = node.data?.format || 'xlsx'
@@ -93,7 +95,7 @@ export function estimateBlockLoad(node, edges, status) {
     }
   } else {
     // Clean / Calc / Cols / Report : coût linéaire, message générique.
-    reason = "opération linéaire en nombre de lignes"
+    reason = 'opération linéaire en nombre de lignes'
   }
 
   if (totalRows < heavyAt) return null

@@ -28,7 +28,7 @@ const inputsFor = (n) => {
 }
 
 describe('<ConnectDialog>', () => {
-  it("propose les blocs cibles, exclut la source elle-même et ceux sans entrée", () => {
+  it('propose les blocs cibles, exclut la source elle-même et ceux sans entrée', () => {
     render(
       <ConnectDialog
         open
@@ -67,7 +67,7 @@ describe('<ConnectDialog>', () => {
     expect(screen.getByText('Entrée principale (FROM)')).toBeInTheDocument()
   })
 
-  it("confirme avec les valeurs sélectionnées", () => {
+  it('confirme avec les valeurs sélectionnées', () => {
     const onConfirm = vi.fn()
     render(
       <ConnectDialog
@@ -92,7 +92,7 @@ describe('<ConnectDialog>', () => {
     )
   })
 
-  it("avertit quand le port cible est déjà connecté (sauf union)", () => {
+  it('avertit quand le port cible est déjà connecté (sauf union)', () => {
     render(
       <ConnectDialog
         open

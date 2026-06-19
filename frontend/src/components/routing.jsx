@@ -791,7 +791,10 @@ function RuleValueField({ r, onChange }) {
     const text = (r.values || []).join('\n')
     const nonEmpty = (r.values || []).filter((v) => v && String(v).trim() !== '').length
     return (
-      <div className="rrow-multi" title="Mode liste : une valeur par ligne, la règle matche si au moins une matche">
+      <div
+        className="rrow-multi"
+        title="Mode liste : une valeur par ligne, la règle matche si au moins une matche"
+      >
         <textarea
           className="qb-input rrow-multi-area"
           rows={Math.min(8, Math.max(2, (r.values || []).length + 1))}

@@ -748,9 +748,7 @@ def _run_source(con, pid, node, ins, *, on_progress=None):
     path = storage.files_dir(pid) / file
     if not path.exists():
         raise ValueError(f"fichier introuvable : {file}")
-    df = _read_source(
-        path, d.get("sheet"), d.get("header_row") or 0, d, on_progress=on_progress
-    )
+    df = _read_source(path, d.get("sheet"), d.get("header_row") or 0, d, on_progress=on_progress)
     # A.5 — casts utilisateur explicites (number / date / text / boolean) AVANT
     # matérialisation, pour ne pas forcer un détour par un bloc Nettoyage.
     df, casts_report = _apply_casts(df, d.get("casts"), d.get("decimal") or "", d.get("thousands"))
@@ -3157,7 +3155,14 @@ def _execute_node(
         "row_count": outputs.get(handles[0], 0),
         "columns": columns,
     }
-    for k in ("compiled_sql", "clean_report", "report", "casts_report", "input_rows", "unrouted_rows"):
+    for k in (
+        "compiled_sql",
+        "clean_report",
+        "report",
+        "casts_report",
+        "input_rows",
+        "unrouted_rows",
+    ):
         if k in extra:
             result[k] = extra[k]
     return result
@@ -3197,9 +3202,7 @@ def _execute_node_with_progress(con, pid, wid, nid, node, edges, **kwargs):
 
     def worker():
         try:
-            res = _execute_node(
-                con, pid, wid, node, edges, on_progress=on_progress, **kwargs
-            )
+            res = _execute_node(con, pid, wid, node, edges, on_progress=on_progress, **kwargs)
             q.put({"_kind": "result", "result": res})
         except Exception as exc:  # noqa: BLE001
             q.put({"_kind": "error", "exc": exc})

@@ -5,7 +5,6 @@ matérialiser le bloc, et qu'il distingue les configs incomplètes (paire vide,
 colonne absente, ref non branchée) du cas nominal."""
 
 import pandas as pd
-import pytest
 
 import engine
 import storage
@@ -45,10 +44,15 @@ def test_keep_mode_single_pair():
         pd.DataFrame({"k": ["A", "C", "E"]}),
         {"mode": "keep", "pairs": [{"column": "code", "ref_column": "k"}]},
     )
-    res = engine.filter_preview(pid, wid, nid, {
-        "mode": "keep",
-        "pairs": [{"column": "code", "ref_column": "k"}],
-    })
+    res = engine.filter_preview(
+        pid,
+        wid,
+        nid,
+        {
+            "mode": "keep",
+            "pairs": [{"column": "code", "ref_column": "k"}],
+        },
+    )
     assert res["status"] == "ok"
     assert res["mode"] == "keep"
     assert res["total_main"] == 5
@@ -64,10 +68,15 @@ def test_exclude_mode_is_complement_of_keep():
         pd.DataFrame({"k": ["A", "C", "E"]}),
         {"mode": "exclude", "pairs": [{"column": "code", "ref_column": "k"}]},
     )
-    res = engine.filter_preview(pid, wid, nid, {
-        "mode": "exclude",
-        "pairs": [{"column": "code", "ref_column": "k"}],
-    })
+    res = engine.filter_preview(
+        pid,
+        wid,
+        nid,
+        {
+            "mode": "exclude",
+            "pairs": [{"column": "code", "ref_column": "k"}],
+        },
+    )
     assert res["status"] == "ok"
     assert res["mode"] == "exclude"
     assert res["matches"] == 3
@@ -81,13 +90,18 @@ def test_composite_key_requires_all_columns_to_match():
         pd.DataFrame({"ka": ["x", "y"], "kb": [1, 2]}),
         {},
     )
-    res = engine.filter_preview(pid, wid, nid, {
-        "mode": "keep",
-        "pairs": [
-            {"column": "a", "ref_column": "ka"},
-            {"column": "b", "ref_column": "kb"},
-        ],
-    })
+    res = engine.filter_preview(
+        pid,
+        wid,
+        nid,
+        {
+            "mode": "keep",
+            "pairs": [
+                {"column": "a", "ref_column": "ka"},
+                {"column": "b", "ref_column": "kb"},
+            ],
+        },
+    )
     # ref n'a que (x,1) et (y,2). Donc main (x,1) et (y,2) matchent ; (x,2) et (y,1) non.
     assert res["matches"] == 2
     assert res["kept"] == 2
@@ -100,17 +114,27 @@ def test_case_insensitive():
         pd.DataFrame({"k": ["ABC", "def"]}),
         {},
     )
-    sensitive = engine.filter_preview(pid, wid, nid, {
-        "mode": "keep",
-        "pairs": [{"column": "code", "ref_column": "k"}],
-        "case_insensitive": False,
-    })
+    sensitive = engine.filter_preview(
+        pid,
+        wid,
+        nid,
+        {
+            "mode": "keep",
+            "pairs": [{"column": "code", "ref_column": "k"}],
+            "case_insensitive": False,
+        },
+    )
     assert sensitive["kept"] == 0  # aucune correspondance exacte
-    insensitive = engine.filter_preview(pid, wid, nid, {
-        "mode": "keep",
-        "pairs": [{"column": "code", "ref_column": "k"}],
-        "case_insensitive": True,
-    })
+    insensitive = engine.filter_preview(
+        pid,
+        wid,
+        nid,
+        {
+            "mode": "keep",
+            "pairs": [{"column": "code", "ref_column": "k"}],
+            "case_insensitive": True,
+        },
+    )
     assert insensitive["kept"] == 2  # "abc"↔"ABC" et "DEF"↔"def"
 
 
@@ -153,10 +177,15 @@ def test_bad_column():
         pd.DataFrame({"k": ["A"]}),
         {},
     )
-    res = engine.filter_preview(pid, wid, nid, {
-        "mode": "keep",
-        "pairs": [{"column": "inexistante", "ref_column": "k"}],
-    })
+    res = engine.filter_preview(
+        pid,
+        wid,
+        nid,
+        {
+            "mode": "keep",
+            "pairs": [{"column": "inexistante", "ref_column": "k"}],
+        },
+    )
     assert res["status"] == "bad_column"
     assert "inexistante" in res["message"]
 
@@ -167,10 +196,15 @@ def test_null_keys_are_reported_and_not_matched():
         pd.DataFrame({"k": ["A", "C"]}),
         {},
     )
-    res = engine.filter_preview(pid, wid, nid, {
-        "mode": "keep",
-        "pairs": [{"column": "code", "ref_column": "k"}],
-    })
+    res = engine.filter_preview(
+        pid,
+        wid,
+        nid,
+        {
+            "mode": "keep",
+            "pairs": [{"column": "code", "ref_column": "k"}],
+        },
+    )
     assert res["null_keys"] == 1
     # A, C, A matchent → 3 ; None ne peut pas matcher → exclu
     assert res["matches"] == 3

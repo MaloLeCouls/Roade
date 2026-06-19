@@ -282,9 +282,7 @@ def read_backpack(project_id: str) -> list[dict]:
 def write_backpack(project_id: str, items: list[dict]) -> None:
     p = backpack_path(project_id)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(
-        json.dumps({"items": items}, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    p.write_text(json.dumps({"items": items}, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def add_backpack_item(project_id: str, item: dict) -> dict:

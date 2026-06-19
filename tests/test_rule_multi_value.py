@@ -5,7 +5,6 @@ créer N conditions séparées en OR. Maintenant `rule.values = [...]` fait
 en un coup la sémantique « ANY-match » (et « NONE-match » pour `not_*`)."""
 
 import pandas as pd
-import pytest
 
 import engine
 

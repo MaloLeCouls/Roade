@@ -1680,8 +1680,8 @@ function UnionSchemaPreview({ inputs, byName }) {
   if (inputs.length === 1) {
     return (
       <div className="qb-hint" style={{ marginTop: 8 }}>
-        Une seule entrée — l'union reproduira simplement le bloc amont (
-        {inputs[0].columns.length} colonnes).
+        Une seule entrée — l'union reproduira simplement le bloc amont ({inputs[0].columns.length}{' '}
+        colonnes).
       </div>
     )
   }
@@ -1739,9 +1739,7 @@ function UnionSchemaPreview({ inputs, byName }) {
                   </li>
                 )
               })}
-              {orphans.length > 20 && (
-                <li className="muted">… et {orphans.length - 20} autres</li>
-              )}
+              {orphans.length > 20 && <li className="muted">… et {orphans.length - 20} autres</li>}
             </ul>
           </>
         )}
@@ -1954,8 +1952,8 @@ function FilterDryRunPanel({ dryRun, keep }) {
   if (!dryRun.ready) {
     return (
       <div className="filter-dryrun filter-dryrun-hint">
-        <Icon name="info" size={12} /> Exécutez les amonts pour voir combien de lignes
-        seraient gardées / exclues.
+        <Icon name="info" size={12} /> Exécutez les amonts pour voir combien de lignes seraient
+        gardées / exclues.
       </div>
     )
   }
@@ -1964,19 +1962,13 @@ function FilterDryRunPanel({ dryRun, keep }) {
   }
   if (dryRun.error) {
     return (
-      <div className="filter-dryrun filter-dryrun-warn">
-        Aperçu indisponible : {dryRun.error}
-      </div>
+      <div className="filter-dryrun filter-dryrun-warn">Aperçu indisponible : {dryRun.error}</div>
     )
   }
   const r = dryRun.res
   if (!r) return null
   if (r.status !== 'ok') {
-    return (
-      <div className="filter-dryrun filter-dryrun-hint">
-        Aperçu en attente — {r.message}.
-      </div>
-    )
+    return <div className="filter-dryrun filter-dryrun-hint">Aperçu en attente — {r.message}.</div>
   }
   const fmt = (n) => Number(n || 0).toLocaleString('fr-FR')
   const pct = r.total_main > 0 ? Math.round((r.kept / r.total_main) * 100) : 0
@@ -2013,8 +2005,9 @@ function FilterDryRunPanel({ dryRun, keep }) {
       </div>
       {r.null_keys > 0 && (
         <p className="qb-hint" style={{ marginTop: 4 }}>
-          {fmt(r.null_keys)} ligne{r.null_keys > 1 ? 's ont' : ' a'} au moins une cellule vide
-          dans les colonnes comparées — {keep ? 'exclue(s) faute de pouvoir matcher' : 'gardée(s) (faute de pouvoir matcher)'}.
+          {fmt(r.null_keys)} ligne{r.null_keys > 1 ? 's ont' : ' a'} au moins une cellule vide dans
+          les colonnes comparées —{' '}
+          {keep ? 'exclue(s) faute de pouvoir matcher' : 'gardée(s) (faute de pouvoir matcher)'}.
         </p>
       )}
     </div>

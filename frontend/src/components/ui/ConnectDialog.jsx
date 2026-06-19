@@ -56,8 +56,7 @@ export default function ConnectDialog({
 
   const isUnion = targetNode?.type === 'union'
   const willReplace =
-    !isUnion &&
-    edges?.some((e) => e.target === targetId && e.targetHandle === targetHandle)
+    !isUnion && edges?.some((e) => e.target === targetId && e.targetHandle === targetHandle)
 
   const canConnect = sourceHandle && targetId && targetHandle
 
@@ -85,10 +84,7 @@ export default function ConnectDialog({
         {outputs.length > 1 && (
           <label className="connect-row">
             <span>Port de sortie</span>
-            <select
-              value={sourceHandle}
-              onChange={(e) => setSourceHandle(e.target.value)}
-            >
+            <select value={sourceHandle} onChange={(e) => setSourceHandle(e.target.value)}>
               {outputs.map((o) => (
                 <option key={o.handle} value={o.handle}>
                   {o.label || o.handle}
@@ -120,10 +116,7 @@ export default function ConnectDialog({
         {targetInputs.length > 1 && (
           <label className="connect-row">
             <span>Port d'entrée</span>
-            <select
-              value={targetHandle}
-              onChange={(e) => setTargetHandle(e.target.value)}
-            >
+            <select value={targetHandle} onChange={(e) => setTargetHandle(e.target.value)}>
               {targetInputs.map((i) => (
                 <option key={i.handle} value={i.handle}>
                   {i.label || i.handle}

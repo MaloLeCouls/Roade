@@ -10,8 +10,6 @@ Maintenant : `_run_sql` ouvre une connexion DuckDB jetable avec
 `builder` (SQL qu'on génère) garde la connexion partagée du workflow.
 """
 
-from pathlib import Path
-
 import pandas as pd
 import pytest
 
@@ -24,7 +22,9 @@ def _make_workflow_with_raw_sql(raw_sql: str, source_df=None):
     p = storage.create_project("SqlSandbox")
     pid = p["id"]
     fd = storage.files_dir(pid)
-    df = source_df if source_df is not None else pd.DataFrame({"x": [1, 2, 3], "y": ["a", "b", "c"]})
+    df = (
+        source_df if source_df is not None else pd.DataFrame({"x": [1, 2, 3], "y": ["a", "b", "c"]})
+    )
     df.to_excel(fd / "data.xlsx", index=False)
     wf = storage.create_workflow(pid, "W")
     wid = wf["id"]
@@ -103,9 +103,7 @@ def test_raw_sql_blocks_read_parquet_arbitrary_path():
 def test_raw_sql_blocks_copy_to_file(tmp_path):
     """`COPY ... TO 'fichier'` permettrait d'exfiltrer le résultat vers le disque."""
     target = tmp_path / "leak.csv"
-    pid, wid = _make_workflow_with_raw_sql(
-        f"COPY (SELECT * FROM in1) TO '{target}' (FORMAT CSV)"
-    )
+    pid, wid = _make_workflow_with_raw_sql(f"COPY (SELECT * FROM in1) TO '{target}' (FORMAT CSV)")
     with pytest.raises(RuntimeError, match="sandbox|filesystem|disabled"):
         engine.run_workflow(pid, wid, only_node="q")
     assert not target.exists(), "le COPY a quand même écrit le fichier — sandbox cassée"

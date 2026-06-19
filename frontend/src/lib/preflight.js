@@ -104,7 +104,11 @@ export function preflightWorkflow(nodes, edges) {
       // amont côté preflight pour décider du cas marginal.
       const items = d.columns || []
       if (items.length > 0 && items.every((it) => it.keep === false)) {
-        add(n.id, 'cols_all_dropped', 'Vous avez décoché toutes les colonnes — gardez-en au moins une.')
+        add(
+          n.id,
+          'cols_all_dropped',
+          'Vous avez décoché toutes les colonnes — gardez-en au moins une.',
+        )
       }
     }
 

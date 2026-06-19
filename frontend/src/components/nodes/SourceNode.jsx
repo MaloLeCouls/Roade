@@ -88,10 +88,23 @@ export function StatusBadge({ st, running, runningLabel = 'exécution…', runni
   return <span className="badge idle">non exécuté</span>
 }
 
-export function NodeFooter({ st, running, runningLabel, runningTitle, onPreview, onRun, onReload }) {
+export function NodeFooter({
+  st,
+  running,
+  runningLabel,
+  runningTitle,
+  onPreview,
+  onRun,
+  onReload,
+}) {
   return (
     <div className="node-foot">
-      <StatusBadge st={st} running={running} runningLabel={runningLabel} runningTitle={runningTitle} />
+      <StatusBadge
+        st={st}
+        running={running}
+        runningLabel={runningLabel}
+        runningTitle={runningTitle}
+      />
       <div className="node-actions">
         <button
           className="mini"

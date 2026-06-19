@@ -84,10 +84,7 @@ describe('preflightWorkflow', () => {
     expect(ok.p).toBeUndefined()
 
     // Mode unpivot sans value_columns → flag dédié.
-    const unpiv = preflightWorkflow(
-      [src, n('p', 'pivot', { mode: 'unpivot' })],
-      [e('s', 'p')],
-    )
+    const unpiv = preflightWorkflow([src, n('p', 'pivot', { mode: 'unpivot' })], [e('s', 'p')])
     expect(unpiv.p?.some((i) => i.kind === 'pivot_unpivot_empty')).toBe(true)
   })
 

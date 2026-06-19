@@ -782,7 +782,10 @@ function Editor({ pid, wid, onBack }) {
   // ajout/suppression/renommage en relisant tout (l'API renvoie la liste
   // entière, pas de fusion locale à gérer).
   const reloadBackpack = useCallback(() => {
-    api.listBackpack(pid).then(setBackpack).catch(() => setBackpack([]))
+    api
+      .listBackpack(pid)
+      .then(setBackpack)
+      .catch(() => setBackpack([]))
   }, [pid])
   useEffect(() => {
     reloadBackpack()
@@ -889,8 +892,7 @@ function Editor({ pid, wid, onBack }) {
       const iid = ev.dataTransfer?.getData(BACKPACK_MIME)
       if (!iid) return
       ev.preventDefault()
-      const pos =
-        rf?.screenToFlowPosition?.({ x: ev.clientX, y: ev.clientY }) || { x: 0, y: 0 }
+      const pos = rf?.screenToFlowPosition?.({ x: ev.clientX, y: ev.clientY }) || { x: 0, y: 0 }
       pasteBackpackItem(iid, pos)
     },
     [rf, pasteBackpackItem],
@@ -963,9 +965,7 @@ function Editor({ pid, wid, onBack }) {
       // Drop sur le panneau → on range et on restaure les positions.
       const ids = draggedNodes.map((n) => n.id)
       storeInBackpack(ids)
-      setNodes((nds) =>
-        nds.map((n) => (snap.has(n.id) ? { ...n, position: snap.get(n.id) } : n)),
-      )
+      setNodes((nds) => nds.map((n) => (snap.has(n.id) ? { ...n, position: snap.get(n.id) } : n)))
     },
     [storeInBackpack, setNodes],
   )
@@ -1018,8 +1018,12 @@ function Editor({ pid, wid, onBack }) {
           return
         }
         if (selectMode) setSelectMode(false)
-        setNodes((nds) => (nds.some((n) => n.selected) ? nds.map((n) => ({ ...n, selected: false })) : nds))
-        setEdges((eds) => (eds.some((ed) => ed.selected) ? eds.map((ed) => ({ ...ed, selected: false })) : eds))
+        setNodes((nds) =>
+          nds.some((n) => n.selected) ? nds.map((n) => ({ ...n, selected: false })) : nds,
+        )
+        setEdges((eds) =>
+          eds.some((ed) => ed.selected) ? eds.map((ed) => ({ ...ed, selected: false })) : eds,
+        )
         setSelectedId(null)
         setMenu(null)
       } else if (e.key === 'Enter' && connectMode && !inField(document.activeElement) && !mod) {
@@ -1231,8 +1235,7 @@ function Editor({ pid, wid, onBack }) {
     if (!connectMode) return
     const sourceIds = new Set(connectMode.sources.map((s) => s.id))
     const targets = nodes.filter(
-      (n) =>
-        connectMode.targets.has(n.id) && !sourceIds.has(n.id) && nodeInputs(n).length > 0,
+      (n) => connectMode.targets.has(n.id) && !sourceIds.has(n.id) && nodeInputs(n).length > 0,
     )
     if (targets.length === 0) {
       notify(
@@ -1767,7 +1770,11 @@ function Editor({ pid, wid, onBack }) {
           } else {
             startTimer.current = setTimeout(() => {
               startTimer.current = null
-              setProgress((p) => ({ ...p, currentId: ev.node_id, currentLabel: ev.label || ev.type }))
+              setProgress((p) => ({
+                ...p,
+                currentId: ev.node_id,
+                currentLabel: ev.label || ev.type,
+              }))
               setSourceProgress(null)
               startNodeAnim(node)
             }, 150)
@@ -1973,10 +1980,7 @@ function Editor({ pid, wid, onBack }) {
   // F.5 — heatmap « ce bloc va être lourd » dérivée des comptes de lignes
   // remontés par le dernier run de l'amont. Aucun signal si l'amont n'a jamais
   // tourné (pas de mensonge).
-  const heavyMap = useMemo(
-    () => estimateWorkflowLoad(nodes, edges, status),
-    [nodes, edges, status],
-  )
+  const heavyMap = useMemo(() => estimateWorkflowLoad(nodes, edges, status), [nodes, edges, status])
 
   // highlight the currently-executing node (ComfyUI-style) + flag stale blocks.
   // Frames are dragged by their title bar only and rendered behind the blocks.
@@ -1990,7 +1994,7 @@ function Editor({ pid, wid, onBack }) {
         const dirty = dirtyMap[n.id]
         const issues = preflight[n.id]
         const stt = status[n.id]
-        const lost = stt?.ran ? stt.unrouted ?? 0 : 0
+        const lost = stt?.ran ? (stt.unrouted ?? 0) : 0
         const unused = unusedOutputsOf(n, usedHandlesByNode[n.id])
         const heavy = heavyMap[n.id]
         const isConnectSource = connectMode?.sources?.some((s) => s.id === n.id) || false
@@ -2004,18 +2008,23 @@ function Editor({ pid, wid, onBack }) {
         if (lost > 0) newData.__lost = lost
         if (unused) newData.__unusedHandles = unused
         if (heavy) newData.__heavy = heavy
-        const className = active
-          ? 'rf-active'
-          : isConnectSource
-            ? 'rf-connect-source'
-            : undefined
+        const className = active ? 'rf-active' : isConnectSource ? 'rf-connect-source' : undefined
         // En mode connexion on pilote `selected` depuis notre Set de cibles —
         // sinon on laisse React Flow gérer le sien.
         const patched = { ...n, className, data: newData }
         if (connectMode) patched.selected = isConnectTarget
         return patched
       }),
-    [nodes, progress.currentId, dirtyMap, preflight, status, usedHandlesByNode, heavyMap, connectMode],
+    [
+      nodes,
+      progress.currentId,
+      dirtyMap,
+      preflight,
+      status,
+      usedHandlesByNode,
+      heavyMap,
+      connectMode,
+    ],
   )
 
   // colour links by the data type leaving the source port; make them deletable
@@ -2342,8 +2351,8 @@ function Editor({ pid, wid, onBack }) {
                   <li>
                     <span className="legend-dot legend-dot-error" aria-hidden="true" />
                     <span>
-                      <b>Erreur de configuration</b> — le bloc va échouer à l'exécution
-                      (entrée manquante, colonne non choisie…). Survol = détail.
+                      <b>Erreur de configuration</b> — le bloc va échouer à l'exécution (entrée
+                      manquante, colonne non choisie…). Survol = détail.
                     </span>
                   </li>
                   <li>
@@ -2557,10 +2566,7 @@ function Editor({ pid, wid, onBack }) {
                       </button>
                     )}
                     {mn && nodeOutputs(mn).length > 0 && (
-                      <button
-                        role="menuitem"
-                        onClick={() => enterConnectMode([menu.id])}
-                      >
+                      <button role="menuitem" onClick={() => enterConnectMode([menu.id])}>
                         <Icon name="flow" size={13} /> Connecter à…
                       </button>
                     )}
@@ -2667,8 +2673,8 @@ function ConnectBanner({
         </select>
       )}
       <span className="connect-banner-hint">
-        {fanIn ? 'cliquez le bloc destination' : 'cliquez chaque bloc cible'} —{' '}
-        <kbd>Entrée</kbd> pour valider
+        {fanIn ? 'cliquez le bloc destination' : 'cliquez chaque bloc cible'} — <kbd>Entrée</kbd>{' '}
+        pour valider
       </span>
       <span className="connect-banner-count">
         {fanIn

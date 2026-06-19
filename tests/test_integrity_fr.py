@@ -293,7 +293,6 @@ def test_xlsx_mixed_text_and_numbers_imports_without_crash(tmp_path):
     assert rep["libelle"]["counts"].get("nombre") == 2
 
     # Le parquet s'écrit maintenant sans lever d'exception.
-    import tempfile
 
     p = tmp_path / "out.parquet"
     df.to_parquet(p, index=False)
