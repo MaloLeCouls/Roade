@@ -100,6 +100,30 @@ export function ConditionsEditor({ node, cols, onChange, intent = 'router' }) {
   const d = node.data
   const conditions = d.conditions || []
   const setConditions = (next) => onChange({ conditions: next })
+  // Repli des conditions (état UI local, par id).
+  const [collapsed, setCollapsed] = useState(() => new Set())
+  const toggleCollapse = (id) =>
+    setCollapsed((s) => {
+      const n = new Set(s)
+      if (n.has(id)) n.delete(id)
+      else n.add(id)
+      return n
+    })
+  // Crée une sortie reliée à cette condition, nommée comme elle (raccourci).
+  const addOutputForCond = (cond) => {
+    const outs = d.outputs || []
+    onChange({
+      outputs: [
+        ...outs,
+        {
+          id: uid(),
+          label: cond.name || 'Sortie',
+          color: OUTPUT_COLORS[outs.length % OUTPUT_COLORS.length],
+          match: { conditionId: cond.id, negate: false },
+        },
+      ],
+    })
+  }
   const updCond = (i, patch) =>
     setConditions(conditions.map((c, j) => (j === i ? { ...c, ...patch } : c)))
   const addCond = () =>
@@ -206,42 +230,67 @@ export function ConditionsEditor({ node, cols, onChange, intent = 'router' }) {
           Aucune condition. Créez-en une, puis attribuez-la à une sortie (à droite).
         </div>
       )}
-      {conditions.map((c, i) => (
-        <div className="ccard" key={c.id}>
-          <div className="ccard-head">
-            <Icon name="filter" size={13} />
-            <input
-              className="ocard-name"
-              value={c.name || ''}
-              placeholder="Nom de la condition"
-              onChange={(e) => updCond(i, { name: e.target.value })}
-            />
-            <button
-              className="ghost small"
-              onClick={() => dupCond(i)}
-              title="Dupliquer la condition"
-              aria-label="Dupliquer la condition"
-            >
-              <Icon name="copy" />
-            </button>
-            <button
-              className="ghost danger small"
-              onClick={() => delCond(i)}
-              title="Supprimer la condition"
-              aria-label="Supprimer la condition"
-            >
-              <Icon name="x" />
-            </button>
+      {conditions.map((c, i) => {
+        const isCollapsed = collapsed.has(c.id)
+        return (
+          <div className={`ccard ${isCollapsed ? 'ccard-collapsed' : ''}`} key={c.id}>
+            <div className="ccard-head">
+              <button
+                className="ccard-fold"
+                onClick={() => toggleCollapse(c.id)}
+                title={isCollapsed ? 'Déplier' : 'Replier'}
+                aria-label={isCollapsed ? 'Déplier la condition' : 'Replier la condition'}
+                aria-expanded={!isCollapsed}
+              >
+                <Icon name={isCollapsed ? 'chev-right' : 'down'} size={13} />
+              </button>
+              <input
+                className="ocard-name"
+                value={c.name || ''}
+                placeholder="Nom de la condition"
+                onChange={(e) => updCond(i, { name: e.target.value })}
+              />
+              <button
+                className="ghost small"
+                onClick={() => addOutputForCond(c)}
+                title="Créer une sortie pour cette condition (nommée comme elle)"
+                aria-label="Créer une sortie pour cette condition"
+              >
+                <Icon name="flow" size={12} /> sortie
+              </button>
+              <button
+                className="ghost small"
+                onClick={() => dupCond(i)}
+                title="Dupliquer la condition"
+                aria-label="Dupliquer la condition"
+              >
+                <Icon name="copy" />
+              </button>
+              <button
+                className="ghost danger small"
+                onClick={() => delCond(i)}
+                title="Supprimer la condition"
+                aria-label="Supprimer la condition"
+              >
+                <Icon name="x" />
+              </button>
+            </div>
+            {isCollapsed ? (
+              <div className="ccard-fold-sum">
+                {conditionReadback(c) || <span className="muted">condition vide</span>}
+              </div>
+            ) : (
+              <ConditionBuilder
+                cond={c}
+                cols={cols}
+                defaultCol={d.target_column}
+                caseSensitive={!!d.case_sensitive}
+                onChange={(patch) => updCond(i, patch)}
+              />
+            )}
           </div>
-          <ConditionBuilder
-            cond={c}
-            cols={cols}
-            defaultCol={d.target_column}
-            caseSensitive={!!d.case_sensitive}
-            onChange={(patch) => updCond(i, patch)}
-          />
-        </div>
-      ))}
+        )
+      })}
       <button className="ghost route-add" onClick={addCond}>
         <Icon name="plus" /> Ajouter une condition
       </button>
@@ -259,7 +308,7 @@ function CondColumn({ cols, cond, defaultCol, onChange }) {
         columns={cols}
         value={cond.column || ''}
         onChange={(v) => onChange({ column: v })}
-        placeholder={defaultCol ? `défaut : ${defaultCol}` : '(par défaut)'}
+        placeholder={defaultCol || '(par défaut)'}
       />
     </div>
   )
@@ -774,7 +823,7 @@ export function RuleRow({ r, cols, defaultCol, onChange, onDelete }) {
         columns={cols}
         value={r.column || ''}
         onChange={(v) => onChange({ column: v })}
-        placeholder={defaultCol ? `(défaut : ${defaultCol})` : '(colonne par défaut)'}
+        placeholder={defaultCol || '(colonne par défaut)'}
       />
       <select
         className="qb-select"
@@ -1331,7 +1380,7 @@ export function OutputsPane({ pid, wid, node, status, onChange, onRun, running, 
           conformes). Pour aiguiller vers plus de sorties, choisissez <b>Router</b> dans la
           configuration du bloc (panneau latéral, en sélectionnant le bloc).
         </div>
-        <FlowMap items={items} total={dist.total} />
+        <FlowMap items={items} total={dist.total} height={200} />
         <div className="control-summary">
           {items.map((it) => (
             <div className="route-sum-item" key={it.id}>

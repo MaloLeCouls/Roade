@@ -131,7 +131,7 @@ export default function ColumnPicker({
       {items.map((c) => (
         <option key={c.name} value={c.name}>
           {c.name}
-          {c.type ? ` · ${shortType(c.type)}` : ''}
+          {c.type ? ` (${shortType(c.type)})` : ''}
         </option>
       ))}
     </>

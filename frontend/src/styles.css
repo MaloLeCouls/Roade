@@ -2743,6 +2743,13 @@ table.dt th.idx {
 }
 .rhs-toggle {
   flex: 0 0 auto;
+  /* icône + libellé sur une seule ligne (sinon l'icône passe au-dessus du
+     texte quand le bouton est serré dans une rangée de règle). */
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+  line-height: 1;
   font-size: 10px;
   font-weight: 700;
   color: var(--muted);
@@ -2949,6 +2956,24 @@ table.dt th.idx {
 }
 .dotsep {
   color: var(--muted);
+}
+.ccard-fold {
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--muted);
+  padding: 0 2px;
+  display: inline-flex;
+  align-items: center;
+}
+.ccard-fold:hover {
+  color: var(--ink);
+}
+.ccard-fold-sum {
+  font-size: var(--fs-sm);
+  color: var(--ink-soft);
+  padding: 2px 4px 2px 22px;
 }
 .ocard-readback {
   display: flex;

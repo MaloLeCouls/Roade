@@ -60,8 +60,20 @@ Rubriques utilisées : `Ajouté` · `Changé` · `Corrigé` · `Sécurité` · `
   Principes : phrase-driven, Hick/Miller, reconnaissance > rappel, visibilité de
   l'état.
 
+### Changé
+
+- **Validation — finitions de l'éditeur de condition** : (1) type de colonne
+  affiché entre parenthèses `configuration (texte)` au lieu de `· texte`
+  (ambigu si le nom contient un `·`) ; (2) la **colonne par défaut** ne répète
+  plus « défaut : … » dans chaque règle (juste le nom) ; (3) bouton **« →
+  sortie »** sur une condition (router) qui crée une sortie nommée comme elle ;
+  (4) **repli** des conditions (chevron + résumé en clair) ; (5) carte des flux
+  (Sankey) du mode Contrôle **réduite** (moins haute).
+
 ### Corrigé
 
+- **Bouton « liste » : icône au-dessus du texte** — `.rhs-toggle` passe en
+  `inline-flex` (icône + libellé sur une ligne, même serré dans une rangée).
 - **Décalage colonne / opérateur dans les règles (ColumnPicker `compact`)** : le
   mode `compact` n'était honoré qu'au cas « aucune colonne » ; dès les colonnes
   chargées, le picker rendait la version étiquetée `.fld` (flex-column +

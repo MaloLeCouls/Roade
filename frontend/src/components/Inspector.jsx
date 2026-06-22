@@ -2609,7 +2609,7 @@ function DedupConfig({ pid, wid, node, inputs, set }) {
                 return (
                   <option key={name} value={name}>
                     {name}
-                    {c?.type ? ` · ${shortType(c.type)}` : ''}
+                    {c?.type ? ` (${shortType(c.type)})` : ''}
                   </option>
                 )
               })}
