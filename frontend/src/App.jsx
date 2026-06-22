@@ -72,7 +72,7 @@ export default function App() {
         <Breadcrumb view={view} setView={setView} />
       </header>
 
-      {view.name === 'projects' && <ProjectList onOpen={goProject} />}
+      {view.name === 'projects' && <ProjectList onOpen={goProject} onOpenWorkflow={goWorkflow} />}
       {view.name === 'project' && (
         <ProjectView
           pid={view.pid}

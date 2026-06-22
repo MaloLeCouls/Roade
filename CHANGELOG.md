@@ -25,6 +25,15 @@ Rubriques utilisées : `Ajouté` · `Changé` · `Corrigé` · `Sécurité` · `
 
 ### Ajouté
 
+- **G.2** — **Projet de démonstration embarqué** : bouton « Ouvrir l'exemple »
+  sur l'écran d'accueil (état vide). Un clic crée un vrai projet « Commandes
+  2024 » avec un CSV FR de test (séparateur `;`, décimale `,`, accents) et un
+  workflow complet **et exécutable** (Source → Nettoyage → Calcul → Validation
+  → 2 Exports conformes / à corriger), puis ouvre directement le workflow. Fait
+  passer un primo-utilisateur de « Aucun projet » à un premier export en un
+  clic. Endpoint `POST /api/demo` (`backend/demo.py`). Un test de bout en bout
+  garantit que la démo s'exécute (et que la décimale FR est bien parsée :
+  Montant numérique, pas de SUM = 0 silencieuse).
 - **B.6** — **API versionnée `/api/v1`** (graine cloud 1) : le front parle
   désormais à `/api/v1` ; `/api` (sans version) reste accepté pour la
   rétro-compat. La réécriture est faite par un middleware ASGI pur (pas de

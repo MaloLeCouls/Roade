@@ -57,6 +57,8 @@ export const api = {
   createProject: (name) => sendJSON('/projects', 'POST', { name }),
   getProject: (pid) => getJSON(`/projects/${enc(pid)}`),
   deleteProject: (pid) => req(`/projects/${enc(pid)}`, { method: 'DELETE' }),
+  // G.2 — crée le projet de démonstration embarqué (renvoie {project_id, workflow_id, name}).
+  openDemo: () => sendJSON('/demo', 'POST'),
 
   // ---- files ----
   listFiles: (pid) => getJSON(`/projects/${enc(pid)}/files`),

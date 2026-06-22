@@ -23,6 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+import demo
 import engine
 import storage
 import workflow_doc
@@ -161,6 +162,13 @@ def health():
 @app.get("/api/version")
 def version():
     return {"version": __version__}
+
+
+@app.post("/api/demo")
+def create_demo():
+    """G.2 — crée le projet de démonstration embarqué (dossier + CSV FR + un
+    workflow complet et exécutable) et renvoie de quoi naviguer droit dessus."""
+    return demo.seed_demo_project()
 
 
 # --------------------------------------------------------------------------- #

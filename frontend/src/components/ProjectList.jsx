@@ -20,9 +20,11 @@ function fmtRelative(ms) {
   return new Date(ms).toLocaleDateString('fr-FR')
 }
 
-export default function ProjectList({ onOpen }) {
+export default function ProjectList({ onOpen, onOpenWorkflow }) {
   const [projects, setProjects] = useState([])
   const [name, setName] = useState('')
+  // G.2 — création du projet de démonstration en cours (le bouton se désactive).
+  const [seeding, setSeeding] = useState(false)
   // C.6 — quatre états explicites au lieu du « Chargement… » nu.
   // 'loading' au premier chargement, 'ready' après succès, 'error' si l'API
   // est tombée. Une fois 'ready', on garde la dernière liste affichée même
@@ -51,6 +53,20 @@ export default function ProjectList({ onOpen }) {
     setName('')
     await reload()
     onOpen(p.id)
+  }
+
+  // G.2 — « Ouvrir l'exemple » : un clic crée un projet de démo complet et
+  // ouvre directement son workflow, prêt à exécuter (premières 5 minutes).
+  const openExample = async () => {
+    setSeeding(true)
+    try {
+      const r = await api.openDemo()
+      onOpenWorkflow(r.project_id, r.workflow_id)
+    } finally {
+      // L'erreur éventuelle remonte au Toaster global (unhandledrejection) ;
+      // on réactive juste le bouton si la création a échoué.
+      setSeeding(false)
+    }
   }
 
   const remove = async (pid, e) => {
@@ -109,7 +125,14 @@ export default function ProjectList({ onOpen }) {
           <p>Aucun projet pour l'instant.</p>
           <p className="muted">
             Un projet = un dossier sur le disque qui contient vos fichiers, vos workflows et leurs
-            résultats. Créez-en un (ci-dessus) pour commencer.
+            résultats. Créez-en un (ci-dessus), ou découvrez Roade avec l'exemple :
+          </p>
+          <button className="primary" onClick={openExample} disabled={seeding}>
+            {seeding ? 'Création…' : "Ouvrir l'exemple"}
+          </button>
+          <p className="muted small">
+            Un projet « Commandes 2024 » avec un workflow complet (lecture d'un CSV, nettoyage,
+            colonne calculée, tri conformes / non conformes, exports) — prêt à exécuter.
           </p>
         </div>
       )}
