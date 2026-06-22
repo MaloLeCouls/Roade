@@ -1,20 +1,32 @@
 // HTTP client for the Roade backend. The Vite dev server proxies /api to the
 // FastAPI server (see vite.config.js). All methods return parsed JSON, except
 // downloadUrl (a string) and runStream (an EventSource).
+//
+// API versionnée (B.6 / graine cloud 1) : on parle à `/api/v1`. Le backend
+// accepte aussi `/api` (rétro-compat), mais le front s'en tient à la version
+// courante pour qu'un futur `/api/v2` puisse cohabiter sans casser.
+const BASE = '/api/v1'
 
-const BASE = '/api'
+// Toute erreur de l'API arrive sous l'enveloppe `{code, message}` (B.6). On en
+// fait une `Error` dont le `.code` est exploitable par l'appelant (réagir au
+// type d'erreur sans parser le message FR), tout en gardant `.message` lisible.
+function errorFromBody(body, fallback) {
+  const msg = (body && (body.message || body.detail || body.error)) || fallback
+  const err = new Error(msg || 'Erreur inconnue')
+  if (body && body.code) err.code = body.code
+  return err
+}
 
 async function req(path, options = {}) {
   const res = await fetch(BASE + path, options)
   if (!res.ok) {
-    let detail = res.statusText
+    let body = null
     try {
-      const body = await res.json()
-      detail = body.detail || body.error || detail
+      body = await res.json()
     } catch {
       /* non-JSON error body */
     }
-    throw new Error(detail || `Erreur ${res.status}`)
+    throw errorFromBody(body, res.statusText || `Erreur ${res.status}`)
   }
   if (res.status === 204) return null
   const ct = res.headers.get('content-type') || ''
@@ -60,14 +72,13 @@ export const api = {
       }
       xhr.onload = () => {
         if (xhr.status < 200 || xhr.status >= 300) {
-          let detail = xhr.statusText
+          let body = null
           try {
-            const body = JSON.parse(xhr.responseText)
-            detail = body.detail || body.error || detail
+            body = JSON.parse(xhr.responseText)
           } catch {
             /* non-JSON error body */
           }
-          reject(new Error(detail || `Erreur ${xhr.status}`))
+          reject(errorFromBody(body, xhr.statusText || `Erreur ${xhr.status}`))
           return
         }
         try {

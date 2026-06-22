@@ -25,9 +25,25 @@ Rubriques utilisées : `Ajouté` · `Changé` · `Corrigé` · `Sécurité` · `
 
 ### Ajouté
 
+- **B.6** — **API versionnée `/api/v1`** (graine cloud 1) : le front parle
+  désormais à `/api/v1` ; `/api` (sans version) reste accepté pour la
+  rétro-compat. La réécriture est faite par un middleware ASGI pur (pas de
+  duplication des ~40 routes, pas de buffering du SSE), qui est aussi le point
+  d'injection naturel d'une future authentification (encore inactive).
 - **G.5** — `__version__` exposé côté backend (constante module + endpoint
   `GET /api/version`), versions synchronisées entre `pyproject.toml`,
   `frontend/package.json` et `backend/main.py`. Création du CHANGELOG.
+
+### Changé
+
+- **B.6** — **Enveloppe d'erreur typée** : toute erreur de l'API est rendue
+  `{code, message}` (+ `details` sur les 422 de validation) au lieu du
+  `{detail: …}` par défaut. Le `code` est stable et machine-lisible
+  (`project.not_found`, `file.invalid_name`, `run.failed`, `validation_error`…)
+  — le front peut réagir au type d'erreur sans parser le message FR. Les 8
+  routes en `HTTPException(400, str(e))` fourre-tout sont remplacées par des
+  `RoadeError` typées (`backend/errors.py`). Côté front, `api.js` expose le
+  `code` sur l'`Error` levée (`err.code`).
 - **G.6** — Licence **AGPL-3.0-only** : texte canonique FSF dans `LICENSE`,
   champ `license` ajouté dans `pyproject.toml` et `frontend/package.json`,
   section dédiée au README (avec son implication SaaS). Avant ce commit,

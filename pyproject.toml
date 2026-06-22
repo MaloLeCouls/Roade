@@ -76,7 +76,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["engine", "storage", "main", "formula", "query_builder", "workflow_doc"]
+known-first-party = ["engine", "storage", "main", "formula", "query_builder", "workflow_doc", "errors"]
 
 [tool.ruff.format]
 quote-style = "double"

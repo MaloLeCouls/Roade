@@ -9,7 +9,7 @@ import App from './App'
 
 describe('<App>', () => {
   beforeEach(() => {
-    // ProjectList monte au démarrage et fait `fetch('/api/projects')`.
+    // ProjectList monte au démarrage et fait `fetch('/api/v1/projects')`.
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -32,7 +32,7 @@ describe('<App>', () => {
   it('demande la liste des projets au backend', async () => {
     render(<App />)
     await waitFor(() =>
-      expect(globalThis.fetch).toHaveBeenCalledWith('/api/projects', expect.anything()),
+      expect(globalThis.fetch).toHaveBeenCalledWith('/api/v1/projects', expect.anything()),
     )
   })
 })

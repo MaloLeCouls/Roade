@@ -128,8 +128,8 @@ def test_safe_upload_name_unit():
 
     # Cas dangereux : rejet (PAS sanitize silencieux — sinon `../x.exe` passerait
     # pour `x.exe` et l'utilisateur ne verrait rien d'anormal côté UI)
-    from fastapi import HTTPException
+    from errors import RoadeError
 
     for bad in ("", "..", ".", "../x", "..\\x", "a/b", "a\\b", "../../etc/passwd"):
-        with pytest.raises(HTTPException):
+        with pytest.raises(RoadeError):
             main._safe_upload_name(bad)

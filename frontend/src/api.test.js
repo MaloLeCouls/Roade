@@ -9,10 +9,10 @@ import { api } from './api'
 describe('api.downloadUrl', () => {
   it('encode pid + nom + subdir dans la query string', () => {
     expect(api.downloadUrl('p 1', 'rapport final.xlsx')).toBe(
-      '/api/projects/p%201/files/rapport%20final.xlsx',
+      '/api/v1/projects/p%201/files/rapport%20final.xlsx',
     )
     expect(api.downloadUrl('p1', 'a.xlsx', 'sortie/2024')).toBe(
-      '/api/projects/p1/files/a.xlsx?subdir=sortie%2F2024',
+      '/api/v1/projects/p1/files/a.xlsx?subdir=sortie%2F2024',
     )
   })
 })
@@ -36,22 +36,26 @@ describe('api.createProject', () => {
     const out = await api.createProject('Foo')
     expect(out).toEqual({ id: 'abc', name: 'Foo' })
 
-    expect(globalThis.fetch).toHaveBeenCalledWith('/api/projects', {
+    expect(globalThis.fetch).toHaveBeenCalledWith('/api/v1/projects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: 'Foo' }),
     })
   })
 
-  it('lève une erreur avec le `detail` du backend en cas de 4xx', async () => {
+  it("lève une erreur avec le `message` de l'enveloppe backend en cas de 4xx", async () => {
     globalThis.fetch.mockResolvedValueOnce({
       ok: false,
       status: 400,
       statusText: 'Bad Request',
       headers: new Headers({ 'content-type': 'application/json' }),
-      json: async () => ({ detail: 'Nom de projet requis' }),
+      json: async () => ({ code: 'project.name_required', message: 'Nom de projet requis' }),
     })
 
-    await expect(api.createProject('')).rejects.toThrow('Nom de projet requis')
+    // L'enveloppe B.6 expose `message` (affichable) ET `code` (réagissable).
+    await expect(api.createProject('')).rejects.toMatchObject({
+      message: 'Nom de projet requis',
+      code: 'project.name_required',
+    })
   })
 })

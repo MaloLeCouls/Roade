@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field
 import engine
 import storage
 import workflow_doc
+from errors import RoadeError, register_error_handlers
 
 # Source unique de la version backend. Tenu en synchro avec `pyproject.toml` et
 # `frontend/package.json` ; voir CHANGELOG.md pour la politique de release (G.5).
@@ -49,6 +50,47 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type"],
 )
+
+
+class ApiVersionRewrite:
+    """Expose l'API sous `/api/v1` (graine cloud 1 — versionner pour évoluer
+    sans casser) sans dupliquer les ~40 routes : on réécrit `/api/v1/<x>` en
+    `/api/<x>` avant le routage. La forme `/api/<x>` (sans version) reste
+    acceptée — rétro-compat des bookmarks et de la suite de tests.
+
+    C'est aussi le **seul point d'entrée** que traverse chaque requête API :
+    l'endroit naturel où brancher demain une vérification d'authentification
+    (graine cloud 1, encore inactive — on ne câble rien ici aujourd'hui).
+
+    Implémenté en ASGI pur (pas via `BaseHTTPMiddleware`) pour ne pas
+    bufferiser la réponse en streaming du run SSE (`/run-stream`).
+    """
+
+    _PREFIX = "/api/v1"
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            path = scope.get("path", "")
+            if path == self._PREFIX or path.startswith(self._PREFIX + "/"):
+                scope = dict(scope)
+                scope["path"] = "/api" + path[len(self._PREFIX) :]
+                raw = scope.get("raw_path")
+                if raw is not None:
+                    # raw_path est ASCII et n'inclut pas la query string : on ne
+                    # réécrit que le préfixe de version, le reste reste intact.
+                    scope["raw_path"] = b"/api" + raw[len(self._PREFIX) :]
+        await self.app(scope, receive, send)
+
+
+# Ajouté après CORS → middleware le plus externe : la réécriture de version a
+# lieu avant tout le reste, le routage ne voit que des chemins `/api/...`.
+app.add_middleware(ApiVersionRewrite)
+
+# Enveloppe d'erreur typée `{code, message}` sur toute l'API (todo B.6).
+register_error_handlers(app)
 
 
 # --------------------------------------------------------------------------- #
@@ -133,7 +175,7 @@ def list_projects():
 def create_project(payload: CreateProjectBody):
     name = payload.name.strip()
     if not name:
-        raise HTTPException(400, "Nom de projet requis")
+        raise RoadeError("project.name_required", "Nom de projet requis", 400)
     return storage.create_project(name)
 
 
@@ -141,7 +183,7 @@ def create_project(payload: CreateProjectBody):
 def get_project(pid: str):
     p = storage.get_project(pid)
     if not p:
-        raise HTTPException(404, "Projet introuvable")
+        raise RoadeError("project.not_found", "Projet introuvable", 404)
     p = dict(p)
     p["dir"] = str(storage.project_dir(pid))
     return p
@@ -159,16 +201,18 @@ def delete_project(pid: str):
 @app.get("/api/projects/{pid}/backpack")
 def list_backpack(pid: str):
     if not storage.get_project(pid):
-        raise HTTPException(404, "Projet introuvable")
+        raise RoadeError("project.not_found", "Projet introuvable", 404)
     return storage.read_backpack(pid)
 
 
 @app.post("/api/projects/{pid}/backpack")
 def add_backpack(pid: str, payload: BackpackAddBody):
     if not storage.get_project(pid):
-        raise HTTPException(404, "Projet introuvable")
+        raise RoadeError("project.not_found", "Projet introuvable", 404)
     if not payload.nodes:
-        raise HTTPException(400, "Sélection vide — au moins un bloc requis")
+        raise RoadeError(
+            "backpack.empty_selection", "Sélection vide — au moins un bloc requis", 400
+        )
     name = payload.name.strip() or _auto_name_backpack(payload.nodes)
     return storage.add_backpack_item(
         pid, {"name": name, "nodes": payload.nodes, "edges": payload.edges}
@@ -179,14 +223,14 @@ def add_backpack(pid: str, payload: BackpackAddBody):
 def rename_backpack(pid: str, iid: str, payload: BackpackPatchBody):
     updated = storage.update_backpack_item(pid, iid, {"name": payload.name.strip()})
     if not updated:
-        raise HTTPException(404, "Item introuvable")
+        raise RoadeError("backpack.not_found", "Item introuvable", 404)
     return updated
 
 
 @app.delete("/api/projects/{pid}/backpack/{iid}")
 def delete_backpack(pid: str, iid: str):
     if not storage.delete_backpack_item(pid, iid):
-        raise HTTPException(404, "Item introuvable")
+        raise RoadeError("backpack.not_found", "Item introuvable", 404)
     return {"ok": True}
 
 
@@ -213,12 +257,12 @@ def _resolve_file(pid: str, name: str, subdir: str | None) -> Path:
         root = storage.exports_dir(pid).resolve()
         path = (root / subdir / name).resolve()
         if root not in path.parents:
-            raise HTTPException(400, "Chemin de fichier invalide")
+            raise RoadeError("file.invalid_path", "Chemin de fichier invalide", 400)
     else:
         root = storage.files_dir(pid).resolve()
         path = (root / name).resolve()
         if path.parent != root:
-            raise HTTPException(400, "Chemin de fichier invalide")
+            raise RoadeError("file.invalid_path", "Chemin de fichier invalide", 400)
     return path
 
 
@@ -255,11 +299,11 @@ def _safe_upload_name(raw: str | None) -> str:
     """
     name = (raw or "").strip()
     if not name:
-        raise HTTPException(400, "Nom de fichier manquant")
+        raise RoadeError("file.invalid_name", "Nom de fichier manquant", 400)
     if any(c in name for c in ("/", "\\", "\0")):
-        raise HTTPException(400, "Nom de fichier invalide (séparateur de chemin)")
+        raise RoadeError("file.invalid_name", "Nom de fichier invalide (séparateur de chemin)", 400)
     if name in (".", "..") or name.startswith("..") or "/.." in name or "\\.." in name:
-        raise HTTPException(400, "Nom de fichier invalide (..)")
+        raise RoadeError("file.invalid_name", "Nom de fichier invalide (..)", 400)
     return name
 
 
@@ -267,7 +311,7 @@ def _safe_upload_name(raw: str | None) -> str:
 async def upload_file(pid: str, file: UploadFile = File(...)):
     fd = storage.files_dir(pid)
     if not fd.exists():
-        raise HTTPException(404, "Projet introuvable")
+        raise RoadeError("project.not_found", "Projet introuvable", 404)
     name = _safe_upload_name(file.filename)
     dest = fd / name
     with dest.open("wb") as out:
@@ -280,7 +324,7 @@ async def upload_file(pid: str, file: UploadFile = File(...)):
 def download_file(pid: str, name: str, subdir: str | None = Query(None)):
     path = _resolve_file(pid, name, subdir)
     if not path.exists():
-        raise HTTPException(404, "Fichier introuvable")
+        raise RoadeError("file.not_found", "Fichier introuvable", 404)
     return FileResponse(path, filename=name)
 
 
@@ -307,8 +351,10 @@ def _open_in_os(path) -> None:
     the backend runs on the same machine as the user."""
     ext = Path(path).suffix.lower()
     if ext and ext not in _OS_OPENABLE:
-        raise HTTPException(
-            400, f"Type de fichier non ouvrable depuis Roade : {ext or '(sans extension)'}"
+        raise RoadeError(
+            "file.not_openable",
+            f"Type de fichier non ouvrable depuis Roade : {ext or '(sans extension)'}",
+            400,
         )
     if sys.platform.startswith("win"):
         os.startfile(str(path))  # noqa: S606 - Windows-only, trusted local path
@@ -322,13 +368,13 @@ def _open_in_os(path) -> None:
 def open_file(pid: str, name: str, subdir: str | None = Query(None)):
     path = _resolve_file(pid, name, subdir)
     if not path.exists():
-        raise HTTPException(404, "Fichier introuvable")
+        raise RoadeError("file.not_found", "Fichier introuvable", 404)
     try:
         _open_in_os(path)
-    except HTTPException:
+    except RoadeError:
         raise  # nos refus 400 (extensions non whitelistées) doivent remonter intacts
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(500, f"Impossible d'ouvrir le fichier : {e}")
+        raise RoadeError("file.open_failed", f"Impossible d'ouvrir le fichier : {e}", 500)
     return {"ok": True}
 
 
@@ -341,17 +387,17 @@ def open_files_folder(pid: str, subdir: str | None = Query(None)):
         fd = (storage.exports_dir(pid) / subdir).resolve()
         root = storage.exports_dir(pid).resolve()
         if root not in fd.parents and fd != root:
-            raise HTTPException(400, "Chemin invalide")
+            raise RoadeError("file.invalid_path", "Chemin invalide", 400)
     else:
         fd = storage.files_dir(pid)
     if not fd.exists():
-        raise HTTPException(404, "Dossier introuvable")
+        raise RoadeError("file.not_found", "Dossier introuvable", 404)
     try:
         _open_in_os(fd)
-    except HTTPException:
+    except RoadeError:
         raise
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(500, f"Impossible d'ouvrir le dossier : {e}")
+        raise RoadeError("file.open_failed", f"Impossible d'ouvrir le dossier : {e}", 500)
     return {"ok": True}
 
 
@@ -378,7 +424,7 @@ def peek(
     try:
         return engine.peek_source(pid, file, sheet, header_row, data)
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(400, str(e))
+        raise RoadeError("source.peek_failed", str(e), 400)
 
 
 # --------------------------------------------------------------------------- #
@@ -399,7 +445,7 @@ def create_workflow(pid: str, payload: CreateWorkflowBody):
 def get_workflow(pid: str, wid: str):
     wf = storage.get_workflow(pid, wid)
     if not wf:
-        raise HTTPException(404, "Workflow introuvable")
+        raise RoadeError("workflow.not_found", "Workflow introuvable", 404)
     return wf
 
 
@@ -431,7 +477,7 @@ def run_workflow(pid: str, wid: str, only_node: str | None = Query(None)):
     try:
         return engine.run_workflow(pid, wid, only_node)
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(400, str(e))
+        raise RoadeError("run.failed", str(e), 400)
 
 
 @app.get("/api/projects/{pid}/workflows/{wid}/document")
@@ -440,11 +486,11 @@ def document_workflow(pid: str, wid: str):
     file, tracing every treatment that leads to it)."""
     wf = storage.get_workflow(pid, wid)
     if not wf:
-        raise HTTPException(404, "Workflow introuvable")
+        raise RoadeError("workflow.not_found", "Workflow introuvable", 404)
     try:
         data = workflow_doc.build_workbook(pid, wid)
     except Exception as e:  # noqa: BLE001 - surfaced to the UI
-        raise HTTPException(400, str(e))
+        raise RoadeError("document.failed", str(e), 400)
     name = (wf.get("name") or "Workflow").strip() or "Workflow"
     fname = f"Documentation - {name}.xlsx"
     ascii_name = fname.encode("ascii", "ignore").decode().strip() or "documentation.xlsx"
@@ -533,7 +579,7 @@ def preview(
             q=q,
         )
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(400, str(e))
+        raise RoadeError("preview.failed", str(e), 400)
 
 
 @app.get("/api/projects/{pid}/workflows/{wid}/nodes/{nid}/profile")
@@ -541,7 +587,7 @@ def profile(pid: str, wid: str, nid: str, column: str, handle: str = "out"):
     try:
         return engine.column_profile(pid, wid, nid, column, handle=handle)
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(400, str(e))
+        raise RoadeError("profile.failed", str(e), 400)
 
 
 @app.get("/api/projects/{pid}/workflows/{wid}/nodes/{nid}/group")
@@ -558,7 +604,7 @@ def keys_group(
     try:
         return engine.keys_group(pid, wid, nid, key_cols, q, handle=handle, limit=limit)
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(400, str(e))
+        raise RoadeError("group.failed", str(e), 400)
 
 
 @app.post("/api/projects/{pid}/workflows/{wid}/nodes/{nid}/route-preview")
@@ -566,7 +612,7 @@ def route_preview(pid: str, wid: str, nid: str, payload: FreeJsonBody):
     try:
         return engine.route_preview(pid, wid, nid, payload.model_dump())
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(400, str(e))
+        raise RoadeError("route_preview.failed", str(e), 400)
 
 
 @app.post("/api/projects/{pid}/workflows/{wid}/nodes/{nid}/split-scan")
@@ -574,7 +620,7 @@ def split_scan(pid: str, wid: str, nid: str, payload: FreeJsonBody):
     try:
         return engine.split_scan(pid, wid, nid, payload.model_dump())
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(400, str(e))
+        raise RoadeError("split_scan.failed", str(e), 400)
 
 
 @app.post("/api/projects/{pid}/workflows/{wid}/nodes/{nid}/filter-preview")
@@ -582,7 +628,7 @@ def filter_preview(pid: str, wid: str, nid: str, payload: FreeJsonBody):
     try:
         return engine.filter_preview(pid, wid, nid, payload.model_dump())
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(400, str(e))
+        raise RoadeError("filter_preview.failed", str(e), 400)
 
 
 # --------------------------------------------------------------------------- #
