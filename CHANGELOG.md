@@ -23,8 +23,24 @@ Rubriques utilisées : `Ajouté` · `Changé` · `Corrigé` · `Sécurité` · `
 
 ## [Unreleased]
 
+### Changé
+
+- **Bloc Doublons — refonte ergonomique (pilote du grand rework UX)** : la
+  config se lit désormais comme une phrase (« Deux lignes sont des doublons
+  quand elles partagent : [colonnes] »). Colonnes-clés en **chips** ajoutables /
+  retirables (au lieu d'une checklist), **compteur live** de doublons (dry-run
+  `dedup-preview` : « 142 lignes en double dans 58 groupes · sur 1 200 »), les
+  3 **sorties chiffrées** en direct, choix « on garde 1re / dernière » en
+  contrôle segmenté, et l'option rare repliée (divulgation progressive).
+  Principes : phrase-driven, Hick/Miller, reconnaissance > rappel, visibilité de
+  l'état.
+
 ### Corrigé
 
+- **Cases à cocher étirées dans les panneaux de config** : une règle globale
+  `.fld input { width: 100% }` étirait les `<input type=checkbox>` imbriquées
+  (ColumnPicker multi…) à 100 %, cassant la mise en page (bloc Doublons et
+  autres). Restreinte aux champs texte/select.
 - **Validation, mode « Groupe » — insensibilité à la casse cassée** : sur
   pandas 3.0, les colonnes texte sont du dtype `str` (et non plus `object`), y
   compris à la lecture Parquet. Le repli en minuscules des contrôles par groupe

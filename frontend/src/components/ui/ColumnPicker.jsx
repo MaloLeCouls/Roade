@@ -31,7 +31,10 @@ const TYPE_SHORT = {
   TEXT: 'texte',
 }
 
-function shortType(t) {
+// Exporté pour les pickers de colonne « maison » (chips du bloc Doublons, etc.)
+// qui doivent afficher le même libellé de type que la primitive (D.2 — une
+// seule façon de nommer un type de colonne).
+export function shortType(t) {
   if (!t) return ''
   return TYPE_SHORT[String(t).toUpperCase()] || String(t).toLowerCase()
 }

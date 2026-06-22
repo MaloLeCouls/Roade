@@ -4,7 +4,7 @@ import QueryBuilder from './QueryBuilder'
 import Icon from './Icon'
 import { ConditionsEditor, RuleRow, MaskBuilder, RulesBuilder } from './routing'
 import { EXTRACTOR_TYPES, defaultExtractor } from './validateHelpers'
-import ColumnPicker from './ui/ColumnPicker'
+import ColumnPicker, { shortType } from './ui/ColumnPicker'
 
 export default function Inspector({
   pid,
@@ -81,7 +81,9 @@ export default function Inspector({
         <SourceConfig pid={pid} node={node} files={files} set={set} onSchema={onSchema} />
       )}
       {node.type === 'sql' && <SqlConfig node={node} inputs={inputs} set={set} />}
-      {node.type === 'dedup' && <DedupConfig node={node} inputs={inputs} set={set} />}
+      {node.type === 'dedup' && (
+        <DedupConfig pid={pid} wid={wid} node={node} inputs={inputs} set={set} />
+      )}
       {node.type === 'validate' && <ValidateConfig node={node} inputs={inputs} set={set} />}
       {node.type === 'pivot' && <PivotConfig node={node} inputs={inputs} set={set} />}
       {node.type === 'clean' && <CleanConfig node={node} inputs={inputs} set={set} />}
@@ -2401,12 +2403,53 @@ function ReportConfig({ node, inputs, set }) {
   )
 }
 
-function DedupConfig({ node, inputs, set }) {
+// Dry-run live du bloc Doublons (compteur de doublons + tailles des 3 sorties)
+// à chaque édition de la config — calé sur `useFilterDryRun`. Pas d'appel tant
+// que les colonnes ne sont pas chargées (Parquet amont matérialisé).
+function useDedupDryRun(pid, wid, node, colsLen) {
+  const d = node.data
+  const cfgKey = JSON.stringify({ k: d.key_columns, keep: d.keep, m: d.dups_mode })
+  const ready = pid && wid && node?.id && colsLen > 0
+  const [state, setState] = useState({ loading: false, res: null, error: null, ready: false })
+  useEffect(() => {
+    if (!ready) {
+      setState({ loading: false, res: null, error: null, ready: false })
+      return
+    }
+    setState((s) => ({ ...s, loading: true, ready: true }))
+    const h = setTimeout(() => {
+      api
+        .dedupPreview(pid, wid, node.id, d)
+        .then((res) => setState({ loading: false, res, error: null, ready: true }))
+        .catch((e) =>
+          setState({ loading: false, res: null, error: e.message || String(e), ready: true }),
+        )
+    }, 350)
+    return () => clearTimeout(h)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pid, wid, node?.id, cfgKey, ready])
+  return state
+}
+
+const fmtInt = (v) => Number(v ?? 0).toLocaleString('fr-FR')
+
+// Bloc Doublons — refonte ergonomique (pilote du rework).
+// La config se lit comme une phrase : « deux lignes sont des doublons quand
+// elles partagent : [colonnes] ». Compteur live, sorties chiffrées, options
+// rares repliées (divulgation progressive).
+function DedupConfig({ pid, wid, node, inputs, set }) {
   const d = node.data
   const cols = inputs[0]?.columns || []
   const selected = d.key_columns || []
+  const dry = useDedupDryRun(pid, wid, node, cols.length)
+  const available = cols.filter((c) => !selected.includes(c?.name ?? String(c)))
+  const keep = d.keep === 'last' ? 'last' : 'first'
+
+  const addKey = (name) => name && set({ key_columns: [...selected, name] })
+  const removeKey = (name) => set({ key_columns: selected.filter((k) => k !== name) })
+
   return (
-    <div className="insp-body">
+    <div className="insp-body dedup">
       {inputs.length === 0 && (
         <div className="qb-warn">
           Connectez une entrée (ancre <b>in</b>) puis exécutez le bloc amont pour charger ses
@@ -2414,52 +2457,161 @@ function DedupConfig({ node, inputs, set }) {
         </div>
       )}
 
-      <div className="fld">
-        <div className="fld-head">
-          <span>Colonnes-clés (détection des doublons)</span>
+      <div className="dedup-sentence">
+        <span className="dedup-lede">
+          Deux lignes sont des doublons quand elles partagent&nbsp;:
           <InfoBubble>
-            Aucune cochée → doublon sur la <b>ligne entière</b>. Plusieurs cochées → doublon sur
-            leur <b>combinaison</b>.
+            Aucune colonne → doublon sur la <b>ligne entière</b>. Plusieurs colonnes → doublon sur
+            leur <b>combinaison</b> (toutes identiques).
           </InfoBubble>
+        </span>
+        <div className="keychips">
+          {selected.length === 0 ? (
+            <span
+              className="keychip keychip-whole"
+              title="Aucune colonne-clé : le doublon porte sur la ligne entière"
+            >
+              la ligne entière
+            </span>
+          ) : (
+            selected.map((name) => (
+              <span className="keychip" key={name}>
+                {name}
+                <button
+                  type="button"
+                  className="keychip-x"
+                  aria-label={`Retirer la colonne ${name}`}
+                  onClick={() => removeKey(name)}
+                >
+                  ×
+                </button>
+              </span>
+            ))
+          )}
+          {available.length > 0 && (
+            <select
+              className="keychip-add"
+              value=""
+              aria-label="Ajouter une colonne-clé"
+              onChange={(e) => {
+                addKey(e.target.value)
+                e.target.value = ''
+              }}
+            >
+              <option value="">+ colonne</option>
+              {available.map((c) => {
+                const name = c?.name ?? String(c)
+                return (
+                  <option key={name} value={name}>
+                    {name}
+                    {c?.type ? ` · ${shortType(c.type)}` : ''}
+                  </option>
+                )
+              })}
+            </select>
+          )}
         </div>
-        <ColumnPicker
-          multi
-          columns={cols}
-          value={selected}
-          onChange={(v) => set({ key_columns: v })}
-          emptyMessage="— colonnes non chargées —"
-        />
+        <DedupCountLine dry={dry} />
       </div>
 
-      <label className="fld">
-        <span>Exemplaire à conserver</span>
-        <select value={d.keep || 'first'} onChange={(e) => set({ keep: e.target.value })}>
-          <option value="first">Première occurrence</option>
-          <option value="last">Dernière occurrence</option>
-        </select>
-      </label>
-
-      <label className="fld">
-        <span>Sortie « Doublons » contient…</span>
-        <select value={d.dups_mode || 'all'} onChange={(e) => set({ dups_mode: e.target.value })}>
-          <option value="all">Toutes les occurrences des groupes en double</option>
-          <option value="exemplar">Un exemplaire par groupe en double</option>
-          <option value="extra">Seulement les occurrences en trop</option>
-        </select>
-      </label>
-
-      <div className="outs-legend">
-        <div>
-          <span className="odot kept" /> <b>Dédoublonné</b> — un exemplaire par groupe (flux « sans
-          doublons »)
-        </div>
-        <div>
-          <span className="odot dups" /> <b>Doublons</b> — selon l'option ci-dessus
-        </div>
-        <div>
-          <span className="odot uniq" /> <b>Uniques</b> — lignes présentes une seule fois
+      <div className="dedup-keep">
+        <span className="dedup-keep-lbl">On garde&nbsp;:</span>
+        <div className="seg" role="radiogroup" aria-label="Exemplaire à conserver">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={keep === 'first'}
+            className={keep === 'first' ? 'on' : ''}
+            onClick={() => set({ keep: 'first' })}
+          >
+            la 1re occurrence
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={keep === 'last'}
+            className={keep === 'last' ? 'on' : ''}
+            onClick={() => set({ keep: 'last' })}
+          >
+            la dernière
+          </button>
         </div>
       </div>
+
+      <DedupOutputs dry={dry} />
+
+      <details className="dedup-adv">
+        <summary>Options avancées</summary>
+        <label className="fld">
+          <span>La sortie « Doublons » contient…</span>
+          <select value={d.dups_mode || 'all'} onChange={(e) => set({ dups_mode: e.target.value })}>
+            <option value="all">Toutes les occurrences des groupes en double</option>
+            <option value="exemplar">Un exemplaire par groupe en double</option>
+            <option value="extra">Seulement les occurrences en trop</option>
+          </select>
+        </label>
+      </details>
+    </div>
+  )
+}
+
+function DedupCountLine({ dry }) {
+  if (!dry.ready)
+    return (
+      <div className="dedup-count dedup-count-hint">
+        Exécutez le bloc amont pour compter les doublons.
+      </div>
+    )
+  if (dry.loading) return <div className="dedup-count dedup-count-hint">Calcul de l'aperçu…</div>
+  if (dry.error)
+    return <div className="dedup-count dedup-count-warn">Aperçu indisponible : {dry.error}</div>
+  const r = dry.res
+  if (!r || r.status !== 'ok')
+    return (
+      <div className="dedup-count dedup-count-warn">{r?.message || 'Aperçu indisponible.'}</div>
+    )
+  const pct = r.total ? Math.round((r.extra / r.total) * 100) : 0
+  if (r.extra === 0)
+    return (
+      <div className="dedup-count dedup-count-ok">
+        Aucun doublon sur cette clé — les {fmtInt(r.total)} lignes sont uniques.
+      </div>
+    )
+  return (
+    <div className="dedup-count">
+      ↳ <b>{fmtInt(r.extra)}</b> ligne{r.extra > 1 ? 's' : ''} en double
+      {r.dup_groups > 0 && (
+        <>
+          {' '}
+          dans <b>{fmtInt(r.dup_groups)}</b> groupe{r.dup_groups > 1 ? 's' : ''}
+        </>
+      )}
+      <span className="muted">
+        {' '}
+        · sur {fmtInt(r.total)} ({pct}%)
+      </span>
+    </div>
+  )
+}
+
+function DedupOutputs({ dry }) {
+  const r = dry.ready && !dry.loading && !dry.error && dry.res?.status === 'ok' ? dry.res : null
+  const n = (v) => (r ? fmtInt(v) : '—')
+  const rows = [
+    ['kept', 'Dédoublonné', r?.kept, 'un exemplaire par groupe'],
+    ['dups', 'Doublons', r?.dups, 'selon l’option ci-dessous'],
+    ['uniq', 'Uniques', r?.uniques, 'lignes présentes une seule fois'],
+  ]
+  return (
+    <div className="dedup-outs" aria-label="Sorties du bloc">
+      {rows.map(([cls, name, val, desc]) => (
+        <div className="dedup-out" key={cls}>
+          <span className={`odot ${cls}`} aria-hidden="true" />
+          <span className="dedup-out-name">{name}</span>
+          <span className="dedup-out-n">{n(val)}</span>
+          <span className="dedup-out-desc muted">{desc}</span>
+        </div>
+      ))}
     </div>
   )
 }

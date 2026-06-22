@@ -646,6 +646,14 @@ def filter_preview(pid: str, wid: str, nid: str, payload: FreeJsonBody):
         raise RoadeError("filter_preview.failed", str(e), 400)
 
 
+@app.post("/api/projects/{pid}/workflows/{wid}/nodes/{nid}/dedup-preview")
+def dedup_preview(pid: str, wid: str, nid: str, payload: FreeJsonBody):
+    try:
+        return engine.dedup_preview(pid, wid, nid, payload.model_dump())
+    except Exception as e:  # noqa: BLE001
+        raise RoadeError("dedup_preview.failed", str(e), 400)
+
+
 # --------------------------------------------------------------------------- #
 # Validation tester
 # --------------------------------------------------------------------------- #

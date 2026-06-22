@@ -174,6 +174,13 @@ export const api = {
       'POST',
       config,
     ),
+  // ---- dedup: live dry-run (duplicate counts + output sizes, no materialization) ----
+  dedupPreview: (pid, wid, nodeId, config) =>
+    sendJSON(
+      `/projects/${enc(pid)}/workflows/${enc(wid)}/nodes/${enc(nodeId)}/dedup-preview`,
+      'POST',
+      config,
+    ),
 
   // ---- streaming run (Server-Sent Events) ----
   runStream: (

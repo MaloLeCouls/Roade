@@ -1082,8 +1082,12 @@ button.ghost.icon-only {
   font-weight: 600;
   color: var(--ink-soft);
 }
+/* Les champs texte/nombre d'un .fld remplissent la largeur du panneau ; mais
+   PAS les cases à cocher / radios — sinon une <input type=checkbox> imbriquée
+   (ColumnPicker multi, etc.) s'étire à 100 % et casse la mise en page (les
+   noms passent à droite et se replient). C'était le bug du bloc Doublons. */
 .fld select,
-.fld input {
+.fld input:not([type='checkbox']):not([type='radio']) {
   width: 100%;
 }
 .info-note {
@@ -5170,4 +5174,162 @@ table.dt th.idx {
   justify-content: flex-end;
   gap: var(--s-2);
   margin-top: var(--s-5);
+}
+
+/* ---- Bloc Doublons — refonte (config qui se lit comme une phrase) --------- */
+.dedup-sentence {
+  margin-bottom: var(--s-5);
+}
+.dedup-lede {
+  display: block;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: var(--s-3);
+  line-height: 1.4;
+}
+.keychips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  align-items: center;
+}
+.keychip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--surface-3);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 4px 4px 4px 10px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.keychip-whole {
+  font-style: italic;
+  font-weight: 500;
+  color: var(--ink-soft);
+  padding-right: 10px;
+  background: var(--surface-1);
+}
+.keychip-x {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+}
+.keychip-x:hover {
+  background: var(--line);
+  color: var(--ink);
+}
+.keychip-add {
+  border: 1px dashed var(--line);
+  background: transparent;
+  color: var(--accent);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.keychip-add:hover {
+  border-color: var(--accent);
+  background: var(--surface-1);
+}
+.dedup-count {
+  margin-top: var(--s-3);
+  font-size: var(--fs-sm);
+  color: var(--ink);
+}
+.dedup-count b {
+  color: var(--accent-d);
+}
+.dedup-count-hint {
+  color: var(--muted);
+}
+.dedup-count-warn {
+  color: var(--warn);
+}
+.dedup-count-ok {
+  color: var(--ok);
+}
+.dedup-keep {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  margin-bottom: var(--s-4);
+}
+.dedup-keep-lbl {
+  font-weight: 600;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.seg button {
+  border: none;
+  background: #fff;
+  padding: 5px 12px;
+  font-size: var(--fs-sm);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.seg button + button {
+  border-left: 1px solid var(--line);
+}
+.seg button.on {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.dedup-outs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  background: var(--surface-1);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--s-3);
+}
+.dedup-out {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+}
+.dedup-out .odot {
+  align-self: center;
+}
+.dedup-out-name {
+  font-weight: 600;
+  color: var(--ink);
+  min-width: 96px;
+}
+.dedup-out-n {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--ink);
+  min-width: 60px;
+}
+.dedup-out-desc {
+  font-size: var(--fs-xs);
+}
+.dedup-adv > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--ink-soft);
+  font-size: 13px;
+  padding: var(--s-1) 0;
+  list-style-position: inside;
+}
+.dedup-adv[open] > summary {
+  margin-bottom: var(--s-2);
 }

@@ -904,6 +904,65 @@ def _run_dedup(con, pid, node, ins):
     }, {}
 
 
+def dedup_preview(pid, wid, node_id, config: dict) -> dict:
+    """Dry-run du bloc Doublons contre son entrée actuelle, sans matérialiser.
+    Renvoie les comptes (total, groupes en double, lignes redondantes, et les
+    tailles des 3 sorties) pour un retour live pendant l'édition — l'utilisateur
+    voit « 142 doublons sur 1 200 lignes » dès qu'il coche une colonne-clé.
+    Calé sur la sémantique exacte de `_run_dedup`. Inspiré de `filter_preview`."""
+    wf = storage.get_workflow(pid, wid)
+    if not wf:
+        raise ValueError("Workflow introuvable")
+    node = next((n for n in wf.get("nodes", []) if n["id"] == node_id), None)
+    if not node:
+        raise ValueError("Bloc introuvable")
+    d = config or {}
+    ins = _node_inputs(pid, wid, node, wf.get("edges", []))
+    if not ins:
+        return {"status": "no_input", "message": "branchez et exécutez l'entrée"}
+    df = _single(ins)
+    total = int(len(df))
+    requested = list(d.get("key_columns") or [])
+    if requested:
+        missing = [k for k in requested if k not in df.columns]
+        if missing:
+            return {
+                "status": "bad_column",
+                "message": "colonnes-clés absentes : " + ", ".join(missing),
+                "total": total,
+            }
+        keys = requested
+    else:
+        keys = list(df.columns)  # aucune cochée → doublon sur la ligne entière
+    keep = d.get("keep", "first")
+    if keep not in ("first", "last"):
+        keep = "first"
+    dups_mode = d.get("dups_mode", "all")
+
+    dup_any = df.duplicated(subset=keys, keep=False)
+    exemplar = ~df.duplicated(subset=keys, keep=keep)
+    extra_mask = df.duplicated(subset=keys, keep=keep)
+    n_dup_rows = int(dup_any.sum())
+    n_groups = int((dup_any & exemplar).sum())  # un exemplaire par groupe en double
+    n_extra = int(extra_mask.sum())  # lignes redondantes (toutes sauf une / groupe)
+    n_kept = int(exemplar.sum())  # sortie « Dédoublonné » : un par groupe
+    n_uniques = int((~dup_any).sum())  # sortie « Uniques » : lignes seules
+    n_dups = {"exemplar": n_groups, "extra": n_extra}.get(dups_mode, n_dup_rows)
+    return {
+        "status": "ok",
+        "total": total,
+        "keys": keys,
+        "whole_row": not requested,
+        "dup_groups": n_groups,
+        "dup_rows": n_dup_rows,
+        "extra": n_extra,
+        "kept": n_kept,
+        "uniques": n_uniques,
+        "dups": n_dups,
+        "dups_mode": dups_mode,
+    }
+
+
 def _run_validate(con, pid, node, ins):
     d = node["data"]
     df = _single(ins)
