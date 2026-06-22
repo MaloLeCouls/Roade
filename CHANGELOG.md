@@ -25,6 +25,13 @@ Rubriques utilisées : `Ajouté` · `Changé` · `Corrigé` · `Sécurité` · `
 
 ### Changé
 
+- **Bloc Validation — refonte de l'éditeur de condition (même langage)** : la
+  condition se lit comme une phrase (« La ligne correspond si : … ») avec une
+  **relecture en langage clair** sous les règles (« configuration = Model ET
+  commence par CMD- »). Les modes rares **Masque positionnel** et **Contrôle
+  par groupe**, qui étaient trois onglets de même poids, passent en
+  **divulgation progressive** (« Définir autrement : … ») — on mène par les
+  règles, le cas à 80 %. Modèle de données et capacités avancées inchangés.
 - **Bloc Doublons — refonte ergonomique (pilote du grand rework UX)** : la
   config se lit désormais comme une phrase (« Deux lignes sont des doublons
   quand elles partagent : [colonnes] »). Colonnes-clés en **chips** ajoutables /

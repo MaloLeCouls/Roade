@@ -11,9 +11,44 @@ import {
   uid,
   buildMaskPattern,
   makeCondition,
+  ruleSummary,
   VS_COLUMN_TESTS,
   MULTI_VALUE_TESTS,
 } from './validateHelpers'
+
+// Relecture d'une condition en langage clair (le « ça se lit comme une phrase »
+// du rework). Pour le mode règles : groupes joints par OU, règles par ET, via
+// le résumé FR existant. Mask/groupe : pas de relecture (le builder a déjà sa
+// propre lisibilité). Défensif — une config en cours d'édition ne doit jamais
+// faire planter le panneau.
+function conditionReadback(cond) {
+  if (!cond || (cond.kind || 'rules') !== 'rules') return ''
+  try {
+    const parts = (cond.groups || [])
+      .map((g) =>
+        (g.rules || [])
+          .map((r) => ruleSummary(r))
+          .filter(Boolean)
+          .join(' ET '),
+      )
+      .filter(Boolean)
+    if (!parts.length) return ''
+    return parts.length > 1 ? parts.map((p) => `(${p})`).join(' OU ') : parts[0]
+  } catch {
+    return ''
+  }
+}
+
+function ConditionReadback({ cond }) {
+  const txt = conditionReadback(cond)
+  if (!txt) return null
+  return (
+    <div className="cond-readback" aria-live="polite">
+      <Icon name="check" size={12} />
+      <span>{txt}</span>
+    </div>
+  )
+}
 
 /*
  * Validation block = named CONDITIONS (rules-DNF or positional mask) + OUTPUTS
@@ -161,63 +196,88 @@ export function ConditionsEditor({ node, cols, onChange }) {
   )
 }
 
+// Sélecteur de colonne « colonne : X » réutilisé en mode règles et masque.
+function CondColumn({ cols, cond, defaultCol, onChange }) {
+  return (
+    <div className="cond-col">
+      <span className="qb-lbl">colonne</span>
+      <ColumnPicker
+        compact
+        columns={cols}
+        value={cond.column || ''}
+        onChange={(v) => onChange({ column: v })}
+        placeholder={defaultCol ? `défaut : ${defaultCol}` : '(par défaut)'}
+      />
+    </div>
+  )
+}
+
+// Condition d'une Validation — refonte (le même langage que le bloc Doublons).
+// On mène par le cas à 80 % (les règles, qui se lisent comme une phrase et se
+// relisent en clair) ; les façons rares de définir la règle (masque positionnel,
+// contrôle par groupe) passent en divulgation progressive au lieu de trois
+// onglets de même poids.
 function ConditionBuilder({ cond, cols, defaultCol, caseSensitive, onChange }) {
   const kind = cond.kind || 'rules'
-  return (
-    <div className="cond-builder">
-      <div className="cond-builder-head">
-        <div className="mode-toggle sm">
+
+  if (kind === 'mask' || kind === 'group') {
+    const title = kind === 'mask' ? 'Masque positionnel' : 'Contrôle par groupe'
+    return (
+      <div className="cond-builder">
+        <div className="cond-alt-head">
+          <span className="cond-alt-title">{title}</span>
           <button
-            className={kind === 'rules' ? 'on' : ''}
+            className="ghost small"
             onClick={() => onChange({ kind: 'rules' })}
+            title="Revenir aux règles"
           >
-            Règles
-          </button>
-          <button
-            className={kind === 'mask' ? 'on' : ''}
-            onClick={() => onChange({ kind: 'mask' })}
-          >
-            Masque
-          </button>
-          <button
-            className={kind === 'group' ? 'on' : ''}
-            onClick={() => onChange({ kind: 'group' })}
-          >
-            Groupe
+            <Icon name="chev-left" size={12} /> revenir aux règles
           </button>
         </div>
-        {kind !== 'group' && (
-          <div className="cond-col">
-            <span className="qb-lbl">colonne</span>
-            <ColumnPicker
-              compact
-              columns={cols}
-              value={cond.column || ''}
-              onChange={(v) => onChange({ column: v })}
-              placeholder={defaultCol ? `défaut : ${defaultCol}` : '(par défaut)'}
+        {kind === 'mask' ? (
+          <>
+            <CondColumn cols={cols} cond={cond} defaultCol={defaultCol} onChange={onChange} />
+            <MaskBuilder
+              segments={cond.segments || []}
+              caseSensitive={caseSensitive}
+              onChange={(segments) => onChange({ segments })}
             />
-          </div>
+            <ConditionTester cond={cond} caseSensitive={caseSensitive} onChange={onChange} />
+          </>
+        ) : (
+          <GroupCheckBuilder cond={cond} cols={cols} defaultCol={defaultCol} onChange={onChange} />
         )}
       </div>
-      {kind === 'mask' ? (
-        <MaskBuilder
-          segments={cond.segments || []}
-          caseSensitive={caseSensitive}
-          onChange={(segments) => onChange({ segments })}
-        />
-      ) : kind === 'group' ? (
-        <GroupCheckBuilder cond={cond} cols={cols} defaultCol={defaultCol} onChange={onChange} />
-      ) : (
-        <RulesBuilder
-          groups={cond.groups || []}
-          cols={cols}
-          defaultCol={cond.column || defaultCol}
-          onChange={(groups) => onChange({ groups })}
-        />
-      )}
-      {kind !== 'group' && (
-        <ConditionTester cond={cond} caseSensitive={caseSensitive} onChange={onChange} />
-      )}
+    )
+  }
+
+  // Mode règles (par défaut) — mené par la phrase.
+  return (
+    <div className="cond-builder">
+      <div className="cond-lead">
+        <span className="cond-lead-txt">La ligne correspond si&nbsp;:</span>
+        <CondColumn cols={cols} cond={cond} defaultCol={defaultCol} onChange={onChange} />
+      </div>
+      <RulesBuilder
+        groups={cond.groups || []}
+        cols={cols}
+        defaultCol={cond.column || defaultCol}
+        onChange={(groups) => onChange({ groups })}
+      />
+      <ConditionReadback cond={cond} />
+      <ConditionTester cond={cond} caseSensitive={caseSensitive} onChange={onChange} />
+      <div className="cond-altlink">
+        <span className="muted">Définir autrement&nbsp;:</span>
+        <button type="button" className="linkish" onClick={() => onChange({ kind: 'mask' })}>
+          masque positionnel
+        </button>
+        <span className="dotsep" aria-hidden="true">
+          ·
+        </span>
+        <button type="button" className="linkish" onClick={() => onChange({ kind: 'group' })}>
+          contrôle par groupe
+        </button>
+      </div>
     </div>
   )
 }

@@ -2866,6 +2866,70 @@ table.dt th.idx {
   max-width: 160px;
 }
 
+/* Condition (refonte) : phrase d'amorce, relecture en clair, façons rares repliées */
+.cond-lead {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+}
+.cond-lead-txt {
+  font-weight: 600;
+  color: var(--ink);
+}
+.cond-readback {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  color: var(--ink-soft);
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  padding: 6px 9px;
+  line-height: 1.45;
+}
+.cond-readback svg {
+  color: var(--accent);
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+.cond-readback > span {
+  color: var(--ink);
+}
+.cond-alt-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
+.cond-alt-title {
+  font-weight: 600;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+.cond-altlink {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+}
+.linkish {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.linkish:hover {
+  color: var(--accent-d);
+}
+.dotsep {
+  color: var(--muted);
+}
+
 /* a named condition card (router intent) */
 .ccard {
   border: 1px solid var(--line);
