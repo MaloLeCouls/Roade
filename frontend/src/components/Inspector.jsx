@@ -1598,24 +1598,29 @@ function CalcConfig({ node, inputs, set }) {
 
       <GroupCalcSection d={d} cols={cols} set={set} />
 
-      <div className="ports-head">
-        <span className="ports-title">Colonnes calculées</span>
-        <InfoBubble>
-          Chaque colonne se construit avec un <b>choix d'opération</b> (extraire un morceau de
-          texte, transformer, combiner, condition Si…, calcul) — sans écrire de formule.
-          <br />
-          <b>Extraire</b> couvre le besoin courant : p.ex. le nom d'un fichier = « le texte après le
-          séparateur
-          <code>\</code>, dernière occurrence » (bouton préréglage « nom de fichier »).
-          <br />
-          La formule générée reste affichée. Le mode <b>Formule (avancé)</b> permet d'écrire
-          directement :<code>[Nom]</code> = colonne, <code>"texte"</code> = littéral,{' '}
-          <code>&amp;</code> = concaténer, et toutes les fonctions (IF, TEXTAFTER, REGEXEXTRACT…).
-          Une colonne peut réutiliser une colonne calculée plus haut.
-        </InfoBubble>
+      <div className="cfg-intent">
+        <span className="cfg-intent-lede">
+          Ajouter des colonnes calculées{items.length ? ` (${items.length})` : ''}.
+        </span>
+        <span className="muted">
+          Chaque colonne se construit par un choix d'opération — sans écrire de formule (ou en mode
+          formule avancé). Une colonne peut réutiliser une colonne calculée plus haut.{' '}
+          <InfoBubble>
+            Chaque colonne se construit avec un <b>choix d'opération</b> (extraire un morceau de
+            texte, transformer, combiner, condition Si…, calcul) — sans écrire de formule.
+            <br />
+            <b>Extraire</b> couvre le besoin courant : p.ex. le nom d'un fichier = « le texte après
+            le séparateur <code>\</code>, dernière occurrence » (bouton préréglage « nom de fichier
+            »).
+            <br />
+            La formule générée reste affichée. Le mode <b>Formule (avancé)</b> permet d'écrire
+            directement : <code>[Nom]</code> = colonne, <code>"texte"</code> = littéral,{' '}
+            <code>&amp;</code> = concaténer, et toutes les fonctions (IF, TEXTAFTER, REGEXEXTRACT…).
+          </InfoBubble>
+        </span>
       </div>
       <button className="ghost small" onClick={add}>
-        + Colonne calculée
+        <Icon name="plus" size={12} /> Ajouter une colonne calculée
       </button>
       <div className="clean-ops">
         {items.map((o, i) => (
@@ -2442,19 +2447,26 @@ function ReportConfig({ node, inputs, set }) {
           Connectez une entrée puis exécutez l'amont pour charger les colonnes.
         </div>
       )}
-      <div className="ports-head">
-        <span className="ports-title">Analyses (état des lieux)</span>
-        <InfoBubble>
-          Bloc <b>à titre d'information</b> (non exporté, sans sortie). Chaque analyse{' '}
-          <b>ventile</b> une colonne selon un critère — <b>valeurs</b>, <b>préfixe</b>,{' '}
-          <b>suffixe</b>, <b>longueur</b>, ou le <b>respect d'une règle / d'un masque</b> (comme
-          dans la Validation) — et l'affiche en <b>camembert</b>, barres ou tableau. Ex. : préfixe
-          des noms de fichiers en camembert → quels préfixes, combien d'occurrences. L'analyse{' '}
-          <b>Clés multiples</b> regroupe les lignes par une clé (une ou plusieurs colonnes) :
-          doublons, unicité (clé candidate ?), taille des groupes, cohérence des autres colonnes par
-          clé, et exploration des plus gros groupes. Visible au clic et dans la{' '}
-          <b>documentation Excel</b>.
-        </InfoBubble>
+      <div className="cfg-intent">
+        <span className="cfg-intent-lede">
+          Faire l'état des lieux des données
+          {items.length ? ` (${items.length} analyse${items.length > 1 ? 's' : ''})` : ''}.
+        </span>
+        <span className="muted">
+          Bloc d'information (non exporté, sans sortie). Chaque analyse ventile une colonne selon un
+          critère et l'affiche en camembert, barres ou tableau.{' '}
+          <InfoBubble>
+            Bloc <b>à titre d'information</b> (non exporté, sans sortie). Chaque analyse{' '}
+            <b>ventile</b> une colonne selon un critère — <b>valeurs</b>, <b>préfixe</b>,{' '}
+            <b>suffixe</b>, <b>longueur</b>, ou le <b>respect d'une règle / d'un masque</b> (comme
+            dans la Validation) — et l'affiche en <b>camembert</b>, barres ou tableau. Ex. : préfixe
+            des noms de fichiers en camembert → quels préfixes, combien d'occurrences. L'analyse{' '}
+            <b>Clés multiples</b> regroupe les lignes par une clé (une ou plusieurs colonnes) :
+            doublons, unicité (clé candidate ?), taille des groupes, cohérence des autres colonnes
+            par clé, et exploration des plus gros groupes. Visible au clic et dans la{' '}
+            <b>documentation Excel</b>.
+          </InfoBubble>
+        </span>
       </div>
 
       <label className="fld insp-desc">
@@ -3085,6 +3097,12 @@ function ExportConfig({ node, set, wfName }) {
   const wb = `${(wfName || 'Workflow').trim()}.xlsx`
   return (
     <div className="insp-body">
+      <div className="cfg-intent">
+        <span className="cfg-intent-lede">Écrire le résultat dans un fichier.</span>
+        <span className="muted">
+          (Re)généré à chaque exécution, dans le dossier <b>files/</b> du projet.
+        </span>
+      </div>
       <label
         className="qb-check"
         style={{ marginBottom: 10 }}
@@ -3139,23 +3157,25 @@ function ExportConfig({ node, set, wfName }) {
         </label>
       )}
 
-      {toWb ? (
-        <p className="qb-hint">
-          Feuille <code>{sanitizeSheet(shown)}</code> dans le classeur <b>files/</b>
-          <code>{wb}</code>.<br />
-          Les autres exports « classeur » de ce workflow deviennent d'autres feuilles du <b>
-            même
-          </b>{' '}
-          fichier.
-        </p>
-      ) : (
-        <p className="qb-hint">
-          Écrit dans <b>files/</b> :{' '}
-          <code>
-            {shown || 'resultat'}.{d.format === 'csv' ? 'csv' : 'xlsx'}
-          </code>
-        </p>
-      )}
+      <div className="cond-readback">
+        <Icon name="download" size={12} />
+        <span>
+          {toWb ? (
+            <>
+              Feuille <code>{sanitizeSheet(shown)}</code> du classeur <code>files/{wb}</code> — les
+              autres exports « classeur » de ce workflow s'y ajoutent comme feuilles.
+            </>
+          ) : (
+            <>
+              Écrit{' '}
+              <code>
+                files/{shown || 'resultat'}.{d.format === 'csv' ? 'csv' : 'xlsx'}
+              </code>
+              .
+            </>
+          )}
+        </span>
+      </div>
       <p className="qb-hint">Un export sans données (0 ligne) ne crée aucun fichier.</p>
     </div>
   )

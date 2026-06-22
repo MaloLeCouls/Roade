@@ -32,7 +32,11 @@ Rubriques utilisées : `Ajouté` · `Changé` · `Corrigé` · `Sécurité` · `
   une colonne par valeur de mois, remplie par SUM(montant) ») ; **Nettoyage**
   (« Nettoyer, opération par opération ») ; **Colonnes** (« Choisir, réordonner
   et renommer » + compteur « N gardées sur M ») ; **Union** (« Empiler N
-  entrées, alignées : Par nom / Par position » en segmenté).
+  entrées, alignées : Par nom / Par position » en segmenté) ; **Calcul**
+  (« Ajouter des colonnes calculées (N) ») ; **Analyse** (« Faire l'état des
+  lieux des données ») ; **Export** (« Écrire le résultat dans un fichier » +
+  relecture de la destination « → files/… »). Source et SQL conservent leur UI
+  dédiée. Le langage est désormais cohérent sur tous les blocs de traitement.
 - **Bloc Validation — refonte de l'éditeur de condition (même langage)** : la
   condition se lit comme une phrase (« La ligne correspond si : … ») avec une
   **relecture en langage clair** sous les règles (« configuration = Model ET
