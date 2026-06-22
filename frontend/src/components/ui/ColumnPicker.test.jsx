@@ -10,19 +10,22 @@ const COLS = [
 ]
 
 describe('<ColumnPicker> mono', () => {
-  it('affiche le type à côté du nom (anti-slop : on ne cache jamais le type)', () => {
+  it('affiche le type en badge distinct (sélection + liste)', () => {
     render(<ColumnPicker columns={COLS} value="Prix" onChange={() => {}} />)
-    const select = screen.getByRole('combobox')
-    // Les libellés des options contiennent le type FR court
-    expect(select.innerHTML).toMatch(/nombre/)
-    expect(select.innerHTML).toMatch(/texte/)
-    expect(select.innerHTML).toMatch(/date/)
+    // le bouton montre la colonne choisie + son badge de type
+    expect(screen.getByText('Prix')).toBeInTheDocument()
+    expect(screen.getByText('nombre')).toBeInTheDocument()
+    // ouvrir la liste révèle les autres types
+    fireEvent.click(screen.getByRole('button'))
+    expect(screen.getByText('texte')).toBeInTheDocument()
+    expect(screen.getByText('date')).toBeInTheDocument()
   })
 
-  it('propage la sélection via onChange', () => {
+  it('propage la sélection via onChange (clic dans le menu)', () => {
     const onChange = vi.fn()
     render(<ColumnPicker columns={COLS} value="" onChange={onChange} />)
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Prix' } })
+    fireEvent.click(screen.getByRole('button')) // ouvre le menu
+    fireEvent.click(screen.getByRole('option', { name: /Prix/ }))
     expect(onChange).toHaveBeenCalledWith('Prix')
   })
 })

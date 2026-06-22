@@ -62,9 +62,15 @@ Rubriques utilisées : `Ajouté` · `Changé` · `Corrigé` · `Sécurité` · `
 
 ### Changé
 
-- **Validation — finitions de l'éditeur de condition** : (1) type de colonne
-  affiché entre parenthèses `configuration (texte)` au lieu de `· texte`
-  (ambigu si le nom contient un `·`) ; (2) la **colonne par défaut** ne répète
+- **Sélecteur de colonne — badge de type distinct** : le type n'est plus un
+  suffixe `· texte` fondu dans le nom (ambigu si le nom contient un `·`) mais un
+  **badge coloré** par catégorie (texte / nombre / date / booléen), dans le
+  sélecteur *et* la liste. Le `<select>` natif (qui ne permet pas de styliser
+  une option) est remplacé par un **menu déroulant maison** rendu en portal
+  (jamais rogné par l'inspecteur scrollable), filtrable au-delà de 7 colonnes,
+  navigable au clavier. S'applique à tous les pickers de colonne mono.
+- **Validation — finitions de l'éditeur de condition** : (1) la **colonne par
+  défaut** ne répète
   plus « défaut : … » dans chaque règle (juste le nom) ; (3) bouton **« →
   sortie »** sur une condition (router) qui crée une sortie nommée comme elle ;
   (4) **repli** des conditions (chevron + résumé en clair) ; (5) carte des flux
