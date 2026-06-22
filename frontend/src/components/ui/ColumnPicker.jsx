@@ -125,6 +125,33 @@ export default function ColumnPicker({
   }
 
   // mono
+  const options = (
+    <>
+      <option value="">{placeholder}</option>
+      {items.map((c) => (
+        <option key={c.name} value={c.name}>
+          {c.name}
+          {c.type ? ` · ${shortType(c.type)}` : ''}
+        </option>
+      ))}
+    </>
+  )
+  // compact : un <select> inline (`qb-select`), sans <label> `.fld`. Sinon la
+  // version étiquetée (flex-column + margin-bottom) se glisse dans une rangée
+  // `.rrow`/`.qb-row` et désaligne les contrôles voisins (la colonne se
+  // décalait de l'opérateur « est égal à » dans une règle de Validation).
+  // C'est le contrat documenté de `compact` — il n'était honoré qu'au cas vide.
+  if (compact) {
+    return (
+      <select
+        className="qb-select"
+        value={value || ''}
+        onChange={(e) => onChange?.(e.target.value)}
+      >
+        {options}
+      </select>
+    )
+  }
   return (
     <label className="colpick colpick-mono fld">
       {label && <span className="fld-label">{label}</span>}
@@ -133,13 +160,7 @@ export default function ColumnPicker({
         value={value || ''}
         onChange={(e) => onChange?.(e.target.value)}
       >
-        <option value="">{placeholder}</option>
-        {items.map((c) => (
-          <option key={c.name} value={c.name}>
-            {c.name}
-            {c.type ? ` · ${shortType(c.type)}` : ''}
-          </option>
-        ))}
+        {options}
       </select>
     </label>
   )
