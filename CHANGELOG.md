@@ -35,8 +35,9 @@ Rubriques utilisées : `Ajouté` · `Changé` · `Corrigé` · `Sécurité` · `
   entrées, alignées : Par nom / Par position » en segmenté) ; **Calcul**
   (« Ajouter des colonnes calculées (N) ») ; **Analyse** (« Faire l'état des
   lieux des données ») ; **Export** (« Écrire le résultat dans un fichier » +
-  relecture de la destination « → files/… »). Source et SQL conservent leur UI
-  dédiée. Le langage est désormais cohérent sur tous les blocs de traitement.
+  relecture de la destination « → files/… ») ; **Source** (« Lire un fichier
+  Excel/CSV ») ; **SQL** (« Transformer en SQL : Constructeur visuel / SQL
+  brut » en segmenté). Le langage est désormais cohérent sur **tous** les blocs.
 - **Bloc Validation — refonte de l'éditeur de condition (même langage)** : la
   condition se lit comme une phrase (« La ligne correspond si : … ») avec une
   **relecture en langage clair** sous les règles (« configuration = Model ET
@@ -61,6 +62,13 @@ Rubriques utilisées : `Ajouté` · `Changé` · `Corrigé` · `Sécurité` · `
 
 ### Corrigé
 
+- **Décalage colonne / opérateur dans les règles (ColumnPicker `compact`)** : le
+  mode `compact` n'était honoré qu'au cas « aucune colonne » ; dès les colonnes
+  chargées, le picker rendait la version étiquetée `.fld` (flex-column +
+  marge), désalignant les contrôles voisins d'une rangée (la colonne se
+  décalait de « est égal à »). `compact` rend désormais un `<select>` inline —
+  corrige toutes les rangées compactes (règles, paires de filtre, contrôles de
+  groupe).
 - **« Trop de blanc » sous les sorties du nœud Validation/Doublons** : la
   refonte du panneau Doublons réutilisait par erreur les classes `.dedup-outs`/
   `.dedup-out` du **nœud** sur le canevas — son fond/padding déteignait sur le

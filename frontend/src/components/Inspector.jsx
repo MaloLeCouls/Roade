@@ -2803,6 +2803,13 @@ function SourceConfig({ pid, node, files, set, onSchema }) {
 
   return (
     <div className="insp-body">
+      <div className="cfg-intent">
+        <span className="cfg-intent-lede">Lire un fichier Excel/CSV.</span>
+        <span className="muted">
+          Le point de départ du workflow. Encodage, séparateur et décimale sont détectés
+          automatiquement (et ajustables ci-dessous).
+        </span>
+      </div>
       <label className="fld">
         <span>Fichier source</span>
         <select
@@ -2976,6 +2983,35 @@ function SqlConfig({ node, inputs, set }) {
   const in2 = inputs.find((i) => i.alias === 'in2')
   return (
     <div className="insp-body">
+      <div className="cfg-intent">
+        <span className="cfg-intent-lede">Transformer en SQL&nbsp;:</span>
+        <div className="seg" role="radiogroup" aria-label="Mode SQL">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={mode === 'builder'}
+            className={mode === 'builder' ? 'on' : ''}
+            onClick={() => set({ mode: 'builder' })}
+          >
+            Constructeur visuel
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={mode === 'raw'}
+            className={mode === 'raw' ? 'on' : ''}
+            onClick={() => set({ mode: 'raw' })}
+          >
+            SQL brut
+          </button>
+        </div>
+        <span className="muted">
+          {mode === 'builder'
+            ? 'sélection, filtres, jointures, regroupements — sans écrire de SQL.'
+            : 'écrivez la requête DuckDB ; les entrées sont les tables in1 / in2.'}
+        </span>
+      </div>
+
       <div className="ports">
         <div className="ports-head">
           <span className="ports-title">Entrées</span>
@@ -2993,15 +3029,6 @@ function SqlConfig({ node, inputs, set }) {
           <PortTag num="2" name="jointure" optional source={in2} />
         </div>
       </div>
-      <div className="mode-toggle">
-        <button className={mode === 'builder' ? 'on' : ''} onClick={() => set({ mode: 'builder' })}>
-          Constructeur visuel
-        </button>
-        <button className={mode === 'raw' ? 'on' : ''} onClick={() => set({ mode: 'raw' })}>
-          SQL brut
-        </button>
-      </div>
-
       {mode === 'raw' ? (
         <>
           <p className="qb-hint">
