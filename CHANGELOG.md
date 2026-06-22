@@ -23,6 +23,17 @@ Rubriques utilisées : `Ajouté` · `Changé` · `Corrigé` · `Sécurité` · `
 
 ## [Unreleased]
 
+---
+
+## [0.5.0] — 2026-06-22 — Distribuable
+
+Milestone *Distribuable* : Roade s'installe et se lance partout (Windows /
+macOS / Linux / Docker), accueille un primo-utilisateur (projet d'exemple +
+onboarding), expose une API versionnée (`/api/v1`) à erreurs typées, et a reçu
+une **grosse passe d'ergonomie** — « la config se lit comme une phrase » sur
+tous les blocs (intention, relecture en clair, divulgation progressive, feedback
+live), avec un sélecteur de colonne à badge de type.
+
 ### Changé
 
 - **Extension du langage aux autres blocs** : chaque config mène par une

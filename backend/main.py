@@ -31,7 +31,7 @@ from errors import RoadeError, register_error_handlers
 
 # Source unique de la version backend. Tenu en synchro avec `pyproject.toml` et
 # `frontend/package.json` ; voir CHANGELOG.md pour la politique de release (G.5).
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 app = FastAPI(title="Roade API", version=__version__)
 
