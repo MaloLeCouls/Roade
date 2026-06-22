@@ -1507,7 +1507,15 @@ def _group_condition_mask(df: pd.DataFrame, cond: dict, cs: bool, default_col: s
     if not cs:
         work = df.copy()
         for c in cols_used:
-            if work[c].dtype == object:
+            # pandas 3.0 : les colonnes texte sont du dtype `str` (et non plus
+            # `object`), y compris à la lecture Parquet. Garder le test
+            # `== object` sautait ici le repli en minuscules → toutes les
+            # comparaisons insensibles à la casse du contrôle par groupe
+            # (contains, constant, rows_satisfy…) échouaient en silence dès
+            # qu'une casse différait. `is_string_dtype` couvre `str` ET `object`
+            # (et exclut numérique/date), l'`isinstance` interne protège déjà
+            # les valeurs non-texte d'une colonne object hétérogène.
+            if pd.api.types.is_string_dtype(work[c].dtype):
                 work[c] = work[c].map(lambda v: v.lower() if isinstance(v, str) else v)
 
     mask = pd.Series(True, index=df.index)

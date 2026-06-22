@@ -57,6 +57,60 @@ def test_group_atomic_single_column():
     assert va == {"A": False, "B": False, "C": True, "D": False}, va
 
 
+def test_group_check_case_insensitive():
+    """Régression : en pandas 3.0, les colonnes texte sont du dtype `str` (plus
+    `object`), y compris à la lecture Parquet. Le repli en minuscules du
+    contrôle par groupe était gardé par `dtype == object` → il était sauté, et
+    toute comparaison insensible à la casse échouait dès qu'une casse différait.
+
+    Symptôme rapporté : « trier les groupes où la colonne contient la valeur X »
+    ne marchait que si X tombait, à la bonne casse, sur la 1re ligne du groupe.
+    """
+    df = pd.DataFrame(
+        {
+            "groupe": ["A", "A", "B", "B", "C", "C"],
+            # « clos » (groupe A) en 2e ligne, « CLOS » (groupe C) en 2e ligne
+            # avec une casse différente de la valeur cherchée.
+            "statut": ["ouvert", "clos", "ouvert", "ouvert", "ouvert", "CLOS"],
+        }
+    )
+
+    def matched(cs):
+        m = engine._group_condition_mask(
+            df,
+            {
+                "group_by": ["groupe"],
+                "checks": [{"check": "contains", "column": "statut", "value": "clos"}],
+            },
+            cs,
+            "statut",
+        ).astype(bool)
+        g = df.assign(ok=list(m)).groupby("groupe")["ok"]
+        assert (g.nunique() == 1).all(), g.nunique().to_dict()  # toujours atomique
+        return {k for k, v in g.first().to_dict().items() if v}
+
+    # Insensible à la casse : A (« clos ») ET C (« CLOS », 2e ligne) matchent ; B non.
+    assert matched(False) == {"A", "C"}
+    # Sensible à la casse : seul A (« clos » exact) matche ; C (« CLOS ») non.
+    assert matched(True) == {"A"}
+
+    # Un check fondé sur l'égalité des valeurs (constant) bénéficie aussi du
+    # repli de casse : « Paris »/« paris » = une seule valeur en insensible.
+    df2 = pd.DataFrame({"g": ["A", "A", "B", "B"], "ville": ["Paris", "paris", "Lyon", "Nice"]})
+
+    def constant(cs):
+        m = engine._group_condition_mask(
+            df2,
+            {"group_by": ["g"], "checks": [{"check": "constant", "column": "ville"}]},
+            cs,
+            "ville",
+        ).astype(bool)
+        return df2.assign(ok=list(m)).groupby("g")["ok"].first().to_dict()
+
+    assert constant(False) == {"A": True, "B": False}  # Paris == paris en ci
+    assert constant(True) == {"A": False, "B": False}  # Paris != paris en cs
+
+
 def test_group_atomic_two_columns():
     df2 = pd.DataFrame(
         {

@@ -23,6 +23,18 @@ Rubriques utilisées : `Ajouté` · `Changé` · `Corrigé` · `Sécurité` · `
 
 ## [Unreleased]
 
+### Corrigé
+
+- **Validation, mode « Groupe » — insensibilité à la casse cassée** : sur
+  pandas 3.0, les colonnes texte sont du dtype `str` (et non plus `object`), y
+  compris à la lecture Parquet. Le repli en minuscules des contrôles par groupe
+  était gardé par un test `dtype == object`, donc **entièrement sauté** : tout
+  contrôle insensible à la casse (`contient la valeur X`, `constant`,
+  `rows_satisfy`…) échouait dès qu'une casse différait. Symptôme observé :
+  « trier les groupes où la colonne contient X » ne semblait marcher que si X
+  tombait, à la bonne casse, sur la 1re ligne du groupe. Corrigé via
+  `is_string_dtype` (couvre `str` et `object`) ; régression ajoutée.
+
 ### Ajouté
 
 - **G.4** — **README utilisateur** orienté quoi / pourquoi / comment démarrer,
