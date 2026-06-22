@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 380" width="1180" height="380" role="img" aria-label="Workflow de démonstration Roade : Source Commandes 2024 puis Nettoyage, Calcul Montant, Validation Référence conforme, et deux exports — Commandes conformes et À corriger." font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+<rect x="0" y="0" width="1180" height="380" fill="#eef0f3"/>
+<defs>
+<clipPath id="clip1"><rect x="24" y="150.0" width="190" height="100" rx="4"/></clipPath>
+<clipPath id="clip2"><rect x="255" y="150.0" width="190" height="100" rx="4"/></clipPath>
+<clipPath id="clip3"><rect x="486" y="150.0" width="190" height="100" rx="4"/></clipPath>
+<clipPath id="clip4"><rect x="717" y="142.0" width="190" height="116" rx="4"/></clipPath>
+<clipPath id="clip5"><rect x="962" y="60" width="190" height="100" rx="4"/></clipPath>
+<clipPath id="clip6"><rect x="962" y="240" width="190" height="100" rx="4"/></clipPath>
+</defs>
+<path d="M 214 200 C 244 200, 225 200, 255 200" fill="none" stroke="#4E79A7" stroke-width="2.5" opacity="0.9"/>
+<path d="M 445 200 C 475 200, 456 200, 486 200" fill="none" stroke="#4f9a93" stroke-width="2.5" opacity="0.9"/>
+<path d="M 676 200 C 706 200, 687 200, 717 200" fill="none" stroke="#b05a86" stroke-width="2.5" opacity="0.9"/>
+<path d="M 907 186.0 C 937 186.0, 932 110.0, 962 110.0" fill="none" stroke="#3f7a4f" stroke-width="2.5" opacity="0.9"/>
+<path d="M 907 224.0 C 937 224.0, 932 290.0, 962 290.0" fill="none" stroke="#c0392f" stroke-width="2.5" opacity="0.9"/>
+<rect x="24" y="151.5" width="190" height="100" rx="4" fill="#141e3c" opacity="0.06"/>
+<g clip-path="url(#clip1)">
+<rect x="24" y="150.0" width="190" height="100" fill="#ffffff"/>
+<rect x="24" y="150.0" width="190" height="30" fill="#353b49"/>
+<rect x="24" y="150.0" width="4" height="30" fill="#4E79A7"/>
+<text x="37" y="169.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#ffffff">Commandes 2024</text>
+<text x="36" y="198.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1f2430">commandes.csv</text>
+<text x="36" y="214.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11" fill="#858b98">séparateur ;  ·  décimale ,</text>
+<rect x="24" y="222.0" width="190" height="28" fill="#fafbfc"/>
+<line x1="24" y1="222.0" x2="214" y2="222.0" stroke="#e7e9ee" stroke-width="1"/>
+<rect x="34" y="228.0" width="71" height="16" rx="4" fill="#e7f0ea"/>
+<text x="69.5" y="239.0" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11" font-weight="600" fill="#3f7a4f">12 lignes</text>
+</g>
+<rect x="24" y="150.0" width="190" height="100" rx="4" fill="none" stroke="#d9dde4" stroke-width="1"/>
+<rect x="18.5" y="194.5" width="11" height="11" rx="2" fill="#9aa3b2" stroke="#fff" stroke-width="2"/>
+<rect x="208.5" y="194.5" width="11" height="11" rx="2" fill="#4E79A7" stroke="#fff" stroke-width="2"/>
+<rect x="255" y="151.5" width="190" height="100" rx="4" fill="#141e3c" opacity="0.06"/>
+<g clip-path="url(#clip2)">
+<rect x="255" y="150.0" width="190" height="100" fill="#ffffff"/>
+<rect x="255" y="150.0" width="190" height="30" fill="#353b49"/>
+<rect x="255" y="150.0" width="4" height="30" fill="#4f9a93"/>
+<text x="268" y="169.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#ffffff">Nettoyage</text>
+<text x="267" y="198.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1f2430">trim → Client</text>
+<text x="267" y="214.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11" fill="#858b98">espaces parasites retirés</text>
+<rect x="255" y="222.0" width="190" height="28" fill="#fafbfc"/>
+<line x1="255" y1="222.0" x2="445" y2="222.0" stroke="#e7e9ee" stroke-width="1"/>
+<rect x="265" y="228.0" width="71" height="16" rx="4" fill="#e7f0ea"/>
+<text x="300.5" y="239.0" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11" font-weight="600" fill="#3f7a4f">12 lignes</text>
+</g>
+<rect x="255" y="150.0" width="190" height="100" rx="4" fill="none" stroke="#d9dde4" stroke-width="1"/>
+<rect x="249.5" y="194.5" width="11" height="11" rx="2" fill="#9aa3b2" stroke="#fff" stroke-width="2"/>
+<rect x="439.5" y="194.5" width="11" height="11" rx="2" fill="#4f9a93" stroke="#fff" stroke-width="2"/>
+<rect x="486" y="151.5" width="190" height="100" rx="4" fill="#141e3c" opacity="0.06"/>
+<g clip-path="url(#clip3)">
+<rect x="486" y="150.0" width="190" height="100" fill="#ffffff"/>
+<rect x="486" y="150.0" width="190" height="30" fill="#353b49"/>
+<rect x="486" y="150.0" width="4" height="30" fill="#b05a86"/>
+<text x="499" y="169.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#ffffff">Montant</text>
+<text x="498" y="198.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1f2430">Quantité × Prix unitaire</text>
+<text x="498" y="214.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11" fill="#858b98">colonne calculée</text>
+<rect x="486" y="222.0" width="190" height="28" fill="#fafbfc"/>
+<line x1="486" y1="222.0" x2="676" y2="222.0" stroke="#e7e9ee" stroke-width="1"/>
+<rect x="496" y="228.0" width="71" height="16" rx="4" fill="#e7f0ea"/>
+<text x="531.5" y="239.0" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11" font-weight="600" fill="#3f7a4f">12 lignes</text>
+</g>
+<rect x="486" y="150.0" width="190" height="100" rx="4" fill="none" stroke="#d9dde4" stroke-width="1"/>
+<rect x="480.5" y="194.5" width="11" height="11" rx="2" fill="#9aa3b2" stroke="#fff" stroke-width="2"/>
+<rect x="670.5" y="194.5" width="11" height="11" rx="2" fill="#b05a86" stroke="#fff" stroke-width="2"/>
+<rect x="717" y="143.5" width="190" height="116" rx="4" fill="#141e3c" opacity="0.06"/>
+<g clip-path="url(#clip4)">
+<rect x="717" y="142.0" width="190" height="116" fill="#ffffff"/>
+<rect x="717" y="142.0" width="190" height="30" fill="#353b49"/>
+<rect x="717" y="142.0" width="4" height="30" fill="#5b6bb0"/>
+<text x="730" y="161.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#ffffff">Référence conforme</text>
+<text x="729" y="190.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1f2430">commence par « CMD- »</text>
+<text x="729" y="206.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11" fill="#858b98">contrôle de nomenclature</text>
+<rect x="717" y="230.0" width="190" height="28" fill="#fafbfc"/>
+<line x1="717" y1="230.0" x2="907" y2="230.0" stroke="#e7e9ee" stroke-width="1"/>
+<rect x="727" y="236.0" width="78" height="16" rx="4" fill="#e7f0ea"/>
+<text x="766.0" y="247.0" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11" font-weight="600" fill="#3f7a4f">12 → 9 / 3</text>
+</g>
+<rect x="717" y="142.0" width="190" height="116" rx="4" fill="none" stroke="#d9dde4" stroke-width="1"/>
+<rect x="711.5" y="194.5" width="11" height="11" rx="2" fill="#9aa3b2" stroke="#fff" stroke-width="2"/>
+<rect x="901.5" y="180.5" width="11" height="11" rx="2" fill="#3f7a4f" stroke="#fff" stroke-width="2"/>
+<rect x="901.5" y="218.5" width="11" height="11" rx="2" fill="#c0392f" stroke="#fff" stroke-width="2"/>
+<text x="919" y="190.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#3f7a4f">Conformes · 9</text>
+<text x="919" y="228.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#c0392f">Non conformes · 3</text>
+<rect x="962" y="61.5" width="190" height="100" rx="4" fill="#141e3c" opacity="0.06"/>
+<g clip-path="url(#clip5)">
+<rect x="962" y="60" width="190" height="100" fill="#ffffff"/>
+<rect x="962" y="60" width="190" height="30" fill="#353b49"/>
+<rect x="962" y="60" width="4" height="30" fill="#c08436"/>
+<text x="975" y="79.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#ffffff">Commandes conformes</text>
+<text x="974" y="108" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1f2430">Commandes conformes.xlsx</text>
+<text x="974" y="124" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11" fill="#858b98">format Excel</text>
+<rect x="962" y="132" width="190" height="28" fill="#fafbfc"/>
+<line x1="962" y1="132" x2="1152" y2="132" stroke="#e7e9ee" stroke-width="1"/>
+<rect x="972" y="138" width="65" height="16" rx="4" fill="#e7f0ea"/>
+<text x="1004.5" y="149" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11" font-weight="600" fill="#3f7a4f">9 lignes</text>
+</g>
+<rect x="962" y="60" width="190" height="100" rx="4" fill="none" stroke="#d9dde4" stroke-width="1"/>
+<rect x="956.5" y="104.5" width="11" height="11" rx="2" fill="#9aa3b2" stroke="#fff" stroke-width="2"/>
+<rect x="962" y="241.5" width="190" height="100" rx="4" fill="#141e3c" opacity="0.06"/>
+<g clip-path="url(#clip6)">
+<rect x="962" y="240" width="190" height="100" fill="#ffffff"/>
+<rect x="962" y="240" width="190" height="30" fill="#353b49"/>
+<rect x="962" y="240" width="4" height="30" fill="#c08436"/>
+<text x="975" y="259.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#ffffff">À corriger</text>
+<text x="974" y="288" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1f2430">À corriger.csv</text>
+<text x="974" y="304" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11" fill="#858b98">preset CSV Excel FR</text>
+<rect x="962" y="312" width="190" height="28" fill="#fafbfc"/>
+<line x1="962" y1="312" x2="1152" y2="312" stroke="#e7e9ee" stroke-width="1"/>
+<rect x="972" y="318" width="65" height="16" rx="4" fill="#e7f0ea"/>
+<text x="1004.5" y="329" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11" font-weight="600" fill="#3f7a4f">3 lignes</text>
+</g>
+<rect x="962" y="240" width="190" height="100" rx="4" fill="none" stroke="#d9dde4" stroke-width="1"/>
+<rect x="956.5" y="284.5" width="11" height="11" rx="2" fill="#9aa3b2" stroke="#fff" stroke-width="2"/>
+</svg>

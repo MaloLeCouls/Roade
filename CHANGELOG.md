@@ -25,6 +25,11 @@ Rubriques utilisées : `Ajouté` · `Changé` · `Corrigé` · `Sécurité` · `
 
 ### Ajouté
 
+- **G.4** — **README utilisateur** orienté quoi / pourquoi / comment démarrer,
+  avec un visuel fidèle du workflow d'exemple (`docs/img/demo-workflow.svg`) et
+  le chemin guidé « Ouvrir l'exemple ». Le contenu développeur (install depuis
+  les sources, architecture, tests, CI) est sorti dans un
+  [`docs/DEV.md`](docs/DEV.md) dédié.
 - **G.2** — **Projet de démonstration embarqué** : bouton « Ouvrir l'exemple »
   sur l'écran d'accueil (état vide). Un clic crée un vrai projet « Commandes
   2024 » avec un CSV FR de test (séparateur `;`, décimale `,`, accents) et un
