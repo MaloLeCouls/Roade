@@ -594,12 +594,17 @@ function CleanConfig({ node, inputs, set }) {
           Connectez une entrée puis exécutez l'amont pour charger les colonnes.
         </div>
       )}
-      <p className="qb-hint">
-        Les opérations s'appliquent dans l'ordre, l'une après l'autre. Un rapport montre à chaque
-        exécution ce qui a changé / échoué.
-      </p>
+      <div className="cfg-intent">
+        <span className="cfg-intent-lede">
+          Nettoyer la donnée, opération par opération{ops.length ? ` (${ops.length})` : ''}.
+        </span>
+        <span className="muted">
+          Les opérations s'appliquent dans l'ordre ; un rapport montre à chaque exécution ce qui a
+          changé ou échoué.
+        </span>
+      </div>
       <button className="ghost small" onClick={add}>
-        + Opération
+        <Icon name="plus" size={12} /> Ajouter une opération
       </button>
       <div className="clean-ops">
         {ops.map((o, i) => (
@@ -1656,38 +1661,51 @@ function UnionConfig({ node, inputs, set }) {
   const byName = d.by_name !== false
   return (
     <div className="insp-body">
-      <div className="ports-head">
-        <span className="ports-title">Union (empilement)</span>
-        <InfoBubble wide>
-          <b>Union</b> empile les lignes de toutes les entrées reliées à l'ancre <b>in</b> (comme
-          coller des feuilles l'une sous l'autre). Deux stratégies d'alignement, à choisir selon la
-          forme des entrées :
-          <ul className="bullets">
-            <li>
-              <b>Par nom</b> — les colonnes sont rapprochées par leur nom ; les colonnes manquantes
-              d'un côté deviennent <i>vides</i> (NULL). Robuste si les en-têtes coïncident.
-            </li>
-            <li>
-              <b>Par position</b> — la 1ʳᵉ colonne avec la 1ʳᵉ, la 2ᵉ avec la 2ᵉ… Les noms du{' '}
-              <b>premier</b> bloc gagnent. À n'utiliser que si vous savez que l'ordre est identique
-              partout — sinon vous mélangez des colonnes différentes sans le voir.
-            </li>
-          </ul>
-        </InfoBubble>
+      <div className="cfg-intent">
+        <span className="cfg-intent-lede">
+          Empiler {inputs.length} entrée{inputs.length > 1 ? 's' : ''}, alignées&nbsp;:
+        </span>
+        <div className="seg" role="radiogroup" aria-label="Alignement des colonnes">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={byName}
+            className={byName ? 'on' : ''}
+            onClick={() => set({ by_name: true })}
+          >
+            Par nom
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={!byName}
+            className={!byName ? 'on' : ''}
+            onClick={() => set({ by_name: false })}
+          >
+            Par position
+          </button>
+        </div>
+        <span className="muted">
+          {byName
+            ? 'colonnes rapprochées par leur nom ; les manquantes deviennent vides (NULL).'
+            : '1ʳᵉ colonne avec la 1ʳᵉ, etc. ; les noms du premier bloc gagnent — ordre identique requis.'}{' '}
+          <InfoBubble wide>
+            <b>Union</b> empile les lignes de toutes les entrées reliées à l'ancre <b>in</b> (comme
+            coller des feuilles l'une sous l'autre). Deux stratégies d'alignement :
+            <ul className="bullets">
+              <li>
+                <b>Par nom</b> — les colonnes sont rapprochées par leur nom ; les colonnes
+                manquantes d'un côté deviennent <i>vides</i> (NULL). Robuste si les en-têtes
+                coïncident.
+              </li>
+              <li>
+                <b>Par position</b> — la 1ʳᵉ colonne avec la 1ʳᵉ, la 2ᵉ avec la 2ᵉ… Les noms du{' '}
+                <b>premier</b> bloc gagnent. À n'utiliser que si l'ordre est identique partout.
+              </li>
+            </ul>
+          </InfoBubble>
+        </span>
       </div>
-      <div className="fld">
-        <span>Entrées connectées : {inputs.length}</span>
-      </div>
-      <label className="fld">
-        <span>Alignement des colonnes</span>
-        <select
-          value={byName ? 'name' : 'pos'}
-          onChange={(e) => set({ by_name: e.target.value === 'name' })}
-        >
-          <option value="name">Par nom de colonne (tolère l'ordre / colonnes manquantes)</option>
-          <option value="pos">Par position</option>
-        </select>
-      </label>
       <label className="qb-check">
         <input
           type="checkbox"
@@ -2097,6 +2115,7 @@ function ColsConfig({ node, inputs, set }) {
   }, [cols]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const present = items.filter((it) => cols.some((c) => c.name === it.name))
+  const keptCount = present.filter((it) => it.keep !== false).length
   const typeOf = (name) => cols.find((c) => c.name === name)?.type
   const upd = (name, patch) =>
     set({ columns: items.map((it) => (it.name === name ? { ...it, ...patch } : it)) })
@@ -2128,13 +2147,25 @@ function ColsConfig({ node, inputs, set }) {
           Connectez une entrée puis exécutez l'amont pour charger les colonnes.
         </div>
       )}
-      <div className="ports-head">
-        <span className="ports-title">Colonnes</span>
-        <InfoBubble>
-          <b>Décochez</b> pour supprimer une colonne, utilisez <b>↑ ↓</b> pour réordonner, et le
-          champ de droite pour <b>renommer</b> (laissez vide pour garder le nom). Les colonnes
-          apparues en amont après coup sont ajoutées automatiquement à la fin.
-        </InfoBubble>
+      <div className="cfg-intent">
+        <span className="cfg-intent-lede">Choisir, réordonner et renommer les colonnes.</span>
+        <span className="muted">
+          Décochez pour supprimer · <b>↑ ↓</b> pour réordonner · le champ de droite pour renommer.
+          {present.length > 0 && (
+            <>
+              {' '}
+              <b>
+                {keptCount} gardée{keptCount > 1 ? 's' : ''}
+              </b>{' '}
+              sur {present.length}.
+            </>
+          )}{' '}
+          <InfoBubble>
+            <b>Décochez</b> pour supprimer une colonne, <b>↑ ↓</b> pour réordonner, et le champ de
+            droite pour <b>renommer</b> (laissez vide pour garder le nom). Les colonnes apparues en
+            amont après coup sont ajoutées automatiquement à la fin.
+          </InfoBubble>
+        </span>
       </div>
       {present.length > 0 && (
         <div className="qb-row">
