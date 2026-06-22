@@ -31,7 +31,10 @@ Rubriques utilisées : `Ajouté` · `Changé` · `Corrigé` · `Sécurité` · `
   commence par CMD- »). Les modes rares **Masque positionnel** et **Contrôle
   par groupe**, qui étaient trois onglets de même poids, passent en
   **divulgation progressive** (« Définir autrement : … ») — on mène par les
-  règles, le cas à 80 %. Modèle de données et capacités avancées inchangés.
+  règles, le cas à 80 %. **Testeur toujours visible** (au lieu de replié).
+  Modèle de données et capacités avancées inchangés.
+- **Nœuds Validation / Doublons plus compacts** sur le canevas : moins de blanc
+  entre la liste des sorties et le pied du bloc.
 - **Bloc Doublons — refonte ergonomique (pilote du grand rework UX)** : la
   config se lit désormais comme une phrase (« Deux lignes sont des doublons
   quand elles partagent : [colonnes] »). Colonnes-clés en **chips** ajoutables /
@@ -44,6 +47,10 @@ Rubriques utilisées : `Ajouté` · `Changé` · `Corrigé` · `Sécurité` · `
 
 ### Corrigé
 
+- **« Trop de blanc » sous les sorties du nœud Validation/Doublons** : la
+  refonte du panneau Doublons réutilisait par erreur les classes `.dedup-outs`/
+  `.dedup-out` du **nœud** sur le canevas — son fond/padding déteignait sur le
+  nœud. Classes du panneau renommées `dedup-cfg-*` (isolées).
 - **Cases à cocher étirées dans les panneaux de config** : une règle globale
   `.fld input { width: 100% }` étirait les `<input type=checkbox>` imbriquées
   (ColumnPicker multi…) à 100 %, cassant la mise en page (bloc Doublons et

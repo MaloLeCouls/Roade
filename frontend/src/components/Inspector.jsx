@@ -2603,13 +2603,13 @@ function DedupOutputs({ dry }) {
     ['uniq', 'Uniques', r?.uniques, 'lignes présentes une seule fois'],
   ]
   return (
-    <div className="dedup-outs" aria-label="Sorties du bloc">
+    <div className="dedup-cfg-outs" aria-label="Sorties du bloc">
       {rows.map(([cls, name, val, desc]) => (
-        <div className="dedup-out" key={cls}>
+        <div className="dedup-cfg-out" key={cls}>
           <span className={`odot ${cls}`} aria-hidden="true" />
-          <span className="dedup-out-name">{name}</span>
-          <span className="dedup-out-n">{n(val)}</span>
-          <span className="dedup-out-desc muted">{desc}</span>
+          <span className="dedup-cfg-out-name">{name}</span>
+          <span className="dedup-cfg-out-n">{n(val)}</span>
+          <span className="dedup-cfg-out-desc muted">{desc}</span>
         </div>
       ))}
     </div>

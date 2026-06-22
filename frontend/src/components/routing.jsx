@@ -1022,7 +1022,6 @@ function ConditionTester({ cond, caseSensitive, onChange }) {
     .split('\n')
     .map((s) => s.trim())
     .filter(Boolean)
-  const [open, setOpen] = useState(!!samplesText)
   const [test, setTest] = useState({ results: [], error: null, loading: false })
   const cfgKey = JSON.stringify({
     k: cond.kind,
@@ -1031,7 +1030,7 @@ function ConditionTester({ cond, caseSensitive, onChange }) {
     cs: caseSensitive,
   })
   useEffect(() => {
-    if (!open || sampleLines.length === 0) {
+    if (sampleLines.length === 0) {
       setTest({ results: [], error: null, loading: false })
       return
     }
@@ -1055,66 +1054,63 @@ function ConditionTester({ cond, caseSensitive, onChange }) {
         .catch((e) => setTest({ results: [], error: e.message, loading: false }))
     }, 300)
     return () => clearTimeout(h)
-  }, [cfgKey, samplesText, open]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cfgKey, samplesText]) // eslint-disable-line react-hooks/exhaustive-deps
   const passCount = test.results.filter((r) => r.valid).length
+  // (3) Testeur toujours visible : on essaie des valeurs sans avoir à déplier.
   return (
-    <div className="vtest">
-      <label className="vtest-toggle">
-        <input type="checkbox" checked={open} onChange={(e) => setOpen(e.target.checked)} />
+    <div className="vtest vtest-open">
+      <div className="vtest-toggle">
         <span className="ports-title">Testeur</span>
-        {open && test.loading && <span className="vtest-spin">…</span>}
-        {open && sampleLines.length > 0 && !test.error && (
+        <span className="vtest-hint muted">— essayez des valeurs, une par ligne</span>
+        {test.loading && <span className="vtest-spin">…</span>}
+        {sampleLines.length > 0 && !test.error && (
           <span className={`vtest-score ${passCount === sampleLines.length ? 'all' : ''}`}>
             {passCount}/{sampleLines.length}
           </span>
         )}
-      </label>
-      {open && (
-        <>
-          <textarea
-            className="vtest-input"
-            rows={2}
-            spellCheck={false}
-            placeholder={'Exemples (un par ligne)… F0-01073.pdf'}
-            value={samplesText}
-            onChange={(e) => onChange({ test_samples: e.target.value })}
-          />
-          {test.error && <div className="qb-warn">{test.error}</div>}
-          {sampleLines.length > 0 && !test.error && (
-            <div className="vtest-results">
-              {sampleLines.map((s, i) => {
-                const r = test.results[i]
-                const ok = r?.valid
-                return (
-                  <div className="vtest-item" key={i}>
-                    <div className={`vtest-row ${ok ? 'ok' : 'ko'}`}>
-                      <span className="vtest-mark">
-                        <Icon name={ok ? 'check' : 'x'} size={11} />
+      </div>
+      <textarea
+        className="vtest-input"
+        rows={2}
+        spellCheck={false}
+        placeholder={'Exemples (un par ligne)… F0-01073.pdf'}
+        value={samplesText}
+        onChange={(e) => onChange({ test_samples: e.target.value })}
+      />
+      {test.error && <div className="qb-warn">{test.error}</div>}
+      {sampleLines.length > 0 && !test.error && (
+        <div className="vtest-results">
+          {sampleLines.map((s, i) => {
+            const r = test.results[i]
+            const ok = r?.valid
+            return (
+              <div className="vtest-item" key={i}>
+                <div className={`vtest-row ${ok ? 'ok' : 'ko'}`}>
+                  <span className="vtest-mark">
+                    <Icon name={ok ? 'check' : 'x'} size={11} />
+                  </span>
+                  <span className="vtest-val" title={s}>
+                    {s}
+                  </span>
+                  {!ok && r?.motif && r.motif !== 'OK' && (
+                    <span className="vtest-motif" title={r.motif}>
+                      {r.motif}
+                    </span>
+                  )}
+                </div>
+                {r?.steps?.length > 0 && (
+                  <div className="vtest-steps">
+                    {r.steps.map((st, j) => (
+                      <span key={j} className={`vstep ${st.status}`} title={st.label}>
+                        {st.label}
                       </span>
-                      <span className="vtest-val" title={s}>
-                        {s}
-                      </span>
-                      {!ok && r?.motif && r.motif !== 'OK' && (
-                        <span className="vtest-motif" title={r.motif}>
-                          {r.motif}
-                        </span>
-                      )}
-                    </div>
-                    {r?.steps?.length > 0 && (
-                      <div className="vtest-steps">
-                        {r.steps.map((st, j) => (
-                          <span key={j} className={`vstep ${st.status}`} title={st.label}>
-                            {st.label}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                    ))}
                   </div>
-                )
-              })}
-            </div>
-          )}
-        </>
+                )}
+              </div>
+            )
+          })}
+        </div>
       )}
     </div>
   )

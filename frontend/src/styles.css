@@ -902,6 +902,19 @@ button.ghost.icon-only {
 .node-dedup .dedup-outs,
 .node-validate .dedup-outs {
   margin-right: -11px;
+  margin-top: 5px;
+  gap: 3px;
+}
+/* Nœuds Validation / Doublons : corps plus resserré, surtout entre les sorties
+   et le pied (moins de blanc sous la liste des sorties). */
+.node-validate .node-body,
+.node-dedup .node-body {
+  padding: 7px 11px 5px;
+  min-height: 0;
+}
+.node-validate .node-foot,
+.node-dedup .node-foot {
+  padding: 4px 10px;
 }
 .dedup-out {
   position: relative;
@@ -1855,6 +1868,14 @@ code {
 }
 .vtest .ports-head {
   margin-bottom: 8px;
+}
+.vtest-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.vtest-hint {
+  font-size: var(--fs-xs);
 }
 .vtest-input {
   width: 100%;
@@ -5354,7 +5375,11 @@ table.dt th.idx {
   color: #fff;
   font-weight: 600;
 }
-.dedup-outs {
+/* NB : classes préfixées `dedup-cfg-` pour ne PAS entrer en collision avec
+   `.dedup-outs`/`.dedup-out` du NŒUD sur le canevas (ValidateNode/DedupNode),
+   qui partagent ces noms. Une version antérieure réutilisait `.dedup-outs` et
+   son padding/fond déteignait sur le nœud (« trop de blanc » sous les sorties). */
+.dedup-cfg-outs {
   display: flex;
   flex-direction: column;
   gap: var(--s-2);
@@ -5364,26 +5389,26 @@ table.dt th.idx {
   border-radius: var(--radius-md);
   margin-bottom: var(--s-3);
 }
-.dedup-out {
+.dedup-cfg-out {
   display: flex;
   align-items: baseline;
   gap: var(--s-2);
 }
-.dedup-out .odot {
+.dedup-cfg-out .odot {
   align-self: center;
 }
-.dedup-out-name {
+.dedup-cfg-out-name {
   font-weight: 600;
   color: var(--ink);
   min-width: 96px;
 }
-.dedup-out-n {
+.dedup-cfg-out-n {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   color: var(--ink);
   min-width: 60px;
 }
-.dedup-out-desc {
+.dedup-cfg-out-desc {
   font-size: var(--fs-xs);
 }
 .dedup-adv > summary {
