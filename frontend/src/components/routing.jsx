@@ -1572,6 +1572,22 @@ function OutputRow({
           {!match.conditionId && (
             <div className="qb-hint">Sans condition attribuée, cette sortie reste vide.</div>
           )}
+          {match.conditionId &&
+            (() => {
+              // (2) Même langage que les conditions : la sortie se relit en clair.
+              const cond = conditions.find((c) => c.id === match.conditionId)
+              const txt = cond ? conditionReadback(cond) : ''
+              if (!txt) return null
+              return (
+                <div className="ocard-readback">
+                  <Icon name={match.negate ? 'x' : 'check'} size={11} />
+                  <span>
+                    {match.negate ? 'les lignes où PAS : ' : 'les lignes où : '}
+                    {txt}
+                  </span>
+                </div>
+              )
+            })()}
         </>
       )}
     </div>

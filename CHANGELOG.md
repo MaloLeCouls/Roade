@@ -32,6 +32,8 @@ Rubriques utilisées : `Ajouté` · `Changé` · `Corrigé` · `Sécurité` · `
   par groupe**, qui étaient trois onglets de même poids, passent en
   **divulgation progressive** (« Définir autrement : … ») — on mène par les
   règles, le cas à 80 %. **Testeur toujours visible** (au lieu de replié).
+  **Sorties** : chaque sortie se relit aussi en clair (« → les lignes où :
+  configuration = Model »). Amorce d'**intention** en tête (contrôle vs routeur).
   Modèle de données et capacités avancées inchangés.
 - **Nœuds Validation / Doublons plus compacts** sur le canevas : moins de blanc
   entre la liste des sorties et le pied du bloc.

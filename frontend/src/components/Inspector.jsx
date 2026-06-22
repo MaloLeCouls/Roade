@@ -162,13 +162,13 @@ function ValidateConfig({ node, inputs, set }) {
         <SplitConfig node={node} cols={cols} set={set} />
       ) : (
         <>
-          <div className="ports-head">
-            <span className="ports-title">Conditions</span>
-            <InfoBubble>
-              Définissez des <b>conditions</b> nommées (en <b>règles</b> ou en <b>masque</b>). À
-              droite, attribuez chaque condition à une <b>sortie</b> — un contrôle « conforme / non
-              conforme » n'est qu'un aiguillage à deux sorties.
-            </InfoBubble>
+          <div className="val-intent">
+            <span className="val-intent-lede">Classez vos lignes selon des conditions.</span>
+            <span className="muted">
+              Un <b>contrôle</b> conforme / non conforme est un aiguillage à deux sorties ; un{' '}
+              <b>routeur</b> en a autant que vous voulez. Définissez les conditions, puis
+              attribuez-les aux sorties.
+            </span>
           </div>
           <ConditionsEditor node={node} cols={cols} onChange={set} />
         </>

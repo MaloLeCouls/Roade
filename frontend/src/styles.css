@@ -2950,6 +2950,33 @@ table.dt th.idx {
 .dotsep {
   color: var(--muted);
 }
+.ocard-readback {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  font-size: var(--fs-xs);
+  color: var(--ink-soft);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+.ocard-readback svg {
+  color: var(--accent);
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+.val-intent {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: var(--s-4);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+.val-intent-lede {
+  font-weight: 600;
+  color: var(--ink);
+  font-size: 13px;
+}
 
 /* a named condition card (router intent) */
 .ccard {
