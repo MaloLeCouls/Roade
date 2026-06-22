@@ -3,7 +3,7 @@ import { api } from '../api'
 import QueryBuilder from './QueryBuilder'
 import Icon from './Icon'
 import { ConditionsEditor, RuleRow, MaskBuilder, RulesBuilder } from './routing'
-import { EXTRACTOR_TYPES, defaultExtractor } from './validateHelpers'
+import { EXTRACTOR_TYPES, defaultExtractor, inferIntent, intentPatch } from './validateHelpers'
 import ColumnPicker, { shortType } from './ui/ColumnPicker'
 
 export default function Inspector({
@@ -124,6 +124,7 @@ function ValidateConfig({ node, inputs, set }) {
   const d = node.data
   const split = d.split || {}
   const isSplit = !!split.enabled
+  const intent = inferIntent(d)
   return (
     <div className="insp-body">
       {inputs.length === 0 && (
@@ -163,14 +164,34 @@ function ValidateConfig({ node, inputs, set }) {
       ) : (
         <>
           <div className="val-intent">
-            <span className="val-intent-lede">Classez vos lignes selon des conditions.</span>
+            <span className="val-intent-lede">Je veux&nbsp;:</span>
+            <div className="seg" role="radiogroup" aria-label="Type de validation">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={intent === 'control'}
+                className={intent === 'control' ? 'on' : ''}
+                onClick={() => set(intentPatch(d, 'control'))}
+              >
+                Contrôler la conformité
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={intent === 'router'}
+                className={intent === 'router' ? 'on' : ''}
+                onClick={() => set(intentPatch(d, 'router'))}
+              >
+                Router vers plusieurs sorties
+              </button>
+            </div>
             <span className="muted">
-              Un <b>contrôle</b> conforme / non conforme est un aiguillage à deux sorties ; un{' '}
-              <b>routeur</b> en a autant que vous voulez. Définissez les conditions, puis
-              attribuez-les aux sorties.
+              {intent === 'control'
+                ? 'Deux sorties : conformes / non conformes, selon la condition ci-dessous.'
+                : 'Autant de sorties que vous voulez — chacune reçoit une condition.'}
             </span>
           </div>
-          <ConditionsEditor node={node} cols={cols} onChange={set} />
+          <ConditionsEditor node={node} cols={cols} onChange={set} intent={intent} />
         </>
       )}
     </div>

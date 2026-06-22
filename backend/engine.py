@@ -382,7 +382,10 @@ def _source_fingerprint(pid, node) -> str | None:
 # Change tracking — a node's "compute signature"
 # --------------------------------------------------------------------------- #
 _SIG_DROP_KEYS = {"test_samples"}  # UI-only, dropped at any depth
-_SIG_DROP_TOP = {"label", "description", "locked", "cache"}  # cosmetic / handled apart
+# cosmetic / handled apart. `intent` + `router_stash` sont de l'état d'UI pur
+# (préréglage Contrôler/Router) : seules les `outputs`/`conditions` effectives
+# pilotent le calcul, donc les inclure invaliderait le cache sans raison.
+_SIG_DROP_TOP = {"label", "description", "locked", "cache", "intent", "router_stash"}
 
 
 def _clean_for_sig(obj):

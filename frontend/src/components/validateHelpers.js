@@ -258,6 +258,82 @@ export function normalizeValidateData(data) {
   }
 }
 
+// ---- Préréglage Contrôler / Router (intent) -------------------------------- //
+// « Contrôler » = un aiguillage à 2 sorties Conformes / Non conformes sur la 1re
+// condition. « Router » = autant de sorties que voulu. Bascule SANS PERTE : les
+// sorties d'un routeur sont planquées dans `router_stash` et restaurées au
+// retour — changer d'avis ne supprime jamais une sortie déjà créée.
+
+export function controlOutputs(condId) {
+  return [
+    {
+      id: 'valid',
+      label: 'Conformes',
+      color: '#59A14F',
+      match: { conditionId: condId, negate: false },
+    },
+    {
+      id: 'invalid',
+      label: 'Non conformes',
+      color: '#E15759',
+      match: { conditionId: condId, negate: true },
+    },
+  ]
+}
+
+function isControlShaped(d, condId) {
+  const o = d.outputs || []
+  return (
+    o.length === 2 &&
+    o[0]?.id === 'valid' &&
+    o[1]?.id === 'invalid' &&
+    o.every((x) => x.match?.conditionId === condId) &&
+    d.else_enabled === false
+  )
+}
+
+// Déduit l'intention quand le champ n'est pas posé (blocs existants) : on infère
+// « contrôle » seulement si la forme y ressemble (≤ 2 sorties valid/invalid,
+// ≤ 1 condition), sinon « router » — pour ne jamais masquer les sorties d'un
+// routeur existant.
+export function inferIntent(d) {
+  if (d.intent === 'control' || d.intent === 'router') return d.intent
+  const o = d.outputs || []
+  const conds = d.conditions || []
+  const looksControl =
+    o.length <= 2 && o.every((x) => x.id === 'valid' || x.id === 'invalid') && conds.length <= 1
+  return looksControl ? 'control' : 'router'
+}
+
+// Patch à appliquer pour basculer l'intention (à passer à `set`/`onChange`).
+export function intentPatch(d, intent) {
+  const conditions = d.conditions || []
+  if (intent === 'control') {
+    const cond0 = conditions[0] || makeCondition({ name: 'Conforme' })
+    const patch = {
+      intent: 'control',
+      conditions: conditions.length ? conditions : [cond0],
+      outputs: controlOutputs(cond0.id),
+      else_enabled: false,
+    }
+    // Planque les sorties courantes si ce n'était pas déjà un contrôle.
+    if (!isControlShaped(d, cond0.id) && (d.outputs || []).length) {
+      patch.router_stash = { outputs: d.outputs, else_enabled: d.else_enabled }
+    }
+    return patch
+  }
+  // Router : restaure le stash s'il existe, sinon garde les sorties courantes.
+  if (d.router_stash) {
+    return {
+      intent: 'router',
+      outputs: d.router_stash.outputs || d.outputs || [],
+      else_enabled: d.router_stash.else_enabled,
+      router_stash: null,
+    }
+  }
+  return { intent: 'router' }
+}
+
 export function escapeRe(s) {
   return String(s ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }

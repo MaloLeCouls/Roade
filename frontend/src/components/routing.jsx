@@ -12,6 +12,7 @@ import {
   buildMaskPattern,
   makeCondition,
   ruleSummary,
+  inferIntent,
   VS_COLUMN_TESTS,
   MULTI_VALUE_TESTS,
 } from './validateHelpers'
@@ -95,7 +96,7 @@ export function useRoutePreview(pid, wid, node, status) {
  *  LEFT — conditions (the "what to test")
  * ======================================================================== */
 
-export function ConditionsEditor({ node, cols, onChange }) {
+export function ConditionsEditor({ node, cols, onChange, intent = 'router' }) {
   const d = node.data
   const conditions = d.conditions || []
   const setConditions = (next) => onChange({ conditions: next })
@@ -122,6 +123,58 @@ export function ConditionsEditor({ node, cols, onChange }) {
           : o,
       ),
     })
+  }
+
+  // Préréglage « Contrôler » : une seule condition de conformité, pas de gestion
+  // multi-condition. Les 2 sorties (Conformes / Non conformes) sont auto-gérées.
+  if (intent === 'control') {
+    const cond0 = conditions[0]
+    return (
+      <div className="conditions-editor">
+        <div className="route-toolbar">
+          <div className="fld" style={{ flex: 1, marginBottom: 0 }}>
+            <span>Colonne à contrôler</span>
+            <ColumnPicker
+              compact
+              columns={cols}
+              value={d.target_column || ''}
+              onChange={(v) => onChange({ target_column: v })}
+              placeholder="—"
+              emptyMessage="(exécutez l'amont)"
+            />
+          </div>
+          <label className="qb-check" style={{ marginBottom: 2 }}>
+            <input
+              type="checkbox"
+              checked={!!d.case_sensitive}
+              onChange={(e) => onChange({ case_sensitive: e.target.checked })}
+            />
+            Sensible à la casse
+          </label>
+        </div>
+        {cond0 ? (
+          <div className="ccard">
+            <ConditionBuilder
+              cond={cond0}
+              cols={cols}
+              defaultCol={d.target_column}
+              caseSensitive={!!d.case_sensitive}
+              onChange={(patch) => updCond(0, patch)}
+            />
+          </div>
+        ) : (
+          <div className="qb-hint">Configurez la règle de conformité ci-dessous.</div>
+        )}
+        <div className="control-outs-legend">
+          <span className="control-out">
+            <span className="odot kept" /> Conformes
+          </span>
+          <span className="control-out">
+            <span className="odot dups" /> Non conformes
+          </span>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -1265,6 +1318,38 @@ export function OutputsPane({ pid, wid, node, status, onChange, onRun, running, 
     onChange({
       outputs: outputs.map((o, i) => ({ ...o, color: palette[i % palette.length] })),
     })
+  }
+
+  // Préréglage « Contrôler » : sorties gérées automatiquement → ici, lecture
+  // seule (carte des flux + effectifs), pas d'édition. On personnalise les
+  // sorties en passant en « Router » depuis le panneau du bloc.
+  if (inferIntent(d) === 'control' && !isSplit) {
+    return (
+      <div className="opane">
+        <div className="info-note">
+          Mode <b>Contrôle de conformité</b> : deux sorties gérées automatiquement (Conformes / Non
+          conformes). Pour aiguiller vers plus de sorties, choisissez <b>Router</b> dans la
+          configuration du bloc (panneau latéral, en sélectionnant le bloc).
+        </div>
+        <FlowMap items={items} total={dist.total} />
+        <div className="control-summary">
+          {items.map((it) => (
+            <div className="route-sum-item" key={it.id}>
+              <span className="odot" style={it.color ? { background: it.color } : undefined} />
+              <span className="route-sum-name">{it.label}</span>
+              <span className="route-count">{(it.count ?? 0).toLocaleString('fr-FR')}</span>
+              <button
+                className="mini"
+                title="Aperçu de cette sortie"
+                onClick={() => onPreview(it.id)}
+              >
+                <Icon name="eye" />
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
   }
 
   return (

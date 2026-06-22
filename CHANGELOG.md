@@ -69,6 +69,15 @@ Rubriques utilisées : `Ajouté` · `Changé` · `Corrigé` · `Sécurité` · `
 
 ### Ajouté
 
+- **Bloc Validation — préréglage « Contrôler / Router »** : un choix d'intention
+  en tête (« Je veux : Contrôler la conformité · Router vers plusieurs
+  sorties »). En **Contrôle**, l'UI est simplifiée — une seule condition de
+  conformité, deux sorties **Conformes / Non conformes** câblées
+  automatiquement. En **Router**, gestion multi-sorties complète. La bascule **ne
+  perd jamais de sortie** : les sorties d'un routeur sont planquées
+  (`router_stash`) et restaurées au retour (garanti par
+  `intentPatch`, testé). `intent`/`router_stash` exclus de la signature de cache
+  (état d'UI pur). Le mode est inféré pour les blocs existants (`inferIntent`).
 - **G.3** — **Onboarding léger** : au tout premier lancement (accueil vide,
   jamais onboardé), une orientation sobre des 3 concepts (projet → blocs →
   exécuter) qui funnel vers le projet d'exemple (G.2). **Montrée une seule

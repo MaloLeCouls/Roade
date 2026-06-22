@@ -3,7 +3,16 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { CLASS_FR, CLASS_RE_JS, VAL_TESTS, defaultExtractor, uid } from './validateHelpers'
+import {
+  CLASS_FR,
+  CLASS_RE_JS,
+  VAL_TESTS,
+  controlOutputs,
+  defaultExtractor,
+  inferIntent,
+  intentPatch,
+  uid,
+} from './validateHelpers'
 
 describe('CLASS_RE_JS / CLASS_FR', () => {
   it('expose une regex JS valide par classe de caractère', () => {
@@ -50,5 +59,65 @@ describe('defaultExtractor()', () => {
     const b = defaultExtractor()
     expect(a).not.toBe(b)
     expect(a).toEqual(b)
+  })
+})
+
+describe('intentPatch — préréglage Contrôler / Router', () => {
+  it('control : 2 sorties Conformes/Non conformes sur la 1re condition', () => {
+    const p = intentPatch({ conditions: [{ id: 'c1', name: 'Conforme' }], outputs: [] }, 'control')
+    expect(p.intent).toBe('control')
+    expect(p.outputs.map((o) => o.id)).toEqual(['valid', 'invalid'])
+    expect(p.outputs[0].match).toEqual({ conditionId: 'c1', negate: false })
+    expect(p.outputs[1].match).toEqual({ conditionId: 'c1', negate: true })
+    expect(p.else_enabled).toBe(false)
+  })
+
+  it('control crée une condition si aucune', () => {
+    const p = intentPatch({ conditions: [] }, 'control')
+    expect(p.conditions).toHaveLength(1)
+    expect(p.outputs[0].match.conditionId).toBe(p.conditions[0].id)
+  })
+
+  it('router→control planque les sorties, control→router les restaure (jamais perdues)', () => {
+    const router = {
+      intent: 'router',
+      conditions: [{ id: 'c1' }, { id: 'c2' }],
+      outputs: [
+        { id: 'a', label: 'A', match: { conditionId: 'c1' } },
+        { id: 'b', label: 'B', match: { conditionId: 'c2' } },
+        { id: 'c', label: 'C', match: { conditionId: 'c1', negate: true } },
+      ],
+      else_enabled: true,
+    }
+    const toCtrl = intentPatch(router, 'control')
+    expect(toCtrl.outputs.map((o) => o.id)).toEqual(['valid', 'invalid'])
+    expect(toCtrl.router_stash.outputs.map((o) => o.id)).toEqual(['a', 'b', 'c'])
+
+    const controlState = { ...router, ...toCtrl }
+    const back = intentPatch(controlState, 'router')
+    expect(back.outputs.map((o) => o.id)).toEqual(['a', 'b', 'c']) // restaurées
+    expect(back.else_enabled).toBe(true)
+    expect(back.router_stash).toBeNull()
+  })
+
+  it('control→router sans stash garde les sorties courantes (patch ne touche pas outputs)', () => {
+    const ctrl = intentPatch({ conditions: [{ id: 'c1' }] }, 'control')
+    const back = intentPatch({ conditions: [{ id: 'c1' }], ...ctrl }, 'router')
+    expect(back.intent).toBe('router')
+    expect(back.outputs).toBeUndefined()
+  })
+
+  it('inferIntent : router si >2 sorties ou plusieurs conditions, control sinon', () => {
+    expect(inferIntent({ intent: 'router' })).toBe('router')
+    expect(inferIntent({ outputs: controlOutputs('c1'), conditions: [{ id: 'c1' }] })).toBe(
+      'control',
+    )
+    expect(
+      inferIntent({
+        outputs: [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
+        conditions: [{ id: 'c1' }],
+      }),
+    ).toBe('router')
+    expect(inferIntent({ conditions: [{ id: 'c1' }, { id: 'c2' }] })).toBe('router')
   })
 })

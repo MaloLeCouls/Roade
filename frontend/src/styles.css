@@ -2977,6 +2977,39 @@ table.dt th.idx {
   color: var(--ink);
   font-size: 13px;
 }
+.val-intent .seg {
+  display: flex;
+  width: 100%;
+}
+.val-intent .seg button {
+  flex: 1;
+}
+.control-outs-legend {
+  display: flex;
+  gap: var(--s-4);
+  font-size: var(--fs-sm);
+  color: var(--ink-soft);
+  padding: 2px;
+}
+.control-out {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.control-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+}
+.control-summary .route-sum-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+.control-summary .route-sum-name {
+  flex: 1;
+}
 
 /* a named condition card (router intent) */
 .ccard {
