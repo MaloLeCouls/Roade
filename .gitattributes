@@ -1,0 +1,8 @@
+# Scripts shell et fichiers de conteneur : TOUJOURS en LF — un CRLF casserait
+# l'exécution sur macOS/Linux (`bash\r` au shebang, etc.).
+*.sh        text eol=lf
+start.sh    text eol=lf
+Dockerfile  text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+.dockerignore text eol=lf

@@ -1,0 +1,14 @@
+# Lance Roade sans connaître Python ni Node : `docker compose up --build`,
+# puis ouvrir http://localhost:8000.
+services:
+  roade:
+    build: .
+    image: roade
+    container_name: roade
+    ports:
+      - '8000:8000'
+    volumes:
+      # Persiste les projets (fichiers importés, workflows, résultats) hors du
+      # conteneur — sinon ils disparaîtraient à chaque recréation.
+      - ./projects:/app/projects
+    restart: unless-stopped

@@ -107,6 +107,13 @@ Rubriques utilisées : `Ajouté` · `Changé` · `Corrigé` · `Sécurité` · `
 
 ### Ajouté
 
+- **G.1 — Lancement multiplateforme** (sans packager lourd) : `start.sh`
+  (miroir Unix de `start.ps1` : `uv sync` + `npm install` au besoin, puis
+  backend + frontend, ouvre le navigateur) ; **Docker** (`Dockerfile`
+  multi-stage build front → image FastAPI servant API + dist sur un port, +
+  `docker-compose.yml` avec volume `projects/` persistant). README + guide dev à
+  jour. `.gitattributes` force le LF sur les scripts shell (sinon `bash\r` casse
+  sur Unix). v0.5 « Distribuable » complet.
 - **Bloc Validation — préréglage « Contrôler / Router »** : un choix d'intention
   en tête (« Je veux : Contrôler la conformité · Router vers plusieurs
   sorties »). En **Contrôle**, l'UI est simplifiée — une seule condition de

@@ -27,11 +27,16 @@ npm install --prefix frontend # deps Node verrouillées (package-lock.json)
 ## Lancer en développement
 
 ```powershell
-.\start.ps1                   # Windows : lance backend (:8000) + frontend (:5173)
+.\start.ps1                   # Windows
 ```
 
-Puis ouvrir <http://localhost:5173>. Le serveur Vite proxifie `/api` vers le
-backend.
+```bash
+./start.sh                    # macOS / Linux
+```
+
+Les deux lancent backend (:8000) + frontend (:5173) et ouvrent le navigateur ;
+`start.sh` fait aussi `uv sync` + `npm install` au besoin. Puis ouvrir
+<http://localhost:5173> (Vite proxifie `/api` vers le backend).
 
 ### Lancement manuel (tout OS)
 
@@ -42,9 +47,7 @@ python -m uvicorn main:app --app-dir backend --port 8000
 cd frontend && npm run dev
 ```
 
-> Sous Windows, remplacer `python` par `.\.venv\Scripts\python.exe`. Un
-> lanceur multiplateforme (`start.sh`, packager) est prévu (roadmap G.1) ;
-> en attendant, les deux commandes ci-dessus marchent partout.
+> Sous Windows, remplacer `python` par `.\.venv\Scripts\python.exe`.
 
 ## Mode production (un seul process)
 
@@ -55,6 +58,18 @@ python -m uvicorn main:app --app-dir backend --port 8000 # sert API + dist
 
 Ouvrir alors <http://localhost:8000> — plus besoin de Vite. Si `frontend/dist/`
 n'existe pas, le backend tourne quand même : seuls les `/api/*` répondent.
+
+### Docker (sans Python ni Node sur l'hôte)
+
+```bash
+docker compose up --build      # → http://localhost:8000
+```
+
+L'image build le front puis sert l'API + le `dist/` sur le port 8000 (mode prod
+ci-dessus, dans un conteneur). Les projets sont persistés via un volume
+(`./projects`). `Dockerfile` + `docker-compose.yml` à la racine. *(L'« ouvrir
+dans l'OS » d'un fichier/dossier ne fonctionne pas dans un conteneur — c'est une
+commodité desktop locale.)*
 
 ## API
 

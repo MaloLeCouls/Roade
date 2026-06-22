@@ -35,14 +35,30 @@ mise sur ce qui fait *confiance* dans le résultat, pas sur le vernis :
 
 ## Premiers pas
 
-1. **Installer et lancer** (Windows) :
+1. **Installer et lancer**, au choix :
+
+   **Docker** (le plus simple — rien à installer d'autre) :
+
+   ```bash
+   docker compose up --build
+   ```
+
+   Puis ouvrir <http://localhost:8000>.
+
+   **Windows** (prérequis : [uv](https://docs.astral.sh/uv/), Node) :
 
    ```powershell
    .\start.ps1
    ```
 
-   Puis ouvrir <http://localhost:5173>. *(Prérequis et lancement sur
-   macOS/Linux : voir le [guide développeur](docs/DEV.md).)*
+   **macOS / Linux** (mêmes prérequis) :
+
+   ```bash
+   ./start.sh
+   ```
+
+   Avec `start.ps1`/`start.sh`, ouvrir <http://localhost:5173>. *(Détails
+   d'installation : voir le [guide développeur](docs/DEV.md).)*
 
 2. **Découvrir avec l'exemple.** Sur l'écran d'accueil (aucun projet), cliquer
    **« Ouvrir l'exemple »** : Roade crée un projet *Commandes 2024* avec un
