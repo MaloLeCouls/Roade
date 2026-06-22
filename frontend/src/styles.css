@@ -5128,3 +5128,46 @@ table.dt th.idx {
     scroll-behavior: auto !important;
   }
 }
+
+/* ---- G.3 — onboarding (orientation 3 concepts, montrée une fois) ---------- */
+.onb-intro {
+  margin: 0 0 var(--s-4);
+}
+.onb-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.onb-step {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--s-3);
+  align-items: start;
+}
+.onb-step-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  color: var(--accent);
+}
+.onb-step-txt {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.onb-step-txt b {
+  font-weight: 600;
+}
+.onb-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s-2);
+  margin-top: var(--s-5);
+}

@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 
 import { api } from '../api'
 import { clickableProps } from '../lib/a11y'
+import { hasOnboarded, markOnboarded } from '../lib/onboarding'
+import Onboarding from './Onboarding'
 import { useConfirm } from './ui/ConfirmDialog'
 
 // Formats légers utilisés sur les cartes projet — pas une lib i18n, mais le strict
@@ -30,6 +32,9 @@ export default function ProjectList({ onOpen, onOpenWorkflow }) {
   // est tombée. Une fois 'ready', on garde la dernière liste affichée même
   // pendant un reload (évite de flasher un skeleton entre 2 actions).
   const [status, setStatus] = useState('loading')
+  // G.3 — onboarding : auto-affiché UNE seule fois (le flag est posé dès
+  // l'affichage), puis ré-ouvrable à la demande via « Découvrir Roade ».
+  const [showOnb, setShowOnb] = useState(false)
   // E.4 — ConfirmDialog au lieu du `window.confirm` natif.
   const [askConfirm, confirmNode] = useConfirm()
 
@@ -46,6 +51,16 @@ export default function ProjectList({ onOpen, onOpenWorkflow }) {
   useEffect(() => {
     reload(true)
   }, [])
+
+  // Premier lancement d'un nouvel utilisateur (accueil vide, jamais onboardé) :
+  // on montre l'orientation une fois et on pose le flag immédiatement — il ne
+  // se ré-affichera plus jamais tout seul, quel que soit le nombre de relances.
+  useEffect(() => {
+    if (status === 'ready' && projects.length === 0 && !hasOnboarded()) {
+      setShowOnb(true)
+      markOnboarded()
+    }
+  }, [status, projects.length])
 
   const create = async () => {
     if (!name.trim()) return
@@ -87,6 +102,13 @@ export default function ProjectList({ onOpen, onOpenWorkflow }) {
       <div className="page-head">
         <h1>Projets</h1>
         <div className="row">
+          <button
+            className="ghost small"
+            onClick={() => setShowOnb(true)}
+            title="Revoir l'orientation des 3 concepts"
+          >
+            Découvrir Roade
+          </button>
           <input
             placeholder="Nom du nouveau projet…"
             value={name}
@@ -98,6 +120,15 @@ export default function ProjectList({ onOpen, onOpenWorkflow }) {
           </button>
         </div>
       </div>
+
+      <Onboarding
+        open={showOnb}
+        onClose={() => setShowOnb(false)}
+        onOpenExample={() => {
+          setShowOnb(false)
+          openExample()
+        }}
+      />
 
       {status === 'loading' && (
         <div className="grid skeleton">

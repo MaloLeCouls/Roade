@@ -37,6 +37,13 @@ Rubriques utilisées : `Ajouté` · `Changé` · `Corrigé` · `Sécurité` · `
 
 ### Ajouté
 
+- **G.3** — **Onboarding léger** : au tout premier lancement (accueil vide,
+  jamais onboardé), une orientation sobre des 3 concepts (projet → blocs →
+  exécuter) qui funnel vers le projet d'exemple (G.2). **Montrée une seule
+  fois** — le flag est posé dès l'affichage (`localStorage`), donc elle ne
+  réapparaît plus jamais toute seule, quel que soit le nombre de relances. Un
+  utilisateur qui a déjà des projets ne la voit pas. Ré-ouvrable à la demande
+  via « Découvrir Roade » sur l'accueil.
 - **Recalcul forcé ciblé (sélection)** : clic droit sur un bloc (ou sur une
   multi-sélection) → « Recalculer (et l'aval) ». Ignore le cache des blocs
   visés **et de tout leur aval**, tout en réutilisant l'amont depuis le cache
