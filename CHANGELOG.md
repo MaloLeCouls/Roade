@@ -25,6 +25,12 @@ Rubriques utilisées : `Ajouté` · `Changé` · `Corrigé` · `Sécurité` · `
 
 ### Changé
 
+- **Extension du langage aux autres blocs** : **Filtre** mène par l'intention
+  (« Je veux : Garder / Exclure les lignes des données présentes dans la
+  référence ») avec son dry-run live ; **Pivot** mène par « Je veux : Pivoter /
+  Dépivoter » + une **relecture en clair** de l'opération (« Pour chaque
+  région, une colonne par valeur de mois, remplie par SUM(montant) »). Classe
+  d'amorce d'intention générique (`cfg-intent`), réutilisable.
 - **Bloc Validation — refonte de l'éditeur de condition (même langage)** : la
   condition se lit comme une phrase (« La ligne correspond si : … ») avec une
   **relecture en langage clair** sous les règles (« configuration = Model ET

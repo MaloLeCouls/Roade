@@ -440,31 +440,62 @@ function PivotConfig({ node, inputs, set }) {
   const mode = d.mode || 'pivot'
   const idx = d.index_columns || []
   const vals = d.value_columns || []
+  const readback =
+    mode === 'pivot'
+      ? `Pour chaque ${idx.length ? idx.join(' + ') : '(ligne)'}, une colonne par valeur de « ${d.pivot_column || '…'} », remplie par ${d.agg || 'SUM'}(${d.value_column || '…'}).`
+      : `Les colonnes ${vals.length ? vals.join(', ') : '(…)'} deviennent deux colonnes : « ${d.name_column || 'variable'} » (le nom) et « ${d.value_column || 'valeur'} ».`
   return (
     <div className="insp-body">
-      <div className="mode-toggle">
-        <button className={mode === 'pivot' ? 'on' : ''} onClick={() => set({ mode: 'pivot' })}>
-          Pivot
-        </button>
-        <button className={mode === 'unpivot' ? 'on' : ''} onClick={() => set({ mode: 'unpivot' })}>
-          Dépivot
-        </button>
+      <div className="cfg-intent">
+        <span className="cfg-intent-lede">Je veux&nbsp;:</span>
+        <div className="seg" role="radiogroup" aria-label="Sens du pivot">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={mode === 'pivot'}
+            className={mode === 'pivot' ? 'on' : ''}
+            onClick={() => set({ mode: 'pivot' })}
+          >
+            Pivoter
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={mode === 'unpivot'}
+            className={mode === 'unpivot' ? 'on' : ''}
+            onClick={() => set({ mode: 'unpivot' })}
+          >
+            Dépivoter
+          </button>
+        </div>
+        <span className="muted">
+          {mode === 'pivot' ? (
+            <>
+              étaler les valeurs d'une colonne en nouvelles colonnes (comme un TCD Excel).{' '}
+              <InfoBubble>
+                <b>Pivot</b> = un TCD Excel : pour chaque combinaison des <b>colonnes conservées</b>
+                , on crée une ligne ; la <b>colonne à éclater</b> devient autant de nouvelles
+                colonnes que de valeurs distinctes (« Janvier », « Février »…), chacune remplie par
+                l'agrégat de la <b>colonne de valeurs</b>. <b>SUM</b> pour des montants,{' '}
+                <b>COUNT</b> pour compter, <b>AVG</b> pour une moyenne.
+              </InfoBubble>
+            </>
+          ) : (
+            <>
+              replier plusieurs colonnes en deux (nom, valeur) — format « tidy ».{' '}
+              <InfoBubble>
+                <b>Dépivot</b> = inverse de Pivot. Plusieurs colonnes (« Janvier », « Février »…)
+                deviennent <b>deux</b> colonnes : un libellé (le nom de l'ancienne colonne) et la
+                valeur correspondante. Utile pour repasser à un format « tidy » avant un <b>SQL</b>{' '}
+                ou un <b>Calc</b>.
+              </InfoBubble>
+            </>
+          )}
+        </span>
       </div>
 
       {mode === 'pivot' ? (
         <>
-          {/* F.2 — info-bubble pour Pivot : c'était le seul bloc « concept-lourd »
-              sans aucune explication contextuelle (audit 03 dissymétrie #2). */}
-          <p className="qb-hint">
-            Transforme les valeurs d'une colonne en nouvelles colonnes (comme un TCD Excel).{' '}
-            <InfoBubble>
-              <b>Pivot</b> = un TCD Excel : pour chaque combinaison des <b>colonnes conservées</b>,
-              on crée une ligne ; la <b>colonne à éclater</b> devient autant de nouvelles colonnes
-              que de valeurs distinctes (« Janvier », « Février »…), chacune remplie par l'agrégat
-              de la <b>colonne de valeurs</b>. Choisissez <b>SUM</b> pour des montants, <b>COUNT</b>{' '}
-              pour compter, <b>AVG</b> pour une moyenne.
-            </InfoBubble>
-          </p>
           <div className="fld">
             <span>Lignes (colonnes conservées)</span>
             <ColumnPicker
@@ -501,15 +532,6 @@ function PivotConfig({ node, inputs, set }) {
         </>
       ) : (
         <>
-          <p className="qb-hint">
-            Transforme plusieurs colonnes en deux colonnes (nom, valeur).{' '}
-            <InfoBubble>
-              <b>Dépivot</b> = inverse de Pivot. Plusieurs colonnes (« Janvier », « Février »…)
-              deviennent <b>deux</b> colonnes : un libellé (le nom de l'ancienne colonne) et la
-              valeur correspondante. Utile pour repasser à un format « tidy » avant un <b>SQL</b> ou
-              un <b>Calc</b>.
-            </InfoBubble>
-          </p>
           <div className="fld">
             <span>Colonnes à dépivoter</span>
             <ColumnPicker
@@ -537,6 +559,10 @@ function PivotConfig({ node, inputs, set }) {
           </label>
         </>
       )}
+      <div className="cond-readback">
+        <Icon name="check" size={12} />
+        <span>{readback}</span>
+      </div>
     </div>
   )
 }
