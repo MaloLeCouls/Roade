@@ -37,6 +37,13 @@ Rubriques utilisées : `Ajouté` · `Changé` · `Corrigé` · `Sécurité` · `
 
 ### Ajouté
 
+- **Recalcul forcé ciblé (sélection)** : clic droit sur un bloc (ou sur une
+  multi-sélection) → « Recalculer (et l'aval) ». Ignore le cache des blocs
+  visés **et de tout leur aval**, tout en réutilisant l'amont depuis le cache
+  (pas de relecture d'une source lente). Nécessaire car la signature de cache
+  d'un bloc aval ne dépend que de la config + des signatures amont (Merkle), pas
+  du contenu recalculé : forcer un bloc seul ne propageait pas la nouvelle
+  sortie jusqu'aux aperçus et exports. Param `force_nodes` sur `run-stream`.
 - **G.4** — **README utilisateur** orienté quoi / pourquoi / comment démarrer,
   avec un visuel fidèle du workflow d'exemple (`docs/img/demo-workflow.svg`) et
   le chemin guidé « Ouvrir l'exemple ». Le contenu développeur (install depuis

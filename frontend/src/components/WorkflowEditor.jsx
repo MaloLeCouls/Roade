@@ -1702,12 +1702,12 @@ function Editor({ pid, wid, onBack }) {
   }
 
   // Streaming run: live progress, ComfyUI-style.
-  const doRun = async (onlyNode = null, force = false, allExports = false) => {
+  const doRun = async (onlyNode = null, force = false, allExports = false, forceNodes = null) => {
     if (busy) return
     // E.3 — pré-run : sur un run complet du workflow, on bloque si des erreurs
-    // statiques sont visibles. On laisse passer le run d'un nœud unique (l'user
-    // peut explorer un sous-graphe encore en cours d'édition).
-    if (!onlyNode) {
+    // statiques sont visibles. On laisse passer le run d'un nœud unique ou d'un
+    // recalcul ciblé (l'user peut explorer un sous-graphe encore en édition).
+    if (!onlyNode && !forceNodes) {
       const preflightNow = preflightWorkflow(nodes, edges)
       if (hasBlockingIssues(preflightNow)) {
         const firstId = Object.keys(preflightNow)[0]
@@ -1841,6 +1841,7 @@ function Editor({ pid, wid, onBack }) {
       },
       force,
       allExports,
+      forceNodes,
     )
   }
 
@@ -2530,6 +2531,34 @@ function Editor({ pid, wid, onBack }) {
                         </button>
                       )
                     })()}
+                    {(() => {
+                      // Recalcul forcé de la sélection + tout son aval (ignore le
+                      // cache des blocs visés). Utile après une correction : un
+                      // bloc dont la config n'a pas changé reste « à jour » pour
+                      // le cache et un run normal ne le régénère pas.
+                      const selRun = nodes.filter(
+                        (x) => x.selected && !['frame', 'group', 'stop'].includes(x.type),
+                      )
+                      if (!selRun.length) return null
+                      return (
+                        <button
+                          role="menuitem"
+                          disabled={busy}
+                          onClick={() => {
+                            doRun(
+                              null,
+                              false,
+                              false,
+                              selRun.map((s) => s.id),
+                            )
+                            setMenu(null)
+                          }}
+                        >
+                          <Icon name="refresh" size={13} /> Recalculer ces {selRun.length} blocs (et
+                          l'aval)
+                        </button>
+                      )
+                    })()}
                     <button
                       className="danger"
                       role="menuitem"
@@ -2568,6 +2597,19 @@ function Editor({ pid, wid, onBack }) {
                     {mn && nodeOutputs(mn).length > 0 && (
                       <button role="menuitem" onClick={() => enterConnectMode([menu.id])}>
                         <Icon name="flow" size={13} /> Connecter à…
+                      </button>
+                    )}
+                    {mn && !['frame', 'group', 'stop'].includes(mn.type) && (
+                      <button
+                        role="menuitem"
+                        disabled={busy}
+                        title="Ignore le cache de ce bloc et recalcule tout l'aval"
+                        onClick={() => {
+                          doRun(null, false, false, [menu.id])
+                          setMenu(null)
+                        }}
+                      >
+                        <Icon name="refresh" size={13} /> Recalculer (et l'aval)
                       </button>
                     )}
                     <button

@@ -707,6 +707,27 @@ def _ancestors(node_id: str, edges: list) -> set[str]:
     return seen
 
 
+def _descendants(node_id: str, edges: list) -> set[str]:
+    """Tous les blocs situés en aval de `node_id` (ses consommateurs, directs et
+    transitifs). Miroir de `_ancestors` : sert au recalcul forcé d'une sélection
+    — forcer un bloc seul ne suffit pas, car la signature de cache d'un bloc
+    aval ne dépend que de la config + des signatures amont (Merkle), pas du
+    *contenu* recalculé ; il faut donc forcer aussi tout l'aval pour que la
+    nouvelle sortie se propage jusqu'aux aperçus et exports."""
+    succ = {}
+    for e in edges:
+        succ.setdefault(e.get("source"), []).append(e.get("target"))
+    seen = set()
+    stack = [node_id]
+    while stack:
+        n = stack.pop()
+        for s in succ.get(n, []):
+            if s and s not in seen:
+                seen.add(s)
+                stack.append(s)
+    return seen
+
+
 # --------------------------------------------------------------------------- #
 # Inputs
 # --------------------------------------------------------------------------- #
@@ -3228,7 +3249,7 @@ def _execute_node_with_progress(con, pid, wid, nid, node, edges, **kwargs):
     thread.join()
 
 
-def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False):
+def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False, force_nodes=None):
     wf = storage.get_workflow(pid, wid)
     if not wf:
         yield {"event": "error", "message": "Workflow introuvable"}
@@ -3237,7 +3258,22 @@ def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False):
     edges = wf.get("edges", [])
     wf_name = wf.get("name") or "Workflow"
     order = _topo_order(nodes, edges)
-    if only_node and only_node in nodes:
+    # Recalcul forcé ciblé : on bypass le cache des blocs choisis ET de tout leur
+    # aval (sinon la sortie corrigée ne se propage pas — cache Merkle). On exécute
+    # ce sous-ensemble + ses ancêtres (réutilisés du cache, pour fournir les
+    # entrées sans relire une source lente).
+    force_set = set()
+    if force_nodes:
+        seeds = {n for n in force_nodes if n in nodes}
+        force_set = set(seeds)
+        for n in seeds:
+            force_set |= _descendants(n, edges)
+        force_set &= set(nodes)
+    if force_set:
+        run_set = set(force_set)
+        for n in force_set:
+            run_set |= _ancestors(n, edges)
+    elif only_node and only_node in nodes:
         run_set = _ancestors(only_node, edges) | {only_node}
     else:
         run_set = set(nodes)
@@ -3264,6 +3300,7 @@ def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False):
         "started_at_ms": int(run_started_at * 1000),
         "only_node": only_node,
         "force": force,
+        "force_nodes": sorted(force_set) or None,
         "ran": [],  # blocs effectivement recalculés
         "cached": [],  # blocs servis par le cache
         "errors": [],  # {node_id, label, message}
@@ -3276,7 +3313,7 @@ def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False):
     # a scope to reorganize the whole project on the user's behalf.
     last = wf.get("last_exports") or {}
     target_dir = storage.workflow_export_dir(pid, wf_name)
-    if only_node is None and last.get("dir") and last["dir"] != target_dir.name:
+    if only_node is None and not force_set and last.get("dir") and last["dir"] != target_dir.name:
         old_dir = storage.exports_dir(pid) / last["dir"]
         if old_dir.exists() and not target_dir.exists():
             target_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -3305,11 +3342,15 @@ def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False):
                 "type": node["type"],
             }
             single_force = force and only_node is not None and nid == only_node
+            # Recalcul ciblé : le bloc fait partie de la sélection forcée (ou de
+            # son aval). On bypass son cache, mais on respecte les verrous comme
+            # le fait « Tout recalculer » (seul un force mono-bloc lève un verrou).
+            node_targeted = nid in force_set
             node_started = _time.time()
             try:
                 result = None
                 exec_kwargs = dict(
-                    bypass_cache=(single_force or (force and only_node is None)),
+                    bypass_cache=(single_force or (force and only_node is None) or node_targeted),
                     bypass_lock=single_force,
                     all_exports=all_exports,
                     export_sink=export_sink,
@@ -3343,20 +3384,25 @@ def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False):
             }
             (run_record["cached"] if result.get("cached") else run_record["ran"]).append(entry)
             yield {"event": "node_done", "node_id": nid, "result": result}
+        # Un recalcul ciblé (force_set) est un run PARTIEL, comme un run mono-bloc :
+        # il n'écrit/nettoie pas comme un run complet (sinon forcer une branche
+        # supprimerait les exports de l'autre, considérés « périmés » car absents
+        # de `produced`).
+        full_run = only_node is None and not force_set
         # write the multi-sheet workbooks once every sheet has been gathered
         for wb_path, sheets in export_sink.items():
-            _write_workbook(wb_path, sheets, fresh=(only_node is None))
+            _write_workbook(wb_path, sheets, fresh=full_run)
         # Cleanup: only on a full run, only files WE previously wrote, only if
         # they're in our export dir, and only if they're not in this run's set.
         # Anything the user dropped in the folder by hand is never touched.
-        if only_node is None:
+        if full_run:
             stale = set(last.get("files") or []) - produced
             for name in stale:
                 p = target_dir / name
                 if p.exists() and p.is_file() and p.parent == target_dir:
                     p.unlink()
         # Persist the post-run state so the next run knows what to clean up.
-        if only_node is None:
+        if full_run:
             wf["last_exports"] = {"dir": target_dir.name, "files": sorted(produced)}
             storage.save_workflow(pid, wf)
         _persist_run_record(pid, wid, run_record, run_started_at)

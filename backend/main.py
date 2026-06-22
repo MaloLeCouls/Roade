@@ -535,9 +535,16 @@ def run_stream(
     only_node: str | None = Query(None),
     force: bool = Query(False),
     all_exports: bool = Query(False),
+    force_nodes: str | None = Query(None),
 ):
+    # Recalcul forcé ciblé (sélection sur le canevas) : liste d'ids séparés par
+    # des virgules. L'engine y ajoute l'aval et bypass leur cache.
+    forced = [n for n in (force_nodes or "").split(",") if n.strip()] or None
+
     def gen():
-        for ev in engine.iter_run_workflow(pid, wid, only_node, force, all_exports):
+        for ev in engine.iter_run_workflow(
+            pid, wid, only_node, force, all_exports, force_nodes=forced
+        ):
             yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(

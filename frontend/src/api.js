@@ -176,8 +176,22 @@ export const api = {
     ),
 
   // ---- streaming run (Server-Sent Events) ----
-  runStream: (pid, wid, onlyNode, onEvent, force = false, allExports = false) => {
-    const url = `${BASE}/projects/${enc(pid)}/workflows/${enc(wid)}/run-stream${qs({ only_node: onlyNode, force: force ? 1 : undefined, all_exports: allExports ? 1 : undefined })}`
+  runStream: (
+    pid,
+    wid,
+    onlyNode,
+    onEvent,
+    force = false,
+    allExports = false,
+    forceNodes = null,
+  ) => {
+    const url = `${BASE}/projects/${enc(pid)}/workflows/${enc(wid)}/run-stream${qs({
+      only_node: onlyNode,
+      force: force ? 1 : undefined,
+      all_exports: allExports ? 1 : undefined,
+      // Recalcul forcé ciblé (sélection) : ids séparés par des virgules.
+      force_nodes: forceNodes && forceNodes.length ? forceNodes.join(',') : undefined,
+    })}`
     const es = new EventSource(url)
     let finished = false
     const stop = () => {
