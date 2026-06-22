@@ -2964,7 +2964,7 @@ table.dt th.idx {
   flex: 0 0 auto;
   margin-top: 2px;
 }
-.val-intent {
+.cfg-intent {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -2972,16 +2972,16 @@ table.dt th.idx {
   font-size: var(--fs-sm);
   line-height: 1.45;
 }
-.val-intent-lede {
+.cfg-intent-lede {
   font-weight: 600;
   color: var(--ink);
   font-size: 13px;
 }
-.val-intent .seg {
+.cfg-intent .seg {
   display: flex;
   width: 100%;
 }
-.val-intent .seg button {
+.cfg-intent .seg button {
   flex: 1;
 }
 .control-outs-legend {

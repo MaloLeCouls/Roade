@@ -163,8 +163,8 @@ function ValidateConfig({ node, inputs, set }) {
         <SplitConfig node={node} cols={cols} set={set} />
       ) : (
         <>
-          <div className="val-intent">
-            <span className="val-intent-lede">Je veux&nbsp;:</span>
+          <div className="cfg-intent">
+            <span className="cfg-intent-lede">Je veux&nbsp;:</span>
             <div className="seg" role="radiogroup" aria-label="Type de validation">
               <button
                 type="button"
@@ -1868,6 +1868,35 @@ function FilterConfig({ pid, wid, node, inputs, set }) {
 
   return (
     <div className="insp-body">
+      <div className="cfg-intent">
+        <span className="cfg-intent-lede">Je veux&nbsp;:</span>
+        <div className="seg" role="radiogroup" aria-label="Mode du filtre">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={keep}
+            className={keep ? 'on' : ''}
+            onClick={() => set({ mode: 'keep' })}
+          >
+            Garder
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={!keep}
+            className={!keep ? 'on' : ''}
+            onClick={() => set({ mode: 'exclude' })}
+          >
+            Exclure
+          </button>
+        </div>
+        <span className="muted">
+          les lignes des <b>données</b> présentes dans la <b>référence</b>{' '}
+          {keep ? '(semi-jointure)' : '(anti-jointure)'} — la référence est seulement consultée,
+          jamais fusionnée.
+        </span>
+      </div>
+
       <div className="ports">
         <div className="ports-head">
           <span className="ports-title">Entrées</span>
@@ -1888,22 +1917,8 @@ function FilterConfig({ pid, wid, node, inputs, set }) {
         </div>
       </div>
 
-      <div className="mode-toggle">
-        <button className={keep ? 'on' : ''} onClick={() => set({ mode: 'keep' })}>
-          Garder si présent
-        </button>
-        <button className={!keep ? 'on' : ''} onClick={() => set({ mode: 'exclude' })}>
-          Exclure si présent
-        </button>
-      </div>
-      <p className="qb-hint">
-        {keep
-          ? `Ne conserve que les lignes des données dont ${pairs.length > 1 ? 'la combinaison de colonnes existe' : 'la valeur existe'} dans la référence (semi-jointure${pairs.length > 1 ? ' composite' : ''}).`
-          : `Retire les lignes des données dont ${pairs.length > 1 ? 'la combinaison de colonnes existe' : 'la valeur existe'} dans la référence (anti-jointure${pairs.length > 1 ? ' composite' : ''}).`}
-      </p>
-
       <div className="ports-head" style={{ marginTop: 6 }}>
-        <span className="ports-title">Colonnes à comparer</span>
+        <span className="ports-title">La clé : quelles colonnes comparer</span>
         <InfoBubble>
           Comparez plusieurs colonnes en parallèle pour former une <b>clé composite</b> : une ligne
           ne « matche » que si la référence contient une ligne avec exactement les mêmes valeurs sur
