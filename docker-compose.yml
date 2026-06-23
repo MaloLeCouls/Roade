@@ -7,6 +7,11 @@ services:
     container_name: roade
     ports:
       - '8000:8000'
+    environment:
+      # Transmet le mot de passe optionnel depuis l'hôte (cf. PasswordGate).
+      # Non définis → portail inactif : `docker compose up` reste ouvert en local.
+      - ROADE_PASSWORD
+      - ROADE_USER
     volumes:
       # Persiste les projets (fichiers importés, workflows, résultats) hors du
       # conteneur — sinon ils disparaîtraient à chaque recréation.

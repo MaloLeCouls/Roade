@@ -16,6 +16,7 @@ import '@xyflow/react/dist/style.css'
 
 import { api } from '../api'
 import { estimateWorkflowLoad, formatRows } from '../lib/loadEstimate'
+import { estimateNodeMs, learnDuration, modelKey } from '../lib/etaModel'
 import { hasBlockingIssues, preflightWorkflow } from '../lib/preflight'
 import { notify } from '../toast'
 import { exportSubdir } from '../lib/paths'
@@ -455,10 +456,22 @@ function Editor({ pid, wid, onBack }) {
   const [selectionDragActive, setSelectionDragActive] = useState(false)
   const [previewPrefs, setPreviewPrefs] = useState({ tab: 'rows', column: null })
   const [banner, setBanner] = useState(null)
+  // Le bandeau d'info (« 15 réutilisés (inchangé) », « Run interrompu. »…) se
+  // referme tout seul après 10 s pour ne pas encombrer. Les erreurs (type
+  // 'error') restent affichées jusqu'à fermeture manuelle.
+  useEffect(() => {
+    if (!banner || banner.type !== 'info') return undefined
+    const t = setTimeout(() => setBanner(null), 10000)
+    return () => clearTimeout(t)
+  }, [banner])
   const [saveState, setSaveState] = useState('saved')
   const loaded = useRef(false)
   const saveTimer = useRef(null)
   const anim = useRef({ timer: null, start: 0, est: 0 }) // per-node progress animation
+  // ETA d'un run : estimation par bloc (recalculée au fil de l'eau avec les vraies
+  // lignes), pour afficher « temps restant » + « heure de fin ».
+  // Plan d'ETA reçu du backend : { plan:{nodeId:est_ms}, total, done:Set, confident, curId, curStart }
+  const etaRef = useRef({ plan: {}, done: new Set(), total: 0, confident: false, curId: null, curStart: 0 })
   const startTimer = useRef(null) // deferred "running" indication
   const canvasRef = useRef(null)
   const groupDrag = useRef(null) // snapshot while dragging a frame
@@ -590,22 +603,68 @@ function Editor({ pid, wid, onBack }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pid, wid, wfName, nodes, edges])
 
-  // Duplique le bloc sélectionné (Ctrl+D) — offset de 40px pour qu'on le voie.
+  // Duplique la SÉLECTION (Ctrl+D) : un ou plusieurs blocs, AVEC les liens entre
+  // eux et les bouchons attachés. Tous les ids (blocs, handles, conditions,
+  // arêtes) sont régénérés ; la copie est décalée de 40px et reste sélectionnée
+  // (prête à être déplacée d'un bloc).
   const duplicateSelected = useCallback(() => {
-    const selected = rf.getNodes?.().filter((n) => n.selected) || []
+    const selected = (rf.getNodes?.() || []).filter((n) => n.selected)
     if (selected.length === 0) {
-      notify("Sélectionnez d'abord un bloc à dupliquer.", 'warn')
+      notify("Sélectionnez d'abord un ou plusieurs blocs à dupliquer.", 'warn')
       return
     }
-    const newNodes = selected.map((n) => ({
-      ...n,
-      id: uid(),
-      selected: false,
-      position: { x: (n.position?.x || 0) + 40, y: (n.position?.y || 0) + 40 },
-      data: { ...n.data },
-    }))
+    commitHistory()
+    const selIds = new Set(selected.map((n) => n.id))
+    const single = selected.length === 1
+    const idMap = {}
+    const cloned = {}
+    for (const n of selected) {
+      idMap[n.id] = `${n.type}-${uid()}`
+      cloned[n.id] = cloneDupData(n, { rename: single, wfName })
+    }
+    // un bouchon (enfant) doit suivre son parent dans le tableau (règle xyflow)
+    const ordered = [...selected].sort((a, b) => (a.type === 'stop' ? 1 : 0) - (b.type === 'stop' ? 1 : 0))
+    const newNodes = []
+    for (const n of ordered) {
+      if (n.type === 'stop' && n.parentId && !selIds.has(n.parentId)) continue // parent non copié
+      const copy = {
+        ...n,
+        id: idMap[n.id],
+        selected: true,
+        position: { x: (n.position?.x || 0) + 40, y: (n.position?.y || 0) + 40 },
+        data: cloned[n.id].data,
+      }
+      if (n.type === 'stop' && n.parentId) {
+        copy.parentId = idMap[n.parentId]
+        copy.position = { ...n.position } // position relative au parent → pas d'offset
+        if (copy.data?.attachedTo?.sourceId) {
+          const ns = idMap[copy.data.attachedTo.sourceId] || copy.data.attachedTo.sourceId
+          copy.data = { ...copy.data, attachedTo: { ...copy.data.attachedTo, sourceId: ns } }
+        }
+      }
+      newNodes.push(copy)
+    }
+    // arêtes dont les DEUX extrémités sont copiées → dupliquées, avec remap des
+    // handles de sortie custom (sinon le lien pointerait vers un handle disparu).
+    const internalEdges = (rf.getEdges?.() || [])
+      .filter((e) => selIds.has(e.source) && selIds.has(e.target))
+      .map((e) => ({
+        ...e,
+        id: `e-${uid()}`,
+        source: idMap[e.source],
+        target: idMap[e.target],
+        sourceHandle: cloned[e.source]?.handleMap?.[e.sourceHandle] || e.sourceHandle,
+        targetHandle: cloned[e.target]?.handleMap?.[e.targetHandle] || e.targetHandle,
+        selected: false,
+      }))
     setNodes((nds) => [...nds.map((n) => ({ ...n, selected: false })), ...newNodes])
-  }, [rf, setNodes])
+    if (internalEdges.length) setEdges((eds) => [...eds, ...internalEdges])
+    if (single) setSelectedId(newNodes[0]?.id || null)
+    else notify(`${newNodes.length} bloc(s) dupliqué(s) avec leurs liens.`, 'info')
+    // commitHistory est stable (useCallback) mais déclaré plus bas → hors deps
+    // pour éviter la TDZ du tableau de dépendances.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rf, setNodes, setEdges, wfName])
 
   // E.1 — historique past/future de l'état du graphe (Ctrl+Z / Ctrl+Y).
   //
@@ -1069,9 +1128,9 @@ function Editor({ pid, wid, onBack }) {
       },
       {
         id: 'duplicate',
-        label: 'Dupliquer le bloc sélectionné',
+        label: 'Dupliquer la sélection',
         shortcut: 'Ctrl+D',
-        keywords: 'copy',
+        keywords: 'copy duplicate copier coller sélection',
         action: duplicateSelected,
       },
       {
@@ -1148,7 +1207,10 @@ function Editor({ pid, wid, onBack }) {
   // A "stop" cap glues to the source block instead of being wired by an edge:
   // we set parentId on the stop and position it next to the source's output
   // handle. React Flow then moves the cap along with the parent automatically.
-  const STOP_CAP_HALF = 11 // half height of the round cap (matches CSS)
+  // Demi-hauteur de la pastille ronde, pour la centrer pile sur le handle de
+  // sortie. La pastille fait 18px (CSS .stop-cap, box-sizing: border-box → la
+  // bordure est incluse) → 9px. Une valeur trop grande la décale vers le haut.
+  const STOP_CAP_HALF = 9
   const attachStop = useCallback(
     (stopId, sourceId, sourceHandle) => {
       const handle = sourceHandle || 'out'
@@ -1377,9 +1439,22 @@ function Editor({ pid, wid, onBack }) {
       // and visually attach to the wrong sortie after a reorder.
       if (
         patch &&
-        ('outputs' in patch || 'else_enabled' in patch || 'mode' in patch || 'split' in patch)
+        ('outputs' in patch ||
+          'else_enabled' in patch ||
+          'mode' in patch ||
+          'split' in patch ||
+          'inputCount' in patch)
       ) {
         updateNodeInternals(id)
+      }
+      // Réduire les entrées d'un bloc SQL : on retire les arêtes qui pointaient
+      // vers une entrée disparue (in3, in4…), sinon il reste une liaison
+      // fantôme vers un handle qui n'existe plus.
+      if (patch && 'inputCount' in patch) {
+        const keep = new Set(
+          Array.from({ length: Math.max(1, patch.inputCount) }, (_, i) => `in${i + 1}`),
+        )
+        setEdges((eds) => eds.filter((e) => e.target !== id || keep.has(e.targetHandle || 'in1')))
       }
     },
     [setNodes, setEdges, updateNodeInternals, commitHistory],
@@ -1525,33 +1600,9 @@ function Editor({ pid, wid, onBack }) {
   const duplicateNode = (id) => {
     const src = nodes.find((n) => n.id === id)
     if (!src) return
-    // coalesce=true : duplicateSelected appelle duplicateNode pour chaque bloc
-    // sélectionné — on veut UN seul pas d'historique pour le batch.
     commitHistory({ coalesce: true })
-    const newId = `${src.type}-${Math.random().toString(36).slice(2, 8)}`
-    const data = JSON.parse(JSON.stringify(src.data))
-    data.label = `${data.label || src.type} (copie)`
-    if (src.type === 'export' && data.auto_name !== false)
-      data.filename = `${(wfName || 'Workflow').trim()} - ${data.label}`
-    // Fresh ids for the validate/routing dynamic handles + the conditions they
-    // reference. Static handles ('valid', 'invalid', 'else', 'out'…) are kept
-    // unchanged — only ids that look user-generated are remapped.
-    if (Array.isArray(data.conditions) || Array.isArray(data.outputs)) {
-      const condRemap = {}
-      data.conditions = (data.conditions || []).map((c) => {
-        const nid = 'c' + uid()
-        condRemap[c.id] = nid
-        return { ...c, id: nid }
-      })
-      data.outputs = (data.outputs || []).map((o) => {
-        const isCustomId = typeof o.id === 'string' && o.id.startsWith('o')
-        const nid = isCustomId ? uid() : o.id
-        const match = o.match
-          ? { ...o.match, conditionId: condRemap[o.match.conditionId] || o.match.conditionId }
-          : o.match
-        return { ...o, id: nid, ...(match ? { match } : {}) }
-      })
-    }
+    const newId = `${src.type}-${uid()}`
+    const { data } = cloneDupData(src, { rename: true, wfName })
     setNodes((nds) => [
       ...nds,
       {
@@ -1595,15 +1646,31 @@ function Editor({ pid, wid, onBack }) {
     setSaveState('saved')
   }
 
-  // Ouvre le dossier `exports/<workflow>/` où les blocs Export écrivent leurs fichiers.
-  const openWorkflowExportFolder = useCallback(async () => {
+  // Ouvre le dossier `exports/<workflow>/` où les blocs Export écrivent leurs
+  // fichiers. Si `file` est fourni (depuis un bloc Export), l'explorateur s'ouvre
+  // avec ce fichier sélectionné — on retrouve l'export exact, pas juste le dossier.
+  const openWorkflowExportFolder = useCallback(
+    async (file) => {
+      setBanner(null)
+      try {
+        await api.openFilesFolder(pid, exportSubdir(wfName), typeof file === 'string' ? file : undefined)
+      } catch (e) {
+        setBanner({ type: 'error', text: `Impossible d'ouvrir le dossier : ${e.message || e}` })
+      }
+    },
+    [pid, wfName],
+  )
+
+  // Ouvre le dossier `files/` du projet (les Excel/CSV importés) — accès rapide
+  // aux sources depuis n'importe quel workflow.
+  const openSourcesFolder = useCallback(async () => {
     setBanner(null)
     try {
-      await api.openFilesFolder(pid, exportSubdir(wfName))
+      await api.openFilesFolder(pid)
     } catch (e) {
       setBanner({ type: 'error', text: `Impossible d'ouvrir le dossier : ${e.message || e}` })
     }
-  }, [pid, wfName])
+  }, [pid])
 
   // Download the human-readable Excel documentation. The doc is built from the
   // *stored* workflow, so we flush any pending edits first.
@@ -1630,6 +1697,10 @@ function Editor({ pid, wid, onBack }) {
       [nid]: {
         ran: true,
         rows: r.row_count ?? r.rows ?? 0,
+        // Signature du résultat (change à chaque recalcul) : sert de clé de
+        // rafraîchissement aux aperçus, fiable même pour un bloc mono-sortie
+        // dont `outputs` reste {} (cf. OutputPreview/ReportView dans BlockEditor).
+        signature: r.signature,
         error: null,
         outputs: r.outputs || {},
         cleanReport: r.clean_report,
@@ -1648,15 +1719,36 @@ function Editor({ pid, wid, onBack }) {
   // ---- per-node progress (non-source blocks) ------------------------------
   // Sources use real `node_progress` (rows_read / total_rows). Other blocks
   // still use a smooth estimated bar when no finer signal exists.
+  // clé `.v2` : repart proprement du défaut calibré (l'ancienne valeur pouvait
+  // être corrompue par un bug — voir saveRate/anim.start ci-dessous).
   const getRate = () => {
-    const v = parseFloat(localStorage.getItem('roade.srcRateMsPerByte'))
-    return Number.isFinite(v) && v > 0 ? v : 0.004 // default ≈ 4 s / Mo
+    const v = parseFloat(localStorage.getItem('roade.srcRateMsPerByte.v2'))
+    return Number.isFinite(v) && v > 0 ? v : 0.0026 // défaut ≈ 2,6 s / Mo (calibré xlsx)
+  }
+  // Lignes « traitées » par un bloc = somme des lignes connues de ses amonts
+  // (statut du dernier run), en remontant le graphe. Une source non encore
+  // exécutée vaut 0 (elle est estimée par sa taille en octets, pas par ses
+  // lignes). Sert à dimensionner l'ETA d'un bloc selon le volume réel.
+  const estRows = (id, st) => {
+    const s = st[id]
+    if (s?.ran && typeof s.rows === 'number') return s.rows
+    // Pas d'historique pour ce bloc : on somme les lignes connues de ses amonts
+    // DIRECTS seulement (pas de récursion profonde — sinon un graphe en losange
+    // compterait deux fois la même source et gonflerait l'ETA).
+    let total = 0
+    for (const e of edges.filter((x) => x.target === id)) {
+      const up = st[e.source]
+      if (up?.ran && typeof up.rows === 'number') total += up.rows
+    }
+    return total
   }
   const saveRate = (r) => {
     const blended = 0.5 * getRate() + 0.5 * r // smooth (EMA) so one slow run can't skew it
+    // plafond 0.02 ms/o (~20 s/Mo) : large mais réaliste — évite qu'une mesure
+    // aberrante fasse exploser l'ETA des sources.
     localStorage.setItem(
-      'roade.srcRateMsPerByte',
-      String(Math.min(0.05, Math.max(0.0003, blended))),
+      'roade.srcRateMsPerByte.v2',
+      String(Math.min(0.02, Math.max(0.0003, blended))),
     )
   }
   const estimateMs = (node) => {
@@ -1664,7 +1756,7 @@ function Editor({ pid, wid, onBack }) {
       const bytes = files.find((f) => f.name === node?.data?.file)?.size || 0
       return Math.max(800, bytes * getRate())
     }
-    return 1000 // other blocks: short default, asymptote handles overruns
+    return estimateNodeMs(modelKey(node), estRows(node?.id, status))
   }
   const stopAnim = () => {
     if (anim.current.timer) {
@@ -1727,6 +1819,10 @@ function Editor({ pid, wid, onBack }) {
       currentId: null,
       currentLabel: 'préparation…',
       startedAt: Date.now(),
+      remainingMs: null,
+      etaAt: null,
+      etaTotalMs: null,
+      etaConfident: false,
     })
     await flushSave()
     let recomputed = 0,
@@ -1743,6 +1839,7 @@ function Editor({ pid, wid, onBack }) {
       onlyNode,
       (ev) => {
         if (ev.event === 'start') {
+          etaRef.current = { plan: {}, done: new Set(), total: 0, confident: false, curId: null, curStart: 0 }
           setProgress((p) => ({
             ...p,
             active: true,
@@ -1750,6 +1847,26 @@ function Editor({ pid, wid, onBack }) {
             done: 0,
             currentId: null,
             currentLabel: '',
+            remainingMs: null,
+            etaAt: null,
+            etaTotalMs: null,
+            etaConfident: false,
+          }))
+        } else if (ev.event === 'eta') {
+          // ETA calculée par le backend (historique réel des durées + cache + file
+          // d'attente exacte). On l'affiche telle quelle ; on la raffine ensuite à
+          // chaque bloc terminé et en direct pendant la lecture d'une source.
+          const er = etaRef.current
+          er.plan = {}
+          for (const pl of ev.plan || []) er.plan[pl.node_id] = pl.est_ms
+          er.total = ev.eta_ms || 0
+          er.confident = !!ev.confident
+          setProgress((p) => ({
+            ...p,
+            etaTotalMs: er.total,
+            etaConfident: er.confident,
+            remainingMs: er.total,
+            etaAt: er.total > 0 ? Date.now() + er.total : null,
           }))
         } else if (ev.event === 'node_start') {
           // Defer the "exécution…" glow: a cached/instant block finishes before this
@@ -1760,6 +1877,11 @@ function Editor({ pid, wid, onBack }) {
             // Sources : affichage immédiat pour que la progression lignes/lignes
             // totales soit visible dès les premiers events `node_progress`.
             stopAnim()
+            // start réel du bloc : sans ça, finishNodeAnim → saveRate lisait un
+            // temps bidon et corrompait le débit (ETA source aberrante).
+            anim.current.start = performance.now()
+            etaRef.current.curId = ev.node_id
+            etaRef.current.curStart = Date.now()
             setNodeFrac(0)
             setSourceProgress({ nodeId: ev.node_id, rowsRead: 0, totalRows: 0 })
             setProgress((p) => ({
@@ -1788,6 +1910,23 @@ function Editor({ pid, wid, onBack }) {
             rowsRead: read,
             totalRows: ev.total_rows || 0,
           })
+          // ETA live : on projette la fin de cette source d'après son rythme réel
+          // (lignes lues / temps écoulé), bien plus fiable que l'estimation
+          // initiale. Le reste des blocs garde son estimation planifiée.
+          const er = etaRef.current
+          const frac = read / total
+          if (er.curId === ev.node_id && er.curStart && frac > 0.03) {
+            const elapsedNode = Date.now() - er.curStart
+            const curRemaining = (elapsedNode / frac) * (1 - frac)
+            let rest = 0
+            for (const id in er.plan) {
+              if (id === ev.node_id || er.done.has(id)) continue
+              rest += er.plan[id] || 0
+            }
+            const remainingMs = curRemaining + rest
+            // mesuré en direct → fiable, on lève le « estimation… »
+            setProgress((p) => ({ ...p, remainingMs, etaAt: Date.now() + remainingMs, etaConfident: true }))
+          }
         } else if (ev.event === 'node_done') {
           const dn = nodes.find((n) => n.id === ev.node_id)
           if (startTimer.current)
@@ -1799,7 +1938,26 @@ function Editor({ pid, wid, onBack }) {
           // this block is now up to date — remember the config it ran with
           if (dn) setRunStamps((s) => ({ ...s, [ev.node_id]: nodeDataSig(dn.data) }))
           setSourceProgress((sp) => (sp?.nodeId === ev.node_id ? null : sp))
-          setProgress((p) => ({ ...p, done: p.done + 1, currentId: null }))
+          // --- ETA : apprendre la durée réelle, puis recalculer le temps restant
+          // avec les vraies lignes (connues au fur et à mesure des blocs finis). ---
+          const er = etaRef.current
+          if (!ev.result?.cached && ev.elapsed_ms > 0) {
+            // on garde l'apprentissage local en plus de l'historique backend
+            learnDuration(modelKey(dn), ev.result?.row_count ?? 0, ev.elapsed_ms)
+          }
+          er.done.add(ev.node_id)
+          // restant = somme des estimations (plan backend) des blocs pas encore finis
+          let rem = 0
+          for (const id in er.plan) if (!er.done.has(id)) rem += er.plan[id] || 0
+          setProgress((p) => ({
+            ...p,
+            done: p.done + 1,
+            currentId: null,
+            remainingMs: rem,
+            etaAt: rem > 0 ? Date.now() + rem : null,
+            // un bloc terminé = un point d'ancrage réel → l'ETA devient fiable
+            etaConfident: true,
+          }))
         } else if (ev.event === 'done') {
           clearStartTimer()
           stopAnim()
@@ -2104,11 +2262,19 @@ function Editor({ pid, wid, onBack }) {
             </span>
             <button
               className="ghost icon-only"
+              onClick={openSourcesFolder}
+              title="Imports — ouvrir le dossier des fichiers sources (Excel/CSV importés)"
+              aria-label="Ouvrir le dossier des fichiers sources (imports)"
+            >
+              <Icon name="import" />
+            </button>
+            <button
+              className="ghost icon-only"
               onClick={openWorkflowExportFolder}
-              title="Ouvrir le dossier des exports"
+              title="Exports — ouvrir le dossier des fichiers exportés de ce workflow"
               aria-label="Ouvrir le dossier des exports"
             >
-              <Icon name="folder" />
+              <Icon name="export" />
             </button>
             <button
               className="ghost"
@@ -2560,6 +2726,15 @@ function Editor({ pid, wid, onBack }) {
                       )
                     })()}
                     <button
+                      role="menuitem"
+                      onClick={() => {
+                        duplicateSelected()
+                        setMenu(null)
+                      }}
+                    >
+                      <Icon name="copy" size={13} /> Dupliquer la sélection ({selCount})
+                    </button>
+                    <button
                       className="danger"
                       role="menuitem"
                       onClick={() => {
@@ -2668,7 +2843,29 @@ function MenuInfo({ children }) {
 
 function fmtElapsed(ms) {
   const s = Math.max(0, Math.floor(ms / 1000))
-  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s`
+  if (s < 60) return `${s} s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m} min ${String(s % 60).padStart(2, '0')} s`
+  return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`
+}
+
+// Heure de fin estimée, au format local court (« 14:32 »).
+function fmtClock(ts) {
+  try {
+    return new Date(ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+  } catch {
+    return ''
+  }
+}
+
+// Temps restant, format compact : secondes (arrondies) sous 1 min, sinon
+// minutes seules (« ~35 min » se lit mieux que « ~35 min 15 s »), puis heures.
+function fmtETA(ms) {
+  const s = Math.max(0, Math.round(ms / 1000))
+  if (s < 60) return `${Math.max(5, Math.round(s / 5) * 5)} s`
+  const m = Math.round(s / 60)
+  if (m < 60) return `${m} min`
+  return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`
 }
 
 // Bannière du mode « click-to-connect » : rappelle qui est le bloc source,
@@ -2753,9 +2950,20 @@ function fmtSourcesLabel(sources) {
 function ProgressBar({ progress, frac = 0, sourceProgress = null, onGo }) {
   if (!progress.active && progress.done === 0) return null
   const within = progress.active ? Math.min(0.999, frac) : 0
-  const pct = progress.total
-    ? Math.min(100, Math.round(((progress.done + within) / progress.total) * 100))
-    : 0
+  // Avancement par nombre de blocs (équipondéré)…
+  const countFrac = progress.total ? (progress.done + within) / progress.total : 0
+  // …mais si on a une ETA, on pondère par le TEMPS (un gros export pèse plus
+  // qu'un petit bloc) et on avance en continu via le décompte vers `etaAt`.
+  let fillFrac = countFrac
+  if (progress.active && progress.etaTotalMs && progress.etaAt) {
+    const liveRem = Math.max(0, progress.etaAt - Date.now())
+    fillFrac = Math.max(countFrac, (progress.etaTotalMs - liveRem) / progress.etaTotalMs)
+  }
+  const pct = progress.active
+    ? Math.min(99, Math.max(0, Math.round(fillFrac * 100)))
+    : progress.done
+      ? 100
+      : 0
   const elapsed = progress.startedAt ? Date.now() - progress.startedAt : 0
   const srcRows =
     sourceProgress?.nodeId === progress.currentId && sourceProgress.totalRows > 0
@@ -2821,6 +3029,13 @@ function ProgressBar({ progress, frac = 0, sourceProgress = null, onGo }) {
               </span>
             )}
             {elapsed > 1500 && <span className="pmeta"> · {fmtElapsed(elapsed)}</span>}
+            {progress.etaConfident && progress.etaAt && progress.etaAt - Date.now() > 1000 ? (
+              <span className="pmeta peta">
+                reste ~{fmtETA(progress.etaAt - Date.now())} · fin ~{fmtClock(progress.etaAt)}
+              </span>
+            ) : !progress.etaConfident ? (
+              <span className="pmeta peta">estimation…</span>
+            ) : null}
           </>
         ) : (
           <span className="done-text">Terminé · {progress.total} bloc(s)</span>
@@ -2832,6 +3047,41 @@ function ProgressBar({ progress, frac = 0, sourceProgress = null, onGo }) {
 
 function miniColor(n) {
   return TYPE_COLOR[n.type] || '#999'
+}
+
+// Clone profond d'un bloc pour duplication. Ré-attribue les ids internes
+// « utilisateur » (conditions + sorties dynamiques des blocs validate/route)
+// pour qu'une copie ne réutilise jamais les handles de l'original (sinon deux
+// handles de même id → collision React Flow au drag). Renvoie aussi `handleMap`
+// (ancien id de sortie → nouveau) pour pouvoir réparer les arêtes dupliquées.
+function cloneDupData(src, { rename = false, wfName = 'Workflow' } = {}) {
+  const data = JSON.parse(JSON.stringify(src.data || {}))
+  const handleMap = {}
+  if (rename) {
+    data.label = `${data.label || src.type} (copie)`
+    if (src.type === 'export' && data.auto_name !== false)
+      data.filename = `${(wfName || 'Workflow').trim()} - ${data.label}`
+  }
+  if (Array.isArray(data.conditions) || Array.isArray(data.outputs)) {
+    const condRemap = {}
+    data.conditions = (data.conditions || []).map((c) => {
+      const nid = 'c' + uid()
+      condRemap[c.id] = nid
+      return { ...c, id: nid }
+    })
+    data.outputs = (data.outputs || []).map((o) => {
+      // sorties « custom » (Router) : id commençant par 'o' → régénéré ; les
+      // sorties statiques (valid/invalid/else/out) gardent leur id.
+      const isCustomId = typeof o.id === 'string' && o.id.startsWith('o')
+      const nid = isCustomId ? uid() : o.id
+      if (isCustomId) handleMap[o.id] = nid
+      const match = o.match
+        ? { ...o.match, conditionId: condRemap[o.match.conditionId] || o.match.conditionId }
+        : o.match
+      return { ...o, id: nid, ...(match ? { match } : {}) }
+    })
+  }
+  return { data, handleMap }
 }
 
 // React Flow adds transient UI fields; persist only what we need.

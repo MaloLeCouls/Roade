@@ -24,4 +24,7 @@ COPY backend/ ./backend/
 COPY --from=frontend /app/frontend/dist ./frontend/dist
 EXPOSE 8000
 # main.py sert frontend/dist (résolu via __file__/../../frontend/dist) si présent.
-CMD [".venv/bin/python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--app-dir", "backend"]
+# Bind sur $PORT si l'hébergeur en fournit un (Railway/Render…), sinon 8000
+# (docker compose local). `exec` → uvicorn devient PID 1 et reçoit SIGTERM,
+# donc l'arrêt du conteneur reste propre malgré la forme shell.
+CMD ["sh", "-c", "exec .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --app-dir backend"]

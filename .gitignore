@@ -7,5 +7,12 @@ __pycache__/
 *.pyc
 .DS_Store
 
+# Build de l'app de bureau (PyInstaller) et logs de test du .exe
+/build/
+/dist/
+*.exe.log
+exe_out.log
+exe_err.log
+
 # Recherche externe sans rapport avec Roade (tombée dans le dossier)
 compass_artifact_*.md

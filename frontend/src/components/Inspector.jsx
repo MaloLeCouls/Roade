@@ -5,6 +5,7 @@ import Icon from './Icon'
 import { ConditionsEditor, RuleRow, MaskBuilder, RulesBuilder } from './routing'
 import { EXTRACTOR_TYPES, defaultExtractor, inferIntent, intentPatch } from './validateHelpers'
 import ColumnPicker, { shortType } from './ui/ColumnPicker'
+import { exportSubdir } from '../lib/paths'
 
 export default function Inspector({
   pid,
@@ -2979,8 +2980,20 @@ function PortTag({ num, name, optional, source }) {
 function SqlConfig({ node, inputs, set }) {
   const d = node.data
   const mode = d.mode || 'builder'
-  const in1 = inputs.find((i) => i.alias === 'in1')
-  const in2 = inputs.find((i) => i.alias === 'in2')
+  // Entrées : au moins `inputCount` ports (défaut 2), et au moins autant que
+  // d'entrées réellement branchées (in3 connectée ⇒ on montre jusqu'à 3).
+  const connectedMax = inputs.reduce((m, i) => {
+    const k = /^in(\d+)$/.exec(i.alias)
+    return k ? Math.max(m, Number(k[1])) : m
+  }, 0)
+  const nIn = Math.max(1, d.inputCount || 2, connectedMax)
+  const ports = Array.from({ length: nIn }, (_, i) => ({
+    num: i + 1,
+    alias: `in${i + 1}`,
+    source: inputs.find((x) => x.alias === `in${i + 1}`),
+  }))
+  const connected = ports.filter((p) => p.source)
+  const setInputs = (n) => set({ inputCount: Math.max(1, n) })
   return (
     <div className="insp-body">
       <div className="cfg-intent">
@@ -3008,7 +3021,7 @@ function SqlConfig({ node, inputs, set }) {
         <span className="muted">
           {mode === 'builder'
             ? 'sélection, filtres, jointures, regroupements — sans écrire de SQL.'
-            : 'écrivez la requête DuckDB ; les entrées sont les tables in1 / in2.'}
+            : 'écrivez la requête DuckDB ; les entrées sont les tables in1, in2, in3…'}
         </span>
       </div>
 
@@ -3016,24 +3029,73 @@ function SqlConfig({ node, inputs, set }) {
         <div className="ports-head">
           <span className="ports-title">Entrées</span>
           <InfoBubble>
-            <b>Port 1</b> — table principale (le <code>FROM</code>, alias <code>in1</code>).
+            <b>in1</b> — table principale (le <code>FROM</code>). <b>in2, in3…</b> — tables
+            additionnelles, à brancher pour des <b>jointures</b> ou des unions.
             <br />
-            <b>Port 2</b> (<code>in2</code>) — <b>optionnel</b>, à brancher seulement pour une{' '}
-            <b>jointure</b> avec une 2ᵉ table.
-            <br />
-            Une seule entrée suffit pour filtrer, agréger, trier…
+            Une seule entrée suffit pour filtrer, agréger, trier… Ajoutez-en autant que
+            nécessaire avec <b>+ entrée</b>.
           </InfoBubble>
+          <span className="ports-add">
+            <button
+              type="button"
+              className="ghost small"
+              disabled={nIn <= 1}
+              onClick={() => setInputs(nIn - 1)}
+              title="Retirer la dernière entrée"
+              aria-label="Retirer la dernière entrée"
+            >
+              –
+            </button>
+            <button
+              type="button"
+              className="ghost small"
+              onClick={() => setInputs(nIn + 1)}
+              title="Ajouter une entrée"
+            >
+              + entrée
+            </button>
+          </span>
         </div>
         <div className="ports-row">
-          <PortTag num="1" name="principale" source={in1} />
-          <PortTag num="2" name="jointure" optional source={in2} />
+          {ports.map((p) => (
+            <PortTag
+              key={p.alias}
+              num={p.num}
+              name={p.num === 1 ? 'principale' : p.alias}
+              optional={p.num > 1}
+              source={p.source}
+            />
+          ))}
         </div>
       </div>
       {mode === 'raw' ? (
         <>
           <p className="qb-hint">
-            Utilisez les alias d'entrée comme tables : <code>in1</code>, <code>in2</code>.
+            Utilisez les alias d'entrée comme tables :{' '}
+            {ports.map((p, i) => (
+              <span key={p.alias}>
+                {i > 0 ? ', ' : ''}
+                <code>{p.alias}</code>
+              </span>
+            ))}
+            .
           </p>
+          {connected.length > 0 && (
+            <div className="sql-legend" aria-label="Correspondance des entrées">
+              {connected.map((p) => (
+                <div className="sql-legend-row" key={p.alias}>
+                  <code>{p.alias}</code>
+                  <span className="sql-legend-eq">=</span>
+                  <span className="sql-legend-name" title={p.source.label}>
+                    «&nbsp;{p.source.label}&nbsp;»
+                  </span>
+                  {(p.source.columns || []).length === 0 && (
+                    <span className="muted">&nbsp;· exécutez l'amont pour voir les colonnes</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
           <textarea
             className="sql-edit"
             rows={12}
@@ -3122,12 +3184,17 @@ function ExportConfig({ node, set, wfName }) {
   const shown = auto ? autoName : d.filename || ''
   const enabled = d.enabled !== false
   const wb = `${(wfName || 'Workflow').trim()}.xlsx`
+  // Emplacement réel sur le disque : exports/<workflow>/… (PAS files/, qui ne
+  // contient que les sources importées).
+  const sub = exportSubdir(wfName)
   return (
     <div className="insp-body">
       <div className="cfg-intent">
         <span className="cfg-intent-lede">Écrire le résultat dans un fichier.</span>
         <span className="muted">
-          (Re)généré à chaque exécution, dans le dossier <b>files/</b> du projet.
+          (Re)généré à chaque exécution, dans <b>exports/{sub}/</b> (dossier des exports du
+          workflow — bouton dossier sur le bloc pour l'ouvrir). <b>Réécrit</b> le fichier s'il existe
+          déjà.
         </span>
       </div>
       <label
@@ -3189,14 +3256,17 @@ function ExportConfig({ node, set, wfName }) {
         <span>
           {toWb ? (
             <>
-              Feuille <code>{sanitizeSheet(shown)}</code> du classeur <code>files/{wb}</code> — les
-              autres exports « classeur » de ce workflow s'y ajoutent comme feuilles.
+              Feuille <code>{sanitizeSheet(shown)}</code> du classeur{' '}
+              <code>
+                exports/{sub}/{wb}
+              </code>{' '}
+              — les autres exports « classeur » de ce workflow s'y ajoutent comme feuilles.
             </>
           ) : (
             <>
               Écrit{' '}
               <code>
-                files/{shown || 'resultat'}.{d.format === 'csv' ? 'csv' : 'xlsx'}
+                exports/{sub}/{shown || 'resultat'}.{d.format === 'csv' ? 'csv' : 'xlsx'}
               </code>
               .
             </>

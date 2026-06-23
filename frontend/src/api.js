@@ -99,8 +99,8 @@ export const api = {
     req(`/projects/${enc(pid)}/files/${enc(name)}${qs({ subdir })}`, { method: 'DELETE' }),
   openFile: (pid, name, subdir) =>
     sendJSON(`/projects/${enc(pid)}/files/${enc(name)}/open${qs({ subdir })}`, 'POST'),
-  openFilesFolder: (pid, subdir) =>
-    sendJSON(`/projects/${enc(pid)}/files/open-folder${qs({ subdir })}`, 'POST'),
+  openFilesFolder: (pid, subdir, file) =>
+    sendJSON(`/projects/${enc(pid)}/files/open-folder${qs({ subdir, file })}`, 'POST'),
   downloadUrl: (pid, name, subdir) =>
     `${BASE}/projects/${enc(pid)}/files/${enc(name)}${qs({ subdir })}`,
   peek: (pid, file, sheet, headerRow, opts = {}) =>

@@ -16,14 +16,19 @@ projects/
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import time
 import uuid
 from pathlib import Path
 
-# projects/ lives next to the backend/ folder, at the repo root.
-ROOT = Path(__file__).resolve().parent.parent / "projects"
+# Emplacement des projets. Par défaut : `projects/` à côté de `backend/` (repo).
+# Surchargé par `ROADE_PROJECTS_DIR` pour les déploiements où le code n'est pas
+# inscriptible — l'app de bureau (.exe) pointe à côté de l'exécutable, et un
+# hébergeur cloud peut viser un volume persistant.
+_ROOT_ENV = os.environ.get("ROADE_PROJECTS_DIR")
+ROOT = Path(_ROOT_ENV) if _ROOT_ENV else Path(__file__).resolve().parent.parent / "projects"
 ROOT.mkdir(parents=True, exist_ok=True)
 
 

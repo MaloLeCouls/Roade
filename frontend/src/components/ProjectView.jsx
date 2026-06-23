@@ -5,7 +5,7 @@ import { clickableProps } from '../lib/a11y'
 import Icon from './Icon'
 import { useConfirm } from './ui/ConfirmDialog'
 
-export default function ProjectView({ pid, onOpenWorkflow }) {
+export default function ProjectView({ pid, onOpenWorkflow, onBack }) {
   const [project, setProject] = useState(null)
   const [files, setFiles] = useState([])
   const [workflows, setWorkflows] = useState([])
@@ -129,6 +129,11 @@ export default function ProjectView({ pid, onOpenWorkflow }) {
 
   return (
     <div className="page">
+      {onBack && (
+        <button className="back-link" onClick={onBack}>
+          <Icon name="chev-left" size={15} /> Tous les projets
+        </button>
+      )}
       <div className="page-head">
         <h1>{project.name}</h1>
         {project.dir && (

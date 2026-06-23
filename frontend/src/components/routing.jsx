@@ -1380,7 +1380,7 @@ export function OutputsPane({ pid, wid, node, status, onChange, onRun, running, 
           conformes). Pour aiguiller vers plus de sorties, choisissez <b>Router</b> dans la
           configuration du bloc (panneau latéral, en sélectionnant le bloc).
         </div>
-        <FlowMap items={items} total={dist.total} height={200} />
+        <FlowMap items={items} total={dist.total} height={130} />
         <div className="control-summary">
           {items.map((it) => (
             <div className="route-sum-item" key={it.id}>
@@ -1475,7 +1475,7 @@ export function OutputsPane({ pid, wid, node, status, onChange, onRun, running, 
           {dist.error && !dist.loading ? (
             <div className="qb-warn">{dist.error}</div>
           ) : (
-            <FlowMap items={items} total={dist.total} height={230} />
+            <FlowMap items={items} total={dist.total} height={160} />
           )}
           {dist.loading && (
             <div className="flow-loading">

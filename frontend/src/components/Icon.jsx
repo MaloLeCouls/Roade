@@ -134,6 +134,24 @@ export default function Icon({ name, size = 14 }) {
           <path {...P} d="M2 4h4l1.5 1.5H14V13H2z" />
         </svg>
       )
+    case 'import':
+      // bac + flèche qui ENTRE (vers le bas) → fichiers importés / sources
+      return (
+        <svg style={s} viewBox="0 0 16 16">
+          <path {...P} d="M3 9.5v3h10v-3" />
+          <path {...P} d="M8 2.5v6" />
+          <path {...P} d="M5.3 5.8L8 8.7l2.7-2.9" />
+        </svg>
+      )
+    case 'export':
+      // bac + flèche qui SORT (vers le haut) → fichiers exportés
+      return (
+        <svg style={s} viewBox="0 0 16 16">
+          <path {...P} d="M3 9.5v3h10v-3" />
+          <path {...P} d="M8 8.7v-6" />
+          <path {...P} d="M5.3 5.4L8 2.5l2.7 2.9" />
+        </svg>
+      )
     case 'flow':
       return (
         <svg style={s} viewBox="0 0 16 16">

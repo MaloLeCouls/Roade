@@ -9,6 +9,14 @@ export default function ValidateNode({ id, data, selected }) {
   const outs = st.outputs || {}
   const unused = new Set(data.__unusedHandles || [])
 
+  // Étiquette externe selon le mode : en « Éclater par valeur » la colonne vit
+  // dans `data.split.column` (pas `target_column`) — sans ça le bloc affichait
+  // « aiguillage sur ? » dès qu'on éclatait une valeur.
+  const split = data.split || {}
+  const isSplit = !!split.enabled
+  const routeCol = isSplit ? split.column : data.target_column
+  const routeVerb = isSplit ? 'éclate' : 'aiguillage sur'
+
   const outputs = [
     ...(data.outputs || []).map((o) => ({
       handle: o.id,
@@ -47,11 +55,8 @@ export default function ValidateNode({ id, data, selected }) {
         <LockBadge locked={data.locked} />
       </div>
       <div className="node-body">
-        <div
-          className="node-sub"
-          title={`aiguillage sur ${data.target_column || '(colonne non choisie)'}`}
-        >
-          aiguillage sur <b>{data.target_column || '?'}</b>
+        <div className="node-sub" title={`${routeVerb} ${routeCol || '(colonne non choisie)'}`}>
+          {routeVerb} <b>{routeCol || '?'}</b>
         </div>
         <div className="dedup-outs">
           {list.map((o) => {

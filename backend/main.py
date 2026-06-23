@@ -9,6 +9,8 @@ Prod : si `frontend/dist/` existe (après `npm run build`), FastAPI sert aussi
 
 from __future__ import annotations
 
+import base64
+import hmac
 import json
 import os
 import subprocess
@@ -86,9 +88,68 @@ class ApiVersionRewrite:
         await self.app(scope, receive, send)
 
 
+class PasswordGate:
+    """Protège tout le service par un mot de passe (HTTP Basic) **si** la
+    variable d'environnement `ROADE_PASSWORD` est définie.
+
+    Pensé pour un déploiement en ligne (Railway/Render…) où l'URL serait sinon
+    ouverte à tout internet : Roade n'a pas de comptes. Quand la variable est
+    absente — cas du dev local et du `docker compose` perso — le portail est
+    *inactif* : l'expérience locale ne change pas (aucun mot de passe demandé).
+
+    ASGI pur (comme `ApiVersionRewrite`) pour protéger aussi le streaming SSE
+    (`/run-stream`) et les fichiers statiques sans bufferiser la réponse.
+    """
+
+    def __init__(self, app):
+        self.app = app
+        self._password = os.environ.get("ROADE_PASSWORD", "")
+        self._user = os.environ.get("ROADE_USER", "roade")
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and self._password and not self._authorized(scope):
+            await self._deny(send)
+            return
+        await self.app(scope, receive, send)
+
+    def _authorized(self, scope) -> bool:
+        header = dict(scope.get("headers", [])).get(b"authorization")
+        if not header:
+            return False
+        try:
+            kind, _, encoded = header.decode("latin-1").partition(" ")
+            if kind.lower() != "basic":
+                return False
+            user, _, pwd = base64.b64decode(encoded).decode("utf-8").partition(":")
+        except (ValueError, UnicodeDecodeError):
+            return False
+        # Comparaison à temps constant : pas d'oracle temporel sur le secret.
+        return hmac.compare_digest(user, self._user) and hmac.compare_digest(pwd, self._password)
+
+    @staticmethod
+    async def _deny(send) -> None:
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 401,
+                "headers": [
+                    (b"www-authenticate", b'Basic realm="Roade"'),
+                    (b"content-type", b"text/plain; charset=utf-8"),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": b"Authentification requise."})
+
+
 # Ajouté après CORS → middleware le plus externe : la réécriture de version a
 # lieu avant tout le reste, le routage ne voit que des chemins `/api/...`.
 app.add_middleware(ApiVersionRewrite)
+
+# Mot de passe optionnel pour un déploiement en ligne (cf. PasswordGate).
+# Ajouté en dernier → middleware le plus externe : protège TOUTE requête (API,
+# SSE, fichiers statiques) avant même la réécriture de version. Inactif si
+# `ROADE_PASSWORD` n'est pas définie → dev local et docker compose inchangés.
+app.add_middleware(PasswordGate)
 
 # Enveloppe d'erreur typée `{code, message}` sur toute l'API (todo B.6).
 register_error_handlers(app)
@@ -372,6 +433,24 @@ def _open_in_os(path) -> None:
         subprocess.Popen(["xdg-open", str(path)])
 
 
+def _reveal_in_os(path) -> None:
+    """Ouvre l'explorateur de fichiers de l'OS avec `path` sélectionné/surligné,
+    pour que l'utilisateur retrouve le fichier exact (pas juste son dossier).
+    Repli : ouvrir le dossier parent. Usage local uniquement."""
+    p = Path(path)
+    try:
+        if sys.platform.startswith("win"):
+            # explorer /select,"<fichier>" → ouvre le dossier, fichier surligné.
+            subprocess.run(["explorer", f"/select,{p}"])  # noqa: S603,S607 - chemin local de confiance
+            return
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", str(p)])
+            return
+    except Exception:  # noqa: BLE001
+        pass
+    _open_in_os(p.parent)
+
+
 @app.post("/api/projects/{pid}/files/{name}/open")
 def open_file(pid: str, name: str, subdir: str | None = Query(None)):
     path = _resolve_file(pid, name, subdir)
@@ -387,21 +466,42 @@ def open_file(pid: str, name: str, subdir: str | None = Query(None)):
 
 
 @app.post("/api/projects/{pid}/files/open-folder")
-def open_files_folder(pid: str, subdir: str | None = Query(None)):
+def open_files_folder(
+    pid: str, subdir: str | None = Query(None), file: str | None = Query(None)
+):
     """Reveal a project folder in the OS file explorer. No subdir = the sources
-    folder; subdir='<workflow folder>' = that workflow's exports folder.
-    Local use only — the backend runs on the user's machine."""
+    folder; subdir='<workflow folder>' = that workflow's exports folder. If `file`
+    is given and exists, the explorer opens with that file selected/highlighted
+    (l'utilisateur retrouve l'export exact). Local use only."""
+    proj = storage.project_dir(pid).resolve()
     if subdir:
         fd = (storage.exports_dir(pid) / subdir).resolve()
         root = storage.exports_dir(pid).resolve()
         if root not in fd.parents and fd != root:
             raise RoadeError("file.invalid_path", "Chemin invalide", 400)
     else:
-        fd = storage.files_dir(pid)
-    if not fd.exists():
-        raise RoadeError("file.not_found", "Dossier introuvable", 404)
+        fd = storage.files_dir(pid).resolve()
     try:
-        _open_in_os(fd)
+        # 1) si on connaît le fichier exact et qu'il existe → on le révèle (surligné)
+        if file:
+            target = (fd / file).resolve()
+            if fd not in target.parents:  # garde-fou : reste sous le dossier visé
+                raise RoadeError("file.invalid_path", "Chemin invalide", 400)
+            if target.exists():
+                _reveal_in_os(target)
+                return {"ok": True}
+        # 2) sinon on ouvre le dossier visé — mais s'il n'existe pas encore (export
+        # jamais lancé, workflow renommé…), on remonte au 1er parent existant
+        # (exports/ puis le dossier projet) : on atterrit toujours quelque part
+        # d'utile, jamais sur une erreur ni un dossier hors-projet.
+        open_target = fd
+        while not open_target.exists() and proj in open_target.parents:
+            open_target = open_target.parent
+        if not open_target.exists():
+            open_target = proj
+        if not open_target.exists():
+            raise RoadeError("file.not_found", "Dossier introuvable", 404)
+        _open_in_os(open_target)
     except RoadeError:
         raise
     except Exception as e:  # noqa: BLE001
@@ -673,7 +773,14 @@ def validate_test(payload: ValidateTestBody):
 # On sert donc index.html pour tout ce qui n'est ni un asset existant, ni une
 # route /api. Le path est resolved+contained pour ne pas servir un fichier
 # en dehors de dist/ (cohérent avec la philo path-traversal de B.3).
-_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+# Gelé (PyInstaller, app de bureau) : les assets du front sont extraits sous
+# `sys._MEIPASS`. Sinon : `frontend/dist/` à côté de `backend/` (repo).
+_MEIPASS = getattr(sys, "_MEIPASS", None)
+_DIST = (
+    Path(_MEIPASS) / "frontend" / "dist"
+    if _MEIPASS
+    else Path(__file__).resolve().parent.parent / "frontend" / "dist"
+)
 if _DIST.exists():
     _DIST_INDEX = _DIST / "index.html"
 

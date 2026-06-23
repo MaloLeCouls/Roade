@@ -22,11 +22,18 @@ export default function StopNode({ id, data, selected }) {
     <div
       className={`node-stop ${attached ? 'attached' : ''} ${selected ? 'sel' : ''}`}
       title={title}
+      onDoubleClick={(e) => {
+        // Double-clic n'importe où sur le bouchon (pas seulement la pastille de
+        // 18px, difficile à viser) → édite la note. stopPropagation : évite que
+        // React Flow traite aussi le double-clic (sélection/zoom).
+        e.stopPropagation()
+        setEditing(true)
+      }}
     >
       {!attached && (
         <Handle type="target" position={Position.Left} id="in" className="anchor anchor-in" />
       )}
-      <span className="stop-cap" onDoubleClick={() => setEditing(true)}>
+      <span className="stop-cap">
         <Icon name="stop" size={12} />
       </span>
       {editing ? (
@@ -35,6 +42,9 @@ export default function StopNode({ id, data, selected }) {
           className="stop-note-input nodrag"
           value={note}
           placeholder="pourquoi fermée ?"
+          // Sans ça, React Flow capte le mousedown et vole le focus → on ne peut
+          // pas taper dans le champ (le bug « impossible de mettre une note »).
+          onMouseDown={(e) => e.stopPropagation()}
           onChange={(e) => set({ note: e.target.value })}
           onBlur={() => setEditing(false)}
           onKeyDown={(e) => {

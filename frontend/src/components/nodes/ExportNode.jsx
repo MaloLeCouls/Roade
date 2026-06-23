@@ -7,7 +7,9 @@ export default function ExportNode({ id, data, selected }) {
   const { status, onRunNode, running, onOpenExportFolder } = useEditor()
   const st = status[id] || {}
   const off = data.enabled === false
-  const hasFile = st.ran && !st.skippedEmpty && !st.error
+  // On ne propose « voir le fichier » que si un fichier a réellement été écrit
+  // (st.exported = son nom). Un export désactivé ou vide n'en produit pas.
+  const hasFile = st.ran && !!st.exported && !st.error
   return (
     <div className={`node node-export ${selected ? 'sel' : ''} ${off ? 'node-off' : ''}`}>
       <Handle
@@ -64,12 +66,12 @@ export default function ExportNode({ id, data, selected }) {
               className="mini"
               onClick={(e) => {
                 e.stopPropagation()
-                onOpenExportFolder?.()
+                onOpenExportFolder?.(st.exported)
               }}
-              title="Ouvrir le dossier contenant le fichier exporté"
-              aria-label="Ouvrir le dossier contenant le fichier exporté"
+              title={`Voir « ${st.exported} » dans l'explorateur (dossier exports du workflow)`}
+              aria-label="Voir le fichier exporté dans l'explorateur"
             >
-              <Icon name="folder" />
+              <Icon name="export" />
             </button>
           )}
           <button

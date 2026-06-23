@@ -240,7 +240,11 @@ function OutputPreview({
   const [handle, setHandle] = useState(initialHandle || outs[0]?.handle || 'out')
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
-  const ran = status?.ran ? JSON.stringify(status.outputs || status.rows) : ''
+  // Re-déclenche le fetch de l'aperçu à chaque réexécution du bloc. On se base
+  // sur la `signature` (change à chaque recalcul) : `status.outputs` vaut {} pour
+  // un bloc mono-sortie (Colonnes, Calcul…), donc l'ancien JSON.stringify ne
+  // changeait jamais et le tableau restait figé après réexécution.
+  const ran = status?.ran ? (status.signature ?? JSON.stringify(status.outputs || status.rows)) : ''
   useEffect(() => {
     setLoading(true)
     api
@@ -405,7 +409,11 @@ function fmtCell(v) {
 function ReportView({ pid, wid, node, status, onRun, running, onPreview }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
-  const ran = status?.ran ? JSON.stringify(status.outputs || status.rows) : ''
+  // Re-déclenche le fetch de l'aperçu à chaque réexécution du bloc. On se base
+  // sur la `signature` (change à chaque recalcul) : `status.outputs` vaut {} pour
+  // un bloc mono-sortie (Colonnes, Calcul…), donc l'ancien JSON.stringify ne
+  // changeait jamais et le tableau restait figé après réexécution.
+  const ran = status?.ran ? (status.signature ?? JSON.stringify(status.outputs || status.rows)) : ''
   useEffect(() => {
     setLoading(true)
     api

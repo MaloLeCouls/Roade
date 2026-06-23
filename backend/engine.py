@@ -810,6 +810,116 @@ def _open_sandboxed_duckdb():
     return sandbox
 
 
+def _explain_sql_error(exc, ins, sql, is_raw):
+    """Transforme une erreur DuckDB en message pédagogique en français.
+
+    Reconnaît les fautes les plus fréquentes (table/colonne inconnue, colonne
+    ambiguë, GROUP BY, conversion de type, syntaxe) et propose une correction
+    concrète, en rappelant les entrées et colonnes réellement disponibles. Le
+    détail technique de DuckDB est toujours conservé en fin de message — un
+    utilisateur avancé peut donc creuser, un débutant a déjà la solution.
+    """
+    detail = str(exc).strip()
+    low = detail.lower()
+    aliases = [a for a, _ in ins]
+    # Colonnes disponibles, dédupliquées en gardant l'ordre des entrées.
+    all_cols, seen = [], set()
+    for _, df in ins:
+        for c in df.columns:
+            c = str(c)
+            if c not in seen:
+                seen.add(c)
+                all_cols.append(c)
+
+    def _join(items, n=15):
+        items = list(items)
+        if not items:
+            return "(aucune)"
+        s = ", ".join(items[:n])
+        return s + (f", … (+{len(items) - n})" if len(items) > n else "")
+
+    inputs_line = "Entrées branchées : " + (", ".join(aliases) if aliases else "(aucune)")
+
+    # --- Sandbox (mode raw uniquement) : c'est une restriction de sécurité,
+    # pas un bug. On garde « sandbox » et « filesystem » dans le texte (les
+    # tests de sécurité s'appuient dessus).
+    if is_raw and any(
+        s in low
+        for s in (
+            "external access",
+            "external_access",
+            "file system operations are disabled",
+            "disabled by configuration",
+        )
+    ):
+        return (
+            "SQL brut refusé : accès filesystem/réseau désactivé dans cette sandbox "
+            "(read_csv_auto, COPY, httpfs, ATTACH… sont interdits). Branchez vos "
+            "fichiers via un bloc Source en amont, puis référez-les par in1, in2…\n"
+            f"— Détail DuckDB : {detail}"
+        )
+
+    def _orig_name(default):
+        # Récupère le nom original (avec sa casse) depuis le détail non minusculé.
+        m = re.search(r'"([^"]+)"', detail)
+        return m.group(1) if m else default
+
+    tips = None
+    m_tbl = re.search(r"table with name (\S+?) does not exist", detail, re.I)
+    if m_tbl:
+        name = m_tbl.group(1).strip('"!')
+        tips = (
+            f"La table « {name} » n'existe pas. Ici, les tables sont vos entrées : "
+            f"{', '.join(aliases) if aliases else '(aucune branchée)'}. Branchez un "
+            "bloc en amont sur l'entrée voulue, puis désignez-la par son alias "
+            "(in1 = 1ʳᵉ entrée, in2 = 2ᵉ…) — pas par le nom du fichier."
+        )
+    elif re.search(r"ambiguous reference to column", low):
+        name = _orig_name("?")
+        tips = (
+            f"La colonne « {name} » existe dans plusieurs entrées. Préfixez-la par "
+            f'son entrée : in1."{name}" ou in2."{name}".'
+        )
+    elif re.search(r'(referenced )?column "?[^"]+"? not found', low):
+        name = _orig_name("?")
+        tips = (
+            f"La colonne « {name} » est introuvable. Colonnes disponibles : "
+            f"{_join(all_cols)}. Vérifiez l'orthographe ; pour un nom avec espaces "
+            'ou accents, mettez des guillemets doubles : "Chiffre d\'affaires".'
+        )
+    elif "must appear in the group by" in low or "must be part of an aggregate" in low:
+        name = _orig_name(None)
+        tips = (
+            (f"La colonne « {name} » " if name else "Une colonne ")
+            + "doit figurer dans le GROUP BY, ou être enveloppée dans une fonction "
+            "d'agrégat (SUM, COUNT, MAX…). En SQL, toute colonne du SELECT mise à "
+            "côté d'un agrégat doit être regroupée."
+        )
+    elif "conversion error" in low or "could not convert" in low or "cast" in low:
+        tips = (
+            "Conversion de type impossible. Souvent : comparer du texte à un nombre, "
+            "ou une date mal reconnue. Convertissez explicitement, ex. "
+            "CAST(colonne AS DOUBLE) ou CAST(colonne AS DATE)."
+        )
+    elif "parser error" in low or "syntax error" in low:
+        m = re.search(r'at or near "([^"]+)"', detail) or re.search(r'near "([^"]+)"', detail)
+        near = f" près de « {m.group(1)} »" if m else ""
+        tips = (
+            f"Erreur de syntaxe SQL{near}. Causes fréquentes : une virgule en trop "
+            'juste avant FROM, des guillemets « courbes » au lieu de droits ("), un '
+            "mot-clé mal orthographié, ou un point-virgule au milieu de la requête."
+        )
+    else:
+        tips = "La requête SQL a échoué."
+        if all_cols:
+            tips += f" Colonnes disponibles : {_join(all_cols)}."
+
+    msg = f"{tips}\n{inputs_line}\n— Détail DuckDB : {detail}"
+    if not is_raw:
+        msg += f"\n— SQL généré : {sql}"
+    return msg
+
+
 def _run_sql(con, pid, node, ins):
     d = node["data"]
     if not ins:
@@ -833,25 +943,10 @@ def _run_sql(con, pid, node, ins):
         try:
             df = sql_con.execute(sql).df()
         except Exception as e:
-            # Message dédié pour le cas sandbox : on dit clairement que c'est
-            # une restriction de sécurité, pas un bug DuckDB. DuckDB ne renvoie
-            # pas un message uniforme — on en reconnaît plusieurs formes.
-            if is_raw:
-                emsg = str(e).lower()
-                sandbox_signals = (
-                    "external access",
-                    "external_access",
-                    "file system operations are disabled",
-                    "disabled by configuration",
-                )
-                if any(s in emsg for s in sandbox_signals):
-                    raise ValueError(
-                        "SQL brut refusé : accès filesystem/réseau désactivé dans cette "
-                        "sandbox (read_csv_auto, COPY, httpfs, ATTACH… sont interdits). "
-                        "Branchez vos fichiers via un bloc Source en amont. "
-                        f"— Détail DuckDB : {e}"
-                    )
-            raise ValueError(f"{e}  —  SQL généré : {sql}")
+            # Filet pédagogique : traduit l'erreur DuckDB en message actionnable
+            # (table/colonne inconnue, GROUP BY, syntaxe…), avec les entrées et
+            # colonnes disponibles. Le détail technique reste en fin de message.
+            raise ValueError(_explain_sql_error(e, ins, sql, is_raw)) from e
     finally:
         # Sandbox jetable : `unregister` n'est pas requis (close suffit), mais
         # sur la connexion partagée on doit nettoyer pour ne pas polluer les
@@ -3311,6 +3406,111 @@ def _execute_node_with_progress(con, pid, wid, nid, node, edges, **kwargs):
     thread.join()
 
 
+# --------------------------------------------------------------------------- #
+# ETA — prédiction de durée d'un run (fiable, basée sur l'historique RÉEL)
+# --------------------------------------------------------------------------- #
+# Le meilleur prédicteur d'un bloc, c'est SA propre durée au dernier run (même
+# fichier, même machine), stockée dans runs.jsonl. À défaut (tout 1er run du
+# bloc), on retombe sur un modèle de coût par type — volontairement grossier :
+# il est remplacé par du réel dès que le bloc a tourné une fois. Les durées
+# d'import (lecture xlsx) et d'export varient énormément selon le fichier et la
+# machine : seul l'historique les rend stables, c'est pour ça qu'on le privilégie.
+_ETA_OVERHEAD_MS = {
+    "source": 150, "export": 60, "validate": 60, "pivot": 80, "calc": 60,
+    "clean": 60, "filter": 60, "dedup": 60, "union": 60, "cols": 50,
+    "report": 50, "sql": 80,
+}
+_ETA_PER_K_MS = {
+    "source": 72, "validate": 20, "pivot": 12, "calc": 8, "clean": 8,
+    "filter": 6, "dedup": 4, "union": 3, "cols": 3, "report": 3, "sql": 12,
+}
+_ETA_SRC_MS_PER_BYTE = 0.004  # repli pour une source jamais lue
+
+
+def _duration_history(pid, wid) -> dict:
+    """node_id -> durée (ms) du dernier run où le bloc a été RECALCULÉ."""
+    hist = {}
+    for run in storage.list_runs(pid, wid, limit=20):  # récent → ancien
+        for e in run.get("ran", []):
+            nid, ms = e.get("node_id"), e.get("elapsed_ms")
+            if nid and nid not in hist and isinstance(ms, (int, float)):
+                hist[nid] = int(ms)
+    return hist
+
+
+def _will_be_cached(pid, wid, node, handles, sig, bypass_cache, bypass_lock) -> bool:
+    """Réplique la décision de cache de `_execute_node`, sans rien exécuter."""
+    if not handles:  # export : tourne toujours
+        return False
+    if not all(storage.node_parquet(pid, wid, node["id"], h).exists() for h in handles):
+        return False
+    if node["data"].get("locked") and not bypass_lock:
+        return True
+    if sig and not bypass_cache and node["data"].get("cache", True) is not False:
+        m0 = storage.read_node_meta(pid, wid, node["id"], handles[0]) or {}
+        if m0.get("node_signature") == sig:
+            return True
+    return False
+
+
+def _expected_rows(pid, wid, node, edges) -> int:
+    """Lignes attendues : row_count du dernier parquet du bloc (même échelle),
+    sinon somme des amonts directs connus. Sert au modèle de repli."""
+    handles = _output_handles(node)
+    if handles:
+        m = storage.read_node_meta(pid, wid, node["id"], handles[0]) or {}
+        if isinstance(m.get("row_count"), int):
+            return m["row_count"]
+    total = 0
+    for e in edges:
+        if e.get("target") == node["id"]:
+            m = (
+                storage.read_node_meta(pid, wid, e.get("source"), e.get("sourceHandle") or "out")
+                or {}
+            )
+            if isinstance(m.get("row_count"), int):
+                total += m["row_count"]
+    return total
+
+
+def _model_predict_ms(pid, wid, node, edges) -> int:
+    t = node["type"]
+    if t == "source":
+        try:
+            f = node["data"].get("file")
+            size = (storage.files_dir(pid) / f).stat().st_size if f else 0
+        except OSError:
+            size = 0
+        return max(600, int(size * _ETA_SRC_MS_PER_BYTE))
+    rows = _expected_rows(pid, wid, node, edges)
+    if t == "export":
+        per_k = 5 if (node["data"].get("format") or "xlsx").lower() == "csv" else 122
+        return int(60 + per_k * rows / 1000)
+    return int(_ETA_OVERHEAD_MS.get(t, 60) + _ETA_PER_K_MS.get(t, 8) * rows / 1000)
+
+
+def _predict_run(pid, wid, nodes, edges, run_ids, sig_by_node, *, force, only_node, force_set):
+    """Pour chaque bloc à exécuter : durée estimée + s'il sera servi par le cache.
+    `basis` : 'cache' (~0), 'history' (réel, fiable) ou 'model' (repli 1er run)."""
+    hist = _duration_history(pid, wid)
+    plan = []
+    for nid in run_ids:
+        node = nodes[nid]
+        handles = _output_handles(node)
+        single_force = force and only_node is not None and nid == only_node
+        bypass_cache = single_force or (force and only_node is None) or (nid in force_set)
+        if _will_be_cached(pid, wid, node, handles, sig_by_node.get(nid), bypass_cache, single_force):
+            plan.append({"node_id": nid, "est_ms": 25, "cached": True, "basis": "cache"})
+        elif nid in hist:
+            plan.append({"node_id": nid, "est_ms": max(20, hist[nid]), "cached": False, "basis": "history"})
+        else:
+            plan.append(
+                {"node_id": nid, "est_ms": _model_predict_ms(pid, wid, node, edges),
+                 "cached": False, "basis": "model"}
+            )
+    return plan
+
+
 def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False, force_nodes=None):
     wf = storage.get_workflow(pid, wid)
     if not wf:
@@ -3351,6 +3551,25 @@ def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False, 
     # "préparation…" label immediately and starts naming blocks as they run.
     yield {"event": "start", "total": len(run_ids)}
     sig_by_node = _signatures_for(pid, wid, nodes, edges, order)
+
+    # ETA : on prédit la durée de chaque bloc de la file (historique réel en
+    # priorité, modèle en repli, ~0 si servi par le cache) et on l'envoie au
+    # client. Il en tire un temps restant + une heure de fin fiables et une barre
+    # globale pondérée par le temps (un gros export pèse plus qu'un petit bloc).
+    eta_plan = _predict_run(
+        pid, wid, nodes, edges, run_ids, sig_by_node,
+        force=force, only_node=only_node, force_set=force_set,
+    )
+    eta_total = sum(p["est_ms"] for p in eta_plan)
+    eta_real = sum(p["est_ms"] for p in eta_plan if p["basis"] != "model")
+    yield {
+        "event": "eta",
+        "plan": eta_plan,
+        "eta_ms": eta_total,
+        # confident : l'estimation s'appuie surtout sur du réel (historique/cache),
+        # pas sur le modèle grossier du tout premier run d'un bloc.
+        "confident": eta_total == 0 or eta_real >= 0.5 * eta_total,
+    }
 
     # A.10 — historique de runs : on collecte un résumé du run en cours et on
     # l'append à `runs.jsonl` à la fin. Utile pour comparer deux exécutions,
@@ -3445,7 +3664,14 @@ def iter_run_workflow(pid, wid, only_node=None, force=False, all_exports=False, 
                 "row_count": result.get("row_count", 0),
             }
             (run_record["cached"] if result.get("cached") else run_record["ran"]).append(entry)
-            yield {"event": "node_done", "node_id": nid, "result": result}
+            # `elapsed_ms` : durée réelle de ce bloc — le client s'en sert pour
+            # calibrer ses estimations (ETA) au fil des runs.
+            yield {
+                "event": "node_done",
+                "node_id": nid,
+                "elapsed_ms": elapsed_ms,
+                "result": result,
+            }
         # Un recalcul ciblé (force_set) est un run PARTIEL, comme un run mono-bloc :
         # il n'écrit/nettoie pas comme un run complet (sinon forcer une branche
         # supprimerait les exports de l'autre, considérés « périmés » car absents

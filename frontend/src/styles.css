@@ -225,6 +225,25 @@ h2 {
   border-radius: var(--radius);
   font-family: ui-monospace, monospace;
 }
+/* bouton « retour aux projets » explicite, en tête de la page projet */
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 14px;
+  padding: 6px 12px 6px 9px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.back-link:hover {
+  border-color: var(--accent);
+  background: #eef3ff;
+}
 
 input,
 select,
@@ -307,8 +326,8 @@ button.ghost.icon-only {
 /* ---------- project grid ---------- */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
 }
 .card {
   background: var(--panel);
@@ -891,6 +910,41 @@ button.ghost.icon-only {
   color: var(--muted);
   pointer-events: none;
 }
+/* SQL — contrôle « N entrées » dans le corps du bloc (＋ / –) */
+.sql-in-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.sql-in-btn {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.sql-in-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.sql-in-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.sql-in-count {
+  font-variant-numeric: tabular-nums;
+}
 
 /* dedup multi-outputs keep role colours */
 .dedup-outs {
@@ -1159,6 +1213,35 @@ button.ghost.icon-only {
 .ports-row {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+}
+.ports-add {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 4px;
+}
+/* SQL — légende « in1 = «source» » sous l'éditeur brut */
+.sql-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  background: #f6f8fb;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.sql-legend-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.sql-legend-eq {
+  color: var(--muted);
+}
+.sql-legend-name {
+  font-weight: 600;
 }
 .port-tag {
   flex: 1;
@@ -4235,9 +4318,21 @@ table.dt th.idx {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: nowrap;
+  /* chiffres à chasse fixe : les valeurs qui changent (lignes, %, chrono) ne
+     décalent plus le reste de la ligne */
+  font-variant-numeric: tabular-nums;
 }
 .progress-text .pmeta {
   color: var(--muted);
+  white-space: nowrap;
+}
+.progress-text .peta {
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+  margin-left: auto; /* ETA (reste + heure de fin) épinglée tout à droite */
+  padding-left: 12px;
 }
 .progress-text .pulse-dot {
   width: 8px;
@@ -4431,7 +4526,8 @@ table.dt th.idx {
 /* ---- C.6 : 4 états + cartes projet enrichies ----------------------------- */
 .card-meta {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  white-space: nowrap;
   align-items: baseline;
   gap: var(--s-2);
   margin-top: var(--s-2);
